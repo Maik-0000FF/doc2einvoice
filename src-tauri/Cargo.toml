@@ -21,6 +21,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+doc2einvoice-validation.workspace = true
 serde.workspace = true
 tauri = { version = "2", features = [] }
 ts-rs = "11"

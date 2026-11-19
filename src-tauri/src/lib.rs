@@ -7,7 +7,8 @@
 //!
 //! - [`commands`]: the IPC boundary. Thin adapters the user interface calls;
 //!   they hold no logic of their own.
-//! - [`app_info`]: program identity and the data of the legal notice.
+//! - [`app_info`]: program identity, the data of the legal notice and the
+//!   published files the validation uses.
 //!
 //! The core never opens a network connection: every document is processed on
 //! the local machine.
