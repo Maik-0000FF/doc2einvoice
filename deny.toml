@@ -1,0 +1,55 @@
+# SPDX-FileCopyrightText: Maik-0000FF
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Policy for the Rust dependencies, checked by cargo-deny: known
+# vulnerabilities, licences and the origin of every crate.
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+# Advisories that are accepted, each with its reason. Each reports a crate as
+# unmaintained; none reports a vulnerability. An entry is removed as soon as
+# the crate that pulls it in drops the dependency.
+ignore = [
+  { id = "RUSTSEC-2024-0370", reason = "proc-macro-error runs at build time only; it comes with the GTK bindings of the WebView and with the XPath engine" },
+  { id = "RUSTSEC-2022-0081", reason = "json is a dependency of the XPath engine; no rule evaluated here uses its JSON functions" },
+  { id = "RUSTSEC-2026-0543", reason = "chrono is a dependency of the XPath engine and has no replacement there yet" },
+]
+
+[licenses]
+version = 2
+# Licences compatible with distributing the application under
+# GPL-3.0-or-later. A crate under any other licence fails the check and has to
+# be assessed before it is added here.
+allow = [
+  "0BSD",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-3-Clause",
+  "CC0-1.0",
+  "GPL-3.0-or-later",
+  "LGPL-2.1-or-later",
+  "MIT",
+  "MIT-0",
+  "MPL-2.0",
+  "Unicode-3.0",
+  "Unlicense",
+  "Zlib",
+]
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+# The crates of this workspace refer to each other by path.
+allow-wildcard-paths = true
+
+[sources]
+# Crates come from crates.io only. The patched copies under vendor/ are part of
+# this repository, not a foreign source.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: Maik-0000FF
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[env]
+# Where `cargo test` writes the TypeScript types derived from the Rust types
+# that cross the IPC boundary. The frontend imports them from there, so each
+# type is defined once, in Rust.
+TS_RS_EXPORT_DIR = { value = "src/lib/ipc/bindings", relative = true }

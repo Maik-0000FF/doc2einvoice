@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: Maik-0000FF
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "doc2einvoice-validation"
+description = "Validation of e-invoices against the published rule sets, with the version and date of each."
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+doc2einvoice-schematron.workspace = true
+oxixml-schema.workspace = true
+roxmltree.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

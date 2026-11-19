@@ -1,0 +1,103 @@
+# SPDX-FileCopyrightText: Maik-0000FF
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# REUSE metadata. Every source file of this project carries its own SPDX header;
+# this file covers the files that cannot (JSON has no comment syntax, lock files
+# and bindings are generated, icons are binary) and states the terms of the
+# third-party files that are kept unchanged. See https://reuse.software/.
+
+version = 1
+
+[[annotations]]
+path = [
+  "package.json",
+  "package-lock.json",
+  "tsconfig.json",
+  ".prettierrc.json",
+  "flake.lock",
+  "Cargo.lock",
+  "src-tauri/tauri.conf.json",
+  "src-tauri/capabilities/**",
+  "src/lib/ipc/bindings/**",
+  "tests/conformance/expected/**",
+  "vendor/patches/**",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Maik-0000FF"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+# Application icons in the formats each platform needs. They are binary
+# renderings of assets/brand/icon.svg (`cargo tauri icon`) and share its terms.
+[[annotations]]
+path = ["src-tauri/icons/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Maik-0000FF"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+# The validation artefacts of EN 16931 and their test documents, unchanged as
+# published by CEN/TC 434. Each file states its licence in its own words; this
+# entry restates it in SPDX form.
+[[annotations]]
+path = ["rulesets/en16931/**", "tests/conformance/corpus/en16931/**"]
+precedence = "override"
+SPDX-FileCopyrightText = "CEN/TC 434 and the contributors to the EN 16931 validation artefacts"
+SPDX-License-Identifier = "EUPL-1.2"
+
+# The Schematron rules and the test suite of XRechnung, unchanged as published
+# by KoSIT.
+[[annotations]]
+path = ["rulesets/xrechnung/**", "tests/conformance/corpus/xrechnung/**"]
+precedence = "override"
+SPDX-FileCopyrightText = "Koordinierungsstelle für IT-Standards (KoSIT)"
+SPDX-License-Identifier = "Apache-2.0"
+
+# The XML Schema files of UBL 2.1, unchanged as published by OASIS. They may be
+# copied and distributed with their notice, but not modified.
+[[annotations]]
+path = ["schemas/ubl-2.1/**"]
+precedence = "override"
+SPDX-FileCopyrightText = "OASIS Open 2001-2013"
+SPDX-License-Identifier = "LicenseRef-OASIS-UBL-2.1"
+
+# Files the UBL 2.1 distribution takes over from other bodies. Each is
+# attributed to its origin.
+[[annotations]]
+path = ["schemas/ubl-2.1/common/CCTS_CCT_SchemaModule-2.1.xsd"]
+precedence = "override"
+SPDX-FileCopyrightText = "UN/CEFACT 2006"
+SPDX-License-Identifier = "LicenseRef-UNCEFACT"
+
+[[annotations]]
+path = ["schemas/ubl-2.1/common/UBL-xmldsig-core-schema-2.1.xsd"]
+precedence = "override"
+SPDX-FileCopyrightText = "2001 The Internet Society and W3C (Massachusetts Institute of Technology, Institut National de Recherche en Informatique et en Automatique, Keio University)"
+SPDX-License-Identifier = "W3C-19980720"
+
+# The two XAdES schemas are copies of schemas of ETSI, changed by the UBL
+# distribution only in the location they import the XML Signature schema from.
+# They state no terms of their own and are distributed here as part of UBL 2.1,
+# under the notice of that distribution.
+[[annotations]]
+path = [
+  "schemas/ubl-2.1/common/UBL-XAdESv132-2.1.xsd",
+  "schemas/ubl-2.1/common/UBL-XAdESv141-2.1.xsd",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "European Telecommunications Standards Institute (ETSI)"
+SPDX-License-Identifier = "LicenseRef-OASIS-UBL-2.1"
+
+# The XML Schema files of the Cross Industry Invoice D16B, unchanged as
+# published by UN/CEFACT.
+[[annotations]]
+path = ["schemas/cii-d16b/**"]
+precedence = "override"
+SPDX-FileCopyrightText = "UN/CEFACT 2016"
+SPDX-License-Identifier = "LicenseRef-UNCEFACT"
+
+# Two crates of the XPath engine Xee, each the published crate with the one
+# patch documented in vendor/PATCHES.md.
+[[annotations]]
+path = ["vendor/xee-interpreter/**", "vendor/xee-xpath-compiler/**"]
+precedence = "override"
+SPDX-FileCopyrightText = "2025 Paligo and contributors"
+SPDX-License-Identifier = "MIT"

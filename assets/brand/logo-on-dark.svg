@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+SPDX-FileCopyrightText: Maik-0000FF
+SPDX-License-Identifier: GPL-3.0-or-later
+
+Logo for dark backgrounds: the application icon followed by the word mark in a
+light text colour and a brighter validation green.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1720 512" role="img" aria-label="doc2einvoice">
+  <defs>
+    <style>
+      .ground { fill: #1d4ed8; }
+      .page { fill: #ffffff; }
+      .fold { fill: #bfd3ff; }
+      .markup { fill: none; stroke: #1d4ed8; stroke-width: 22; stroke-linecap: round; stroke-linejoin: round; }
+      .text-line { stroke: #8fb0f4; stroke-width: 13; stroke-linecap: round; }
+      .valid { fill: none; stroke: #16a34a; stroke-width: 24; stroke-linecap: round; stroke-linejoin: round; }
+      .word { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', sans-serif; font-size: 190px; font-weight: 650; letter-spacing: -4px; fill: #eceef2; }
+      .word-accent { fill: #4ade80; }
+    </style>
+  </defs>
+
+  <path class="ground" d="M176.1 0H335.9C386.61 0 411.96 0 439.25 8.63C469.05 19.48 492.52 42.95 503.37 72.75C512 100.04 512 125.39 512 176.1V335.9C512 386.61 512 411.96 503.37 439.25C492.52 469.05 469.05 492.52 439.25 503.37C411.96 512 386.61 512 335.9 512H176.1C125.39 512 100.04 512 72.75 503.37C42.95 492.52 19.48 469.05 8.63 439.25C0 411.96 0 386.61 0 335.9V176.1C0 125.39 0 100.04 8.63 72.75C19.48 42.95 42.95 19.48 72.75 8.63C100.04 0 125.39 0 176.1 0Z"/>
+  <!-- The page is enlarged about its own centre (268, 256) and moved to the
+       centre of the 512 unit box, so it fills more of the icon body. -->
+  <g transform="translate(256 256) scale(1.35) translate(-268 -256)">
+    <path class="page" d="M168 88h132l84 84v236a16 16 0 0 1-16 16H168a16 16 0 0 1-16-16V104a16 16 0 0 1 16-16z"/>
+    <path class="fold" d="M300 88l84 84h-68a16 16 0 0 1-16-16z"/>
+    <!-- Two lines of text: the page reads as a document without any lettering. -->
+    <line class="text-line" x1="184" y1="198" x2="352" y2="198"/>
+    <line class="text-line" x1="184" y1="228" x2="296" y2="228"/>
+    <polyline class="markup" points="212,262 178,300 212,338"/>
+    <polyline class="markup" points="324,262 358,300 324,338"/>
+    <polyline class="valid" points="238,302 260,324 300,274"/>
+  </g>
+
+  <text class="word" x="580" y="322">doc<tspan class="word-accent">2</tspan>einvoice</text>
+</svg>

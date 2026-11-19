@@ -1,0 +1,32 @@
+# SPDX-FileCopyrightText: Maik-0000FF
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "doc2einvoice"
+description = "Convert documents into EN 16931 compliant e-invoices, entirely on the local machine."
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+# The `_lib` suffix keeps the library name distinct from the binary name, which
+# Cargo requires on Windows.
+name = "doc2einvoice_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+serde.workspace = true
+tauri = { version = "2", features = [] }
+ts-rs = "11"
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

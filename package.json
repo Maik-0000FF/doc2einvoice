@@ -1,0 +1,57 @@
+{
+  "name": "doc2einvoice",
+  "private": true,
+  "description": "Convert documents into EN 16931 compliant e-invoices, entirely on the local machine.",
+  "type": "module",
+  "license": "GPL-3.0-or-later",
+  "author": "Maik-0000FF",
+  "imports": {
+    "#lib/*": "./src/lib/*"
+  },
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "prepare": "svelte-kit sync",
+    "tauri": "tauri",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
+    "lint": "eslint --max-warnings 0 .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "rust:format": "cargo fmt --all",
+    "rust:format:check": "cargo fmt --all --check",
+    "rust:lint": "cargo clippy --workspace --all-targets --locked -- -D warnings",
+    "rust:test": "cargo test --workspace --locked",
+    "bindings:check": "node tools/check-bindings.mjs",
+    "license:check": "reuse lint",
+    "dependencies:check": "cargo deny check && npm audit --audit-level=high",
+    "vendor:check": "tools/verify-vendor.sh",
+    "sources:check": "tools/verify-sources.sh",
+    "conformance:regenerate": "tools/regenerate-conformance.sh",
+    "verify": "npm run format:check && npm run lint && npm run check && npm run test && npm run rust:format:check && npm run rust:lint && npm run rust:test && npm run bindings:check && npm run license:check"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@sveltejs/adapter-static": "~4.0.1",
+    "@sveltejs/kit": "~3.1.1",
+    "@sveltejs/vite-plugin-svelte": "^7.1.2",
+    "@tauri-apps/cli": "^2",
+    "@types/node": "^26.6.6",
+    "eslint": "^10.15.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-svelte": "^3.24.1",
+    "globals": "^17.14.0",
+    "prettier": "^3.10.1",
+    "prettier-plugin-svelte": "^4.2.0",
+    "svelte": "^5.57.1",
+    "svelte-check": "^4.6.0",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.73.0",
+    "vite": "^8.0.16",
+    "vitest": "^5.1.1"
+  }
+}

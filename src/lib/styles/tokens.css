@@ -1,0 +1,37 @@
+/*
+ * SPDX-FileCopyrightText: Maik-0000FF
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * Design tokens: the single place where colours, type and spacing are defined.
+ * Components consume these custom properties and never state raw values.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --color-surface: #ffffff;
+  --color-text: #16181d;
+  --color-text-muted: #5c6370;
+  --color-danger: #b3261e;
+
+  --font-family-base: system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', sans-serif;
+  --font-size-sm: 0.875rem;
+  --font-size-md: 1rem;
+  --font-size-xl: 2rem;
+  --font-weight-regular: 400;
+  --font-weight-bold: 650;
+  --line-height-base: 1.5;
+
+  --space-sm: 0.5rem;
+  --space-md: 1rem;
+  --space-lg: 2rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-surface: #16181d;
+    --color-text: #eceef2;
+    --color-text-muted: #a0a7b4;
+    --color-danger: #f2b8b5;
+  }
+}

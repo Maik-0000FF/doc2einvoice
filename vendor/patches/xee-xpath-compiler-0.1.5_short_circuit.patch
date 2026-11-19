@@ -1,0 +1,43 @@
+--- a/src/ast_ir.rs
++++ b/src/ast_ir.rs
+@@ -348,6 +348,40 @@
+         let mut left_bindings = self.path_expr(&ast.left)?;
+         let mut right_bindings = self.path_expr(&ast.right)?;
+         let op = self.binary_op(ast.operator);
++        if matches!(op, ir::BinaryOperator::And | ir::BinaryOperator::Or) {
++            // Short-circuit evaluation: the right operand is evaluated only if
++            // the left operand does not already decide the result, so an error
++            // in the right operand cannot surface when it is not needed.
++            let left = left_bindings.atom();
++            let right = right_bindings.atom();
++            // Decided by the left operand alone: its own boolean value.
++            let decided = ir::Expr::Binary(ir::Binary {
++                left: left.clone(),
++                op,
++                right: left.clone(),
++            });
++            let decided = Bindings::new(self.variables.new_binding(decided, span)).expr();
++            // Otherwise the result is the boolean value of the right operand.
++            let undecided = ir::Expr::Binary(ir::Binary {
++                left: right.clone(),
++                op,
++                right,
++            });
++            let undecided_binding = self.variables.new_binding(undecided, span);
++            let undecided = right_bindings.bind(undecided_binding).expr();
++            let (then, else_) = if matches!(op, ir::BinaryOperator::Or) {
++                (decided, undecided)
++            } else {
++                (undecided, decided)
++            };
++            let expr = ir::Expr::If(ir::If {
++                condition: left,
++                then: Box::new(then),
++                else_: Box::new(else_),
++            });
++            let binding = self.variables.new_binding(expr, span);
++            return Ok(left_bindings.bind(binding));
++        }
+         let expr = ir::Expr::Binary(ir::Binary {
+             left: left_bindings.atom(),
+             op,

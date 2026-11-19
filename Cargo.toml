@@ -1,0 +1,60 @@
+# SPDX-FileCopyrightText: Maik-0000FF
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[workspace]
+resolver = "3"
+members = ["crates/*", "src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+authors = ["Maik-0000FF"]
+license = "GPL-3.0-or-later"
+repository = "https://github.com/Maik-0000FF/doc2einvoice"
+edition = "2024"
+publish = false
+
+[workspace.dependencies]
+doc2einvoice-schematron = { path = "crates/doc2einvoice-schematron" }
+doc2einvoice-validation = { path = "crates/doc2einvoice-validation" }
+# The XML Schema processor, pinned exactly like the XPath engine below.
+oxixml-schema = "=0.1.2"
+roxmltree = "0.20"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+thiserror = "2"
+# The XPath engine is pinned exactly: two of its crates are replaced by the
+# patched copies under vendor/ (see vendor/PATCHES.md), and those copies belong
+# to precisely these versions.
+xee-xpath = "=0.1.5"
+xot = "0.31"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+dbg_macro = "deny"
+
+[patch.crates-io]
+xee-interpreter = { path = "vendor/xee-interpreter" }
+xee-xpath-compiler = { path = "vendor/xee-xpath-compiler" }
+
+# Dependencies are optimised in development builds too: the XPath engine is far
+# too slow unoptimised to run the conformance corpus in the tests.
+[profile.dev.package."*"]
+opt-level = 2
+
+# Panics unwind (the default) on purpose: the validation layer contains a panic
+# of the XPath engine and reports it as a failed evaluation instead of letting
+# it end the application.
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+strip = true
