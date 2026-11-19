@@ -11,14 +11,40 @@ SPDX-License-Identifier: GPL-3.0-or-later
 [![CI](https://github.com/Maik-0000FF/doc2einvoice/actions/workflows/ci.yml/badge.svg)](https://github.com/Maik-0000FF/doc2einvoice/actions/workflows/ci.yml)
 ![status: early development](https://img.shields.io/badge/status-early%20development-yellow)
 ![EN 16931](https://img.shields.io/badge/EN%2016931-validation%20core-0b7285)
+![Windows: tested](https://img.shields.io/badge/Windows-tested-555)
+![macOS: tested](https://img.shields.io/badge/macOS-tested-555)
+![Linux: tested](https://img.shields.io/badge/Linux-tested-555)
 [![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-pink?logo=github)](https://github.com/sponsors/Maik-0000FF)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20me-ff5e5b?logo=ko-fi&logoColor=white)](https://ko-fi.com/maik0000ff)
 
 Desktop application that turns a document, starting with PDF, into an electronic
 invoice that conforms to the European standard EN 16931.
 
-**Status: early development. The application cannot create invoices yet.** The
-validation core exists and is tested against the published rule sets.
+**Status: early development. The application cannot create invoices yet.** What
+it can do today is check an existing e-invoice: an XML file in UBL or CII is
+validated against EN 16931 or XRechnung, and every finding is listed with its
+rule, in the window or on the command line. The validation is tested against
+the published rule sets.
+
+## Contents
+
+- [Usage](#usage)
+- [Principles](#principles)
+- [Planned output formats](#planned-output-formats)
+- [Conformance](#conformance)
+- [How validation works](#how-validation-works)
+- [References](#references)
+- [Downloads](#downloads)
+- [Disclaimer](#disclaimer)
+- [Development](#development)
+- [Support](#support)
+- [License](#license)
+
+## Usage
+
+The application checks e-invoices in its window and on the command line. The
+[usage guide](docs/usage.md) describes both, what a result shows and where the
+limits are.
 
 ## Principles
 
@@ -207,3 +233,8 @@ version. See [LICENSE](LICENSE).
 
 Copyright and licence notices must be preserved in copies and in modified
 versions.
+
+The files of other publishers keep their own terms, stated in
+[REUSE.toml](REUSE.toml) and in full under [LICENSES](LICENSES). That includes
+the typeface of the interface, [Inter](https://rsms.me/inter/), licensed under
+the SIL Open Font License 1.1.

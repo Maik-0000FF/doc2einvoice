@@ -4,6 +4,7 @@
 //! Recognising the XML syntax of an invoice.
 
 use crate::error::ValidationError;
+use crate::nesting;
 
 const UBL_INVOICE_NAMESPACE: &str = "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2";
 const UBL_INVOICE_ELEMENT: &str = "Invoice";
@@ -24,17 +25,28 @@ pub enum Syntax {
 }
 
 impl Syntax {
+    /// Every syntax, the one place they are listed. What handles each syntax
+    /// iterates over this, so that a new one cannot be left out unnoticed.
+    pub const ALL: [Self; 2] = [Self::Ubl, Self::Cii];
+
     /// Recognises the syntax of a document by its document element.
     ///
     /// # Errors
     ///
-    /// Returns [`ValidationError::Malformed`] if the document is not
+    /// Returns [`ValidationError::TooDeeplyNested`] if the document is nested
+    /// deeper than is read, [`ValidationError::Malformed`] if it is not
     /// well-formed XML, and [`ValidationError::UnsupportedDocument`] if its
     /// document element is none of the supported invoices.
     pub fn of(document: &str) -> Result<Self, ValidationError> {
-        let parsed = roxmltree::Document::parse(document)
-            .map_err(|error| ValidationError::Malformed(error.to_string()))?;
-        let root = parsed.root_element().tag_name();
+        let parsed = nesting::parse(document)?;
+        Self::of_document_element(parsed.root_element())
+    }
+
+    /// Recognises the syntax by the document element of a parsed document.
+    pub(crate) fn of_document_element(
+        element: roxmltree::Node<'_, '_>,
+    ) -> Result<Self, ValidationError> {
+        let root = element.tag_name();
 
         match (root.namespace(), root.name()) {
             (Some(UBL_INVOICE_NAMESPACE), UBL_INVOICE_ELEMENT)

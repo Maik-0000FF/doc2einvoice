@@ -5,7 +5,8 @@
 # Proves that the files of other publishers in this repository are the files
 # those publishers released: downloads every archive pinned in
 # tests/conformance/sources.env, checks its checksum and compares the rule
-# files, the XML Schema files and the test documents with it, byte for byte.
+# files, the XML Schema files, the test documents and the font files with it,
+# byte for byte.
 #
 # The checksums stated in the code are computed from the files of this
 # repository. This script is what ties those files to their publishers.
@@ -25,18 +26,22 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 source "$repository/tests/conformance/sources.env"
 
 readonly corpus="tests/conformance/corpus"
+readonly fonts="src/lib/assets/fonts"
 
 echo "Fetching the pinned archives"
 fetch "$EN16931_ARCHIVE_URL" "$EN16931_ARCHIVE_SHA256" "$work/en16931.tar.gz"
 fetch "$XRECHNUNG_RULES_URL" "$XRECHNUNG_RULES_SHA256" "$work/xrechnung-rules.zip"
 fetch "$XRECHNUNG_TESTSUITE_URL" "$XRECHNUNG_TESTSUITE_SHA256" "$work/xrechnung-testsuite.zip"
 fetch "$XML_SCHEMAS_URL" "$XML_SCHEMAS_SHA256" "$work/xml-schemas.zip"
+fetch "$INTER_URL" "$INTER_SHA256" "$work/inter.zip"
 
-mkdir -p "$work/en16931" "$work/xrechnung-rules" "$work/xrechnung-testsuite" "$work/xml-schemas"
+mkdir -p "$work/en16931" "$work/xrechnung-rules" "$work/xrechnung-testsuite" "$work/xml-schemas" \
+  "$work/inter"
 tar --extract --gzip --file "$work/en16931.tar.gz" --directory "$work/en16931" --strip-components=1
 unzip -q "$work/xrechnung-rules.zip" -d "$work/xrechnung-rules"
 unzip -q "$work/xrechnung-testsuite.zip" -d "$work/xrechnung-testsuite"
 unzip -q "$work/xml-schemas.zip" -d "$work/xml-schemas"
+unzip -q "$work/inter.zip" -d "$work/inter"
 
 # The two rule files of EN 16931 lie in different directories of the archive.
 mkdir -p "$work/en16931-rules"
@@ -58,6 +63,7 @@ declare -rA published=(
   ["$corpus/en16931/examples-ubl"]="$work/en16931/ubl/examples"
   ["$corpus/en16931/examples-cii"]="$work/en16931/cii/examples"
   ["$corpus/xrechnung/instances"]="$work/xrechnung-testsuite/instances"
+  ["$fonts/inter"]="$work/inter/web"
 )
 
 # Compares every file below a directory of this repository with the file of
@@ -101,3 +107,5 @@ echo "XML Schema files"
 check_directories_below schemas 1
 echo "Test documents"
 check_directories_below "$corpus" 2
+echo "Font files"
+check_directories_below "$fonts" 1

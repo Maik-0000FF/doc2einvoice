@@ -49,6 +49,15 @@ pub enum ValidationError {
     #[error("the document is not well-formed XML: {0}")]
     Malformed(String),
 
+    /// The elements of the document are nested deeper than is read. No real
+    /// invoice comes near the limit; a document beyond it could exhaust the
+    /// stack of the thread that reads it.
+    #[error("the document is nested deeper than {limit} levels")]
+    TooDeeplyNested {
+        /// The deepest nesting that is read.
+        limit: usize,
+    },
+
     /// The document is none of the invoice syntaxes this crate validates.
     #[error("the document element `{element}` is not a supported invoice")]
     UnsupportedDocument {

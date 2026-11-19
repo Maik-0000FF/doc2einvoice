@@ -1,0 +1,27 @@
+/*
+ * SPDX-FileCopyrightText: Maik-0000FF
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * The typeface of the interface. It is shipped with the application, so that
+ * text has the same shapes and the same widths on every operating system and
+ * nothing is loaded from a network.
+ *
+ * The family name stated here is the one the token --font-family-base begins
+ * with (tokens.css); a font-face rule cannot read a custom property.
+ */
+
+@font-face {
+  font-family: 'InterVariable';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: block;
+  src: url('../assets/fonts/inter/InterVariable.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'InterVariable';
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: block;
+  src: url('../assets/fonts/inter/InterVariable-Italic.woff2') format('woff2');
+}

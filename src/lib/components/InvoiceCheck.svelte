@@ -1,0 +1,112 @@
+<!--
+SPDX-FileCopyrightText: Maik-0000FF
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
+<script lang="ts">
+  // Checking an e-invoice: the user chooses a file, the application core
+  // validates it, and the result or the reason for a refusal is shown.
+  import { refusalMessage } from '#lib/check/summary.ts';
+  import { i18n } from '#lib/i18n/i18n.svelte.ts';
+  import type { CheckOutcome } from '#lib/ipc/bindings/CheckOutcome.ts';
+  import type { InvoiceCheck } from '#lib/ipc/bindings/InvoiceCheck.ts';
+  import type { ProfileKind } from '#lib/ipc/bindings/ProfileKind.ts';
+  import type { Refusal } from '#lib/ipc/bindings/Refusal.ts';
+  import { checkInvoice, checkInvoiceAgain } from '#lib/ipc/check-invoice.ts';
+
+  import CheckResult from './CheckResult.svelte';
+
+  // While a check runs, nothing starts another one. The file dialog does not
+  // block the window on every system, so the interface does it itself.
+  let busy = $state(false);
+  let check = $state<InvoiceCheck>();
+  let refusal = $state<Refusal>();
+  // Set if the core could not be asked at all; the text is its own.
+  let failure = $state<string>();
+
+  const refused = $derived(refusal === undefined ? undefined : refusalMessage(refusal));
+
+  async function run(request: () => Promise<CheckOutcome>): Promise<void> {
+    if (busy) {
+      return;
+    }
+    busy = true;
+    try {
+      show(await request());
+    } catch (error) {
+      failure = String(error);
+    } finally {
+      busy = false;
+    }
+  }
+
+  // A cancelled dialog changes nothing. A refused file is explained, and the
+  // result of the invoice checked before stays: the core keeps that invoice.
+  function show(outcome: CheckOutcome): void {
+    failure = undefined;
+    switch (outcome.kind) {
+      case 'cancelled':
+        return;
+      case 'checked':
+        check = outcome.check;
+        refusal = undefined;
+        return;
+      case 'refused':
+        refusal = outcome.refusal;
+    }
+  }
+
+  function again(profile: ProfileKind): void {
+    void run(() => checkInvoiceAgain(profile));
+  }
+</script>
+
+<section class="check" aria-busy={busy}>
+  <button
+    class="check__open"
+    disabled={busy}
+    onclick={() => {
+      void run(checkInvoice);
+    }}
+  >
+    {i18n.t(busy ? 'check.running' : 'check.open')}
+  </button>
+
+  {#if failure !== undefined}
+    <p class="check__refusal" role="alert">{i18n.t('check.failed', { detail: failure })}</p>
+  {:else if refused !== undefined}
+    <p class="check__refusal" role="alert">{i18n.t(refused.name, refused.values)}</p>
+  {/if}
+
+  {#if check !== undefined}
+    <CheckResult {check} {busy} onprofile={again} />
+  {/if}
+</section>
+
+<style>
+  .check {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-md);
+    width: min(var(--content-width), 100%);
+  }
+
+  .check__open {
+    padding: var(--space-sm) var(--space-lg);
+    border: var(--border-width) solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+    font-weight: var(--font-weight-bold);
+    cursor: pointer;
+  }
+
+  .check__open:disabled {
+    color: var(--color-text-muted);
+    cursor: progress;
+  }
+
+  .check__refusal {
+    color: var(--color-danger);
+    overflow-wrap: anywhere;
+  }
+</style>
