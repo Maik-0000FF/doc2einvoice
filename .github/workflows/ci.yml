@@ -1,9 +1,10 @@
 # SPDX-FileCopyrightText: Maik-0000FF
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Every quality gate on Linux, the tests on macOS and Windows as well, and the
-# checks of the dependencies. Actions are pinned to a commit; the comment after
-# each one names the release that commit belongs to.
+# Every quality gate on Linux, the tests on Windows as well and, before a change
+# reaches main, on macOS, and the checks of the dependencies. Actions are pinned
+# to a commit; the comment after each one names the release that commit belongs
+# to.
 
 name: CI
 
@@ -77,7 +78,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-15, windows-2025]
+        # Runners for macOS are scarce, and a job that gets none fails. The tests
+        # therefore run there only before a change reaches main: for a pull
+        # request into main and for main itself. Pull requests of the daily
+        # development are tested on Windows.
+        os: ${{ fromJSON((github.base_ref == 'main' || github.ref == 'refs/heads/main') && '["macos-15", "windows-2025"]' || '["windows-2025"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
