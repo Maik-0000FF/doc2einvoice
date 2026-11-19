@@ -50,6 +50,9 @@ verified.
   rejected.
 - **Every value has one place.** No number, path or name with a meaning is
   repeated; it is defined once and used from there.
+- **No text in components.** Every text of the interface lives in the language
+  files under `src/lib/i18n/messages`, in every language. The application core
+  returns identifiers and data, never wording.
 - **No real data in tests.** Test documents contain invented names, addresses
   and identifiers only.
 - **Every file states its licence.** New files carry an SPDX header;

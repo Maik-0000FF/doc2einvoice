@@ -845,6 +845,7 @@ name = "doc2einvoice"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "doc2einvoice-validation",
  "serde",
  "serde_json",
  "tauri",

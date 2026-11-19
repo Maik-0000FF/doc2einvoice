@@ -24,6 +24,10 @@ pub enum Syntax {
 }
 
 impl Syntax {
+    /// Every syntax, the one place they are listed. What handles each syntax
+    /// iterates over this, so that a new one cannot be left out unnoticed.
+    pub const ALL: [Self; 2] = [Self::Ubl, Self::Cii];
+
     /// Recognises the syntax of a document by its document element.
     ///
     /// # Errors

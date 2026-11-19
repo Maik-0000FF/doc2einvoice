@@ -96,7 +96,7 @@ fn cii_agrees_with_the_reference() -> Result<(), Fault> {
 /// anything.
 #[test]
 fn the_expected_verdicts_contain_valid_and_invalid_documents() -> Result<(), Fault> {
-    for syntax in [Syntax::Ubl, Syntax::Cii] {
+    for syntax in Syntax::ALL {
         let verdicts = support::schema_verdicts(XmlSchemaInfo::of(syntax).key)?;
 
         assert!(verdicts.values().any(|valid| *valid));

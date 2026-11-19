@@ -1,0 +1,21 @@
+{
+  "about.open": "Über",
+  "about.title": "Über {name}",
+  "about.version": "Version {version}",
+  "about.close": "Schließen",
+  "about.license": "Lizenz",
+  "about.source": "Quelltext",
+  "about.publications.heading": "Regelwerke und Schemata",
+  "about.publications.text": "Die Prüfung verwendet genau diese veröffentlichten Dateien, unverändert. Jede Aussage zur Konformität bezieht sich auf diese Ausgaben und auf keine neuere.",
+  "about.publications.title": "Veröffentlichung",
+  "about.publications.version": "Version",
+  "about.publications.published": "Veröffentlicht",
+  "about.publications.notNumbered": "nicht nummeriert",
+  "about.publications.ownTerms": "eigene Bedingungen des Herausgebers",
+  "about.disclaimer.heading": "Haftungsausschluss",
+  "about.disclaimer.risk": "Die Nutzung dieser Software erfolgt vollständig auf eigene Gefahr.",
+  "about.disclaimer.advice": "Sie ist ein technisches Werkzeug und leistet keine Rechts-, Steuer- oder Buchhaltungsberatung.",
+  "about.disclaimer.warranty": "Sie wird ohne jede Gewährleistung bereitgestellt, so wie sie ist. Eine Datei, die die technische Prüfung besteht, kann inhaltlich falsch sein oder die rechtlichen Anforderungen eines Landes verfehlen.",
+  "about.disclaimer.responsibility": "Für die Prüfung jeder Rechnung vor ihrer Verwendung oder ihrem Versand sind allein Sie verantwortlich.",
+  "about.disclaimer.liability": "Soweit gesetzlich zulässig, haftet der Autor nicht für Schäden, die aus der Nutzung dieser Software entstehen. Die vollständigen Bedingungen stehen in den Abschnitten 15 bis 17 der Lizenz."
+}
