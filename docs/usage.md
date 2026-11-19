@@ -128,7 +128,8 @@ in content or fail the legal requirements of a country. See the
 - Only the rules of EN 16931 and of XRechnung are included. An invoice that
   names another specification, such as a profile of Factur-X or Peppol BIS
   Billing, is checked against the rules of EN 16931 only, and the result says
-  that the rules it names were not applied. What that specification allows beyond EN 16931, as the EXTENDED profile of
-  Factur-X does, is then reported as findings.
+  that the rules of the specification it names were not applied. What that
+  specification allows beyond EN 16931, as the EXTENDED profile of Factur-X
+  does, is then reported as findings.
 - On Windows the released program has no console. Called from a terminal it
   shows no output there; redirect the output to a file or a pipe.
