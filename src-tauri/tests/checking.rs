@@ -9,7 +9,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use doc2einvoice_lib::checking::outcome::{
-    CheckOutcome, InvoiceCheck, ProfileKind, Refusal, SeverityKind, SyntaxKind,
+    CheckOutcome, InvoiceCheck, ProfileKind, Refusal, RuleCoverageKind, SeverityKind, SyntaxKind,
 };
 use doc2einvoice_lib::checking::service::ValidationService;
 use doc2einvoice_lib::checking::{check_again, check_file};
@@ -65,7 +65,7 @@ fn an_xrechnung_is_checked_as_the_profile_it_claims() -> Result<(), Fault> {
         assert!(check.conforms, "{file}");
         assert_eq!(check.syntax, syntax);
         assert_eq!(check.profile, ProfileKind::XRechnung);
-        assert_eq!(check.suggested_profile, ProfileKind::XRechnung);
+        assert_eq!(check.rule_coverage, RuleCoverageKind::Applied);
         assert!(check.specification_identifier.is_some());
         assert!(file.ends_with(&check.file_name));
         // The rules of the standard and the rules of XRechnung.
@@ -89,7 +89,7 @@ fn an_invoice_that_claims_only_the_standard_is_checked_as_the_standard() -> Resu
     let check = checked(check_file(&service, &corpus(EN16931_CII)))?;
 
     assert_eq!(check.profile, ProfileKind::En16931);
-    assert_eq!(check.suggested_profile, ProfileKind::En16931);
+    assert_eq!(check.rule_coverage, RuleCoverageKind::Applied);
     assert!(check.conforms);
     Ok(())
 }
@@ -103,8 +103,8 @@ fn the_last_invoice_can_be_checked_again_as_another_profile() -> Result<(), Faul
 
     assert_eq!(stricter.file_name, standard.file_name);
     assert_eq!(stricter.profile, ProfileKind::XRechnung);
-    // The suggestion is what the invoice claims; it does not follow the choice.
-    assert_eq!(stricter.suggested_profile, ProfileKind::En16931);
+    // The stricter profile contains the rules the invoice names.
+    assert_eq!(stricter.rule_coverage, RuleCoverageKind::Applied);
     assert!(stricter.rule_sets.len() > standard.rule_sets.len());
     // An invoice that does not claim to be an XRechnung fails its rules.
     assert!(!stricter.conforms);
@@ -239,8 +239,8 @@ fn the_outcome_is_serialized_with_the_names_the_frontend_bindings_use() -> Resul
         "fileName",
         "syntax",
         "profile",
-        "suggestedProfile",
         "specificationIdentifier",
+        "ruleCoverage",
         "conforms",
         "schemaFindings",
         "ruleSets",

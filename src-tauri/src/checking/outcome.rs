@@ -9,8 +9,8 @@
 //! language files.
 
 use doc2einvoice_validation::{
-    Profile, RuleSetResult, SchemaFinding, Severity, Syntax, ValidationError, ValidationFinding,
-    ValidationReport,
+    Profile, RuleCoverage, RuleSetResult, SchemaFinding, Severity, Syntax, ValidationError,
+    ValidationFinding, ValidationReport,
 };
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -82,10 +82,10 @@ pub struct InvoiceCheck {
     pub syntax: SyntaxKind,
     /// The profile the invoice was checked as.
     pub profile: ProfileKind,
-    /// The profile its specification identifier suggests.
-    pub suggested_profile: ProfileKind,
     /// The specification the invoice says it follows (BT-24), if it says so.
     pub specification_identifier: Option<String>,
+    /// Whether the rules of that specification were applied.
+    pub rule_coverage: RuleCoverageKind,
     /// Whether the invoice is valid against the XML Schema and breaks no rule
     /// that makes it invalid.
     pub conforms: bool,
@@ -160,6 +160,20 @@ pub enum ProfileKind {
     XRechnung,
 }
 
+/// Whether the rules of the specification an invoice names were applied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum RuleCoverageKind {
+    /// The invoice names no specification.
+    NotNamed,
+    /// The rules of the named specification were applied.
+    Applied,
+    /// The rules of the named specification were not applied: they are not
+    /// included, or the invoice was checked as another profile.
+    NotApplied,
+}
+
 /// How serious a finding is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -194,14 +208,14 @@ impl InvoiceCheck {
     pub fn new(
         document: &Document,
         specification_identifier: Option<String>,
-        suggested_profile: Profile,
         report: &ValidationReport,
     ) -> Self {
         Self {
             file_name: document.file_name.clone(),
             syntax: report.syntax.into(),
             profile: report.profile.into(),
-            suggested_profile: suggested_profile.into(),
+            rule_coverage: RuleCoverage::of(specification_identifier.as_deref(), report.profile)
+                .into(),
             specification_identifier,
             conforms: report.conforms(),
             schema_findings: report
@@ -268,6 +282,16 @@ impl From<ProfileKind> for Profile {
         match profile {
             ProfileKind::En16931 => Self::En16931,
             ProfileKind::XRechnung => Self::XRechnung,
+        }
+    }
+}
+
+impl From<RuleCoverage> for RuleCoverageKind {
+    fn from(coverage: RuleCoverage) -> Self {
+        match coverage {
+            RuleCoverage::NotNamed => Self::NotNamed,
+            RuleCoverage::Applied => Self::Applied,
+            RuleCoverage::NotApplied => Self::NotApplied,
         }
     }
 }
