@@ -23,7 +23,10 @@ invoice that conforms to the European standard EN 16931.
 **Status: early development. The application cannot create invoices yet.** What
 it can do today is check an existing e-invoice: an XML file in UBL or CII is
 validated against EN 16931 or XRechnung, and every finding is listed with its
-rule. The validation is tested against the published rule sets.
+rule, in the window or on the command line. The validation is tested against
+the published rule sets.
+
+How to use it is described in [docs/usage.md](docs/usage.md).
 
 ## Principles
 
@@ -98,20 +101,6 @@ Development targets as of 2026-11-19:
   crate plus exactly that patch.
 
 The rule files of Peppol BIS Billing 3.0 are not part of this repository.
-
-## Checking invoices on the command line
-
-The same check runs without a window, for one file, many files or whole
-directories:
-
-```sh
-doc2einvoice check invoice.xml
-doc2einvoice check --findings --profile xrechnung invoices/
-```
-
-One line is printed per file, followed by the totals. The command ends
-successfully only if every path led to invoices and every one of them conforms,
-so it can be used in scripts. `doc2einvoice check --help` lists the options.
 
 ## References
 
