@@ -38,7 +38,14 @@ impl Syntax {
     pub fn of(document: &str) -> Result<Self, ValidationError> {
         let parsed = roxmltree::Document::parse(document)
             .map_err(|error| ValidationError::Malformed(error.to_string()))?;
-        let root = parsed.root_element().tag_name();
+        Self::of_document_element(parsed.root_element())
+    }
+
+    /// Recognises the syntax by the document element of a parsed document.
+    pub(crate) fn of_document_element(
+        element: roxmltree::Node<'_, '_>,
+    ) -> Result<Self, ValidationError> {
+        let root = element.tag_name();
 
         match (root.namespace(), root.name()) {
             (Some(UBL_INVOICE_NAMESPACE), UBL_INVOICE_ELEMENT)
