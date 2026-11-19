@@ -30,8 +30,11 @@ pub fn app_info() -> AppInfo {
 
 /// Lets the user choose an invoice and checks it as the profile it suggests.
 ///
-/// The dialog belongs to the window that asked: it stays in front of it, and
-/// the window takes no input until the dialog is closed.
+/// The dialog is given the window that asked as its parent. Windows and macOS
+/// then keep it in front of that window, which takes no input until the dialog
+/// is closed. The dialogs of GTK on Linux take no parent: there the window
+/// stays usable, and a second request opens a second dialog. Nothing here
+/// relies on the window being blocked.
 #[tauri::command]
 pub async fn check_invoice(app: AppHandle, window: WebviewWindow) -> CheckOutcome {
     off_the_event_loop(move || {
