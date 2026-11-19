@@ -1,0 +1,21 @@
+{
+  "about.open": "About",
+  "about.title": "About {name}",
+  "about.version": "Version {version}",
+  "about.close": "Close",
+  "about.license": "Licence",
+  "about.source": "Source code",
+  "about.publications.heading": "Rule sets and schemas",
+  "about.publications.text": "Validation uses exactly these published files, unchanged. Every statement about conformance refers to these releases and to nothing newer.",
+  "about.publications.title": "Publication",
+  "about.publications.version": "Version",
+  "about.publications.published": "Published",
+  "about.publications.notNumbered": "not numbered",
+  "about.publications.ownTerms": "the publisher's own terms",
+  "about.disclaimer.heading": "Disclaimer",
+  "about.disclaimer.risk": "Use this software entirely at your own risk.",
+  "about.disclaimer.advice": "It is a technical tool and gives no legal, tax or accounting advice.",
+  "about.disclaimer.warranty": "It is provided as is, without warranty of any kind. A file that passes technical validation can still be wrong in content or fail the legal requirements of a country.",
+  "about.disclaimer.responsibility": "You alone are responsible for checking every invoice before you use or send it.",
+  "about.disclaimer.liability": "To the maximum extent permitted by law, the author is not liable for any damage arising from the use of this software. The full terms are in sections 15 to 17 of the licence."
+}

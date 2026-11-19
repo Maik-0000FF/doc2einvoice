@@ -13,6 +13,8 @@ const SAMPLE_INFO: AppInfo = {
   copyrightHolder: 'Sample Holder',
   license: 'GPL-3.0-or-later',
   repository: 'https://example.org/sample',
+  ruleSets: [],
+  xmlSchemas: [],
 };
 
 describe('formatLegalNotice', () => {

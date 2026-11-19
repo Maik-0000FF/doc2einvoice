@@ -85,7 +85,7 @@ fn file_name(index: usize) -> String {
 }
 
 fn export(directory: &Path) -> Result<(), Fault> {
-    for syntax in [Syntax::Ubl, Syntax::Cii] {
+    for syntax in Syntax::ALL {
         let target = directory.join(directory_name(syntax));
         fs::create_dir_all(&target)?;
         let cases = support::cases(syntax)?;
@@ -191,7 +191,7 @@ fn remove_all_between(text: &str, open: &str, close: &str) -> String {
 
 /// The syntax whose XML Schema has the given key.
 fn syntax_of_schema(key: &str) -> Result<Syntax, Fault> {
-    [Syntax::Ubl, Syntax::Cii]
+    Syntax::ALL
         .into_iter()
         .find(|syntax| XmlSchemaInfo::of(*syntax).key == key)
         .ok_or_else(|| format!("unknown XML Schema `{key}`").into())

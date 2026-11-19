@@ -36,7 +36,7 @@ fn the_corpus_is_judged_as_its_parts_are() -> Result<(), Fault> {
     let mut validator = Validator::new();
     let mut conforming = 0_usize;
 
-    for syntax in [Syntax::Ubl, Syntax::Cii] {
+    for syntax in Syntax::ALL {
         let verdicts = support::schema_verdicts(XmlSchemaInfo::of(syntax).key)?;
         for case in support::schema_cases(syntax)? {
             let report = validator.validate(&case.xml, Profile::XRechnung)?;
