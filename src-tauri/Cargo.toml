@@ -21,6 +21,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+clap.workspace = true
 serde.workspace = true
 tauri = { version = "2", features = [] }
 ts-rs = "11"

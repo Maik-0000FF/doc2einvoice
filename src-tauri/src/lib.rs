@@ -8,11 +8,13 @@
 //! - [`commands`]: the IPC boundary. Thin adapters the user interface calls;
 //!   they hold no logic of their own.
 //! - [`app_info`]: program identity and the data of the legal notice.
+//! - [`cli`]: the command line, interpreted before the application starts.
 //!
 //! The core never opens a network connection: every document is processed on
 //! the local machine.
 
 pub mod app_info;
+pub mod cli;
 pub mod commands;
 
 /// Builds the application and runs it until the last window closes.
