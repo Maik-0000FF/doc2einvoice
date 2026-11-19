@@ -30,8 +30,12 @@ fn start() -> ExitCode {
 }
 
 /// Writes a text to its stream. An answer ends successfully, the explanation of
-/// a command line that was not understood with the status of a usage error. A
-/// text that cannot be written, to a closed pipe for example, is a failure.
+/// a command line that was not understood with the status of a usage error.
+///
+/// A write the operating system refuses is a failure: a pipe whose reader is
+/// gone, a device that is full. A stream that was closed before the program
+/// started is different: the standard library then reports the write as done,
+/// so the program ends as if the text had been read.
 fn print(output: &Output) -> ExitCode {
     let (written, status) = match output.stream {
         Stream::Stdout => (
