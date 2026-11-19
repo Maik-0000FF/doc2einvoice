@@ -36,14 +36,25 @@ const XRECHNUNG_MARKER: &str = ":xrechnung";
 /// | CII, `ID` of the guideline in the document context   | its text, trimmed   |
 /// | no such element                                      | none                |
 /// | the element is empty or holds white space only       | none                |
+/// | a comment or a processing instruction in the text    | the text around it, |
+/// |                                                      | joined              |
+/// | a comment in front of the text                       | the text            |
+/// | the text or a part of it in a CDATA section          | the text            |
+/// | an element inside the element                        | its text as well    |
 /// | several such elements                                | the first one       |
 /// | an element of that name deeper in the document       | none: not BT-24     |
 /// | an element of that name in another namespace         | none                |
 /// | not well-formed XML                                  | an error            |
 /// | not a supported invoice                              | an error            |
 ///
-/// Several identifiers are not allowed; the XML Schema step reports that. This
-/// function only reads what the invoice says.
+/// What is read is the string value of the element, as the rules and the XML
+/// Schema see it: all the text inside it, whatever markup lies in between. If
+/// only a part were read, an invoice could name one specification to the
+/// rules and another one here.
+///
+/// Several identifiers and elements inside an identifier are not allowed; the
+/// XML Schema step reports them. This function only reads what the invoice
+/// says.
 ///
 /// # Errors
 ///
@@ -63,10 +74,19 @@ pub fn specification_identifier(document: &str) -> Result<Option<String>, Valida
     };
 
     Ok(element
-        .and_then(|element| element.text())
-        .map(str::trim)
-        .filter(|identifier| !identifier.is_empty())
-        .map(str::to_owned))
+        .map(string_value)
+        .map(|value| value.trim().to_owned())
+        .filter(|identifier| !identifier.is_empty()))
+}
+
+/// The string value of an element as XPath defines it: the text of all the
+/// text nodes inside it, in document order.
+fn string_value(element: roxmltree::Node<'_, '_>) -> String {
+    element
+        .descendants()
+        .filter(roxmltree::Node::is_text)
+        .filter_map(|node| node.text())
+        .collect()
 }
 
 /// The first child element of the given name.
@@ -178,6 +198,44 @@ mod tests {
             "<cbc:CustomizationID> \n </cbc:CustomizationID>",
         ] {
             assert_eq!(identifier(&ubl(content))?, None, "{content}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn markup_inside_the_identifier_does_not_cut_it_short() -> Result<(), ValidationError> {
+        const HEAD: &str = "urn:cen.eu:en16931:2017#compliant#urn:xeinkauf.de:kosit";
+        const TAIL: &str = ":xrechnung_3.0";
+
+        for content in [
+            format!("{HEAD}<!--c-->{TAIL}"),
+            format!("<!--c-->{HEAD}{TAIL}"),
+            format!("{HEAD}{TAIL}<!--c-->"),
+            format!("{HEAD}<?p i?>{TAIL}"),
+            format!("{HEAD}<![CDATA[{TAIL}]]>"),
+            format!("<![CDATA[{HEAD}{TAIL}]]>"),
+            format!("{HEAD}<cbc:Note>{TAIL}</cbc:Note>"),
+            format!(" <!--c--> {HEAD}<!--c-->{TAIL} <!--c--> "),
+        ] {
+            let document = ubl(&format!(
+                "<cbc:CustomizationID>{content}</cbc:CustomizationID>"
+            ));
+            let read = identifier(&document)?;
+
+            assert_eq!(read.as_deref(), Some(XRECHNUNG_3), "{content}");
+            assert_eq!(Profile::suggested_for(read.as_deref()), Profile::XRechnung);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn markup_alone_is_no_identifier() -> Result<(), ValidationError> {
+        for content in ["<!--c-->", "<?p i?>", " <!--c--> ", "<cbc:Note/>"] {
+            let document = ubl(&format!(
+                "<cbc:CustomizationID>{content}</cbc:CustomizationID>"
+            ));
+
+            assert_eq!(identifier(&document)?, None, "{content}");
         }
         Ok(())
     }

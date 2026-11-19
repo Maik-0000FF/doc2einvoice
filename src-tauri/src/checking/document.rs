@@ -80,14 +80,15 @@ pub fn load(path: &Path) -> Result<Document, Refusal> {
         return Err(too_large());
     }
 
-    let text = String::from_utf8(bytes).map_err(|_| Refusal::NotUtf8)?;
+    let mut text = String::from_utf8(bytes).map_err(|_| Refusal::NotUtf8)?;
+    if text.starts_with(BYTE_ORDER_MARK) {
+        text.drain(..BYTE_ORDER_MARK.len_utf8());
+    }
     Ok(Document {
         file_name: path
             .file_name()
             .map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
-        text: text
-            .strip_prefix(BYTE_ORDER_MARK)
-            .map_or_else(|| text.clone(), str::to_owned),
+        text,
     })
 }
 

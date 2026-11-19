@@ -9,7 +9,7 @@
 //! The interface never names a file. The file dialog of the operating system
 //! is opened here, and the path the user chose stays in the core.
 
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::app_info::AppInfo;
@@ -29,12 +29,16 @@ pub fn app_info() -> AppInfo {
 }
 
 /// Lets the user choose an invoice and checks it as the profile it suggests.
+///
+/// The dialog belongs to the window that asked: it stays in front of it, and
+/// the window takes no input until the dialog is closed.
 #[tauri::command]
-pub async fn check_invoice(app: AppHandle) -> CheckOutcome {
+pub async fn check_invoice(app: AppHandle, window: WebviewWindow) -> CheckOutcome {
     off_the_event_loop(move || {
         let Some(chosen) = app
             .dialog()
             .file()
+            .set_parent(&window)
             .add_filter(INVOICE_FILE_KIND, &INVOICE_FILE_EXTENSIONS)
             .blocking_pick_file()
         else {
