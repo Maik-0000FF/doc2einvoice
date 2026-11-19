@@ -12,8 +12,9 @@ use std::io;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
-use doc2einvoice_validation::{Profile, Validator, specification_identifier};
+use doc2einvoice_validation::Profile;
 
+use super::checker::Checker;
 use super::document::Document;
 use super::outcome::{InvoiceCheck, Refusal};
 
@@ -88,13 +89,13 @@ impl ValidationService {
 /// The validation thread: answers one request after the other until nobody
 /// can send any more.
 fn serve(jobs: &Receiver<Job>) {
-    let mut validator = Validator::new();
+    let mut checker = Checker::new();
     let mut kept: Option<Document> = None;
 
     for job in jobs {
         let answer = match job.request {
             Request::Check(document) => {
-                let answer = check(&mut validator, &document, None);
+                let answer = checker.check(&document, None);
                 // Only what was checked is kept: a file that is no invoice
                 // does not replace the invoice checked before.
                 if answer.is_ok() {
@@ -105,22 +106,9 @@ fn serve(jobs: &Receiver<Job>) {
             Request::CheckAgain(profile) => kept
                 .as_ref()
                 .ok_or(Refusal::NothingToCheck)
-                .and_then(|document| check(&mut validator, document, Some(profile))),
+                .and_then(|document| checker.check(document, Some(profile))),
         };
         // Whoever asked may have stopped waiting; then the answer is of no use.
         let _ = job.reply.send(answer);
     }
-}
-
-/// Checks a document as the given profile, or as the one it suggests.
-fn check(
-    validator: &mut Validator,
-    document: &Document,
-    profile: Option<Profile>,
-) -> Result<InvoiceCheck, Refusal> {
-    let identifier = specification_identifier(&document.text)?;
-    let suggested = Profile::suggested_for(identifier.as_deref());
-    let report = validator.validate(&document.text, profile.unwrap_or(suggested))?;
-
-    Ok(InvoiceCheck::new(document, identifier, suggested, &report))
 }

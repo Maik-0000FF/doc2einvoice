@@ -99,6 +99,20 @@ Development targets as of 2026-11-19:
 
 The rule files of Peppol BIS Billing 3.0 are not part of this repository.
 
+## Checking invoices on the command line
+
+The same check runs without a window, for one file, many files or whole
+directories:
+
+```sh
+doc2einvoice check invoice.xml
+doc2einvoice check --findings --profile xrechnung invoices/
+```
+
+One line is printed per file, followed by the totals. The command ends
+successfully only if every path led to invoices and every one of them conforms,
+so it can be used in scripts. `doc2einvoice check --help` lists the options.
+
 ## References
 
 The specifications and rule sets this project works against:

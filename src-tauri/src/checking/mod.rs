@@ -5,9 +5,13 @@
 //! validation thread, and describe the result for the user interface.
 //!
 //! - [`document`]: reads the chosen file into memory, within limits.
-//! - [`service`]: the validator on its own thread.
+//! - [`checker`]: checks one document; the step every way of checking shares.
+//! - [`service`]: the checker on a thread of its own, for the window.
+//! - [`batch`]: checks many files for the command line.
 //! - [`outcome`]: the result as data for the interface.
 
+pub mod batch;
+pub mod checker;
 pub mod document;
 pub mod outcome;
 pub mod service;

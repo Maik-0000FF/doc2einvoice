@@ -48,3 +48,75 @@ fn an_unknown_argument_is_explained_on_stderr_with_the_usage_status() -> std::io
     assert!(!output.stderr.is_empty());
     Ok(())
 }
+
+/// An invoice of the conformance corpus that conforms to XRechnung.
+fn conforming_invoice() -> String {
+    format!(
+        "{}/../tests/conformance/corpus/xrechnung/instances/standard/01.01a-INVOICE_ubl.xml",
+        env!("CARGO_MANIFEST_DIR")
+    )
+}
+
+#[test]
+fn check_succeeds_for_an_invoice_that_conforms() -> std::io::Result<()> {
+    let invoice = conforming_invoice();
+
+    let output = run(&["check", &invoice])?;
+    let text = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success(), "{text}");
+    assert!(text.contains(": conforms (profile: xrechnung,"), "{text}");
+    assert!(
+        text.ends_with("conform: 1, do not conform: 0, not checked: 0\n"),
+        "{text}"
+    );
+    assert!(output.stderr.is_empty());
+    Ok(())
+}
+
+#[test]
+fn check_fails_if_one_path_is_no_conforming_invoice() -> std::io::Result<()> {
+    let invoice = conforming_invoice();
+
+    let output = run(&["check", &invoice, "no-such-file.xml"])?;
+    let text = String::from_utf8_lossy(&output.stdout);
+
+    assert_eq!(output.status.code(), Some(1), "{text}");
+    assert!(
+        text.contains("no-such-file.xml: not checked: the file cannot be read"),
+        "{text}"
+    );
+    assert!(
+        text.ends_with("conform: 1, do not conform: 0, not checked: 1\n"),
+        "{text}"
+    );
+    Ok(())
+}
+
+#[test]
+fn check_as_another_profile_reports_what_the_invoice_fails() -> std::io::Result<()> {
+    let standard = format!(
+        "{}/../tests/conformance/corpus/en16931/examples-cii/CII_business_example_01.xml",
+        env!("CARGO_MANIFEST_DIR")
+    );
+
+    let output = run(&["check", "--profile", "xrechnung", "--findings", &standard])?;
+    let text = String::from_utf8_lossy(&output.stdout);
+
+    assert_eq!(output.status.code(), Some(1), "{text}");
+    assert!(
+        text.contains(": does not conform (profile: xrechnung,"),
+        "{text}"
+    );
+    assert!(text.contains("    error\tBR-DE-"), "{text}");
+    Ok(())
+}
+
+#[test]
+fn check_without_a_path_is_a_usage_error() -> std::io::Result<()> {
+    let output = run(&["check"])?;
+
+    assert_eq!(output.status.code(), Some(i32::from(USAGE_ERROR_STATUS)));
+    assert!(output.stdout.is_empty());
+    Ok(())
+}
