@@ -9,12 +9,24 @@
 use std::io::Write;
 use std::process::ExitCode;
 
+use doc2einvoice_lib::checking::batch::{self, BatchRequest};
 use doc2einvoice_lib::cli::{Invocation, Output, Stream, USAGE_ERROR_STATUS, interpret};
 
 fn main() -> ExitCode {
     match interpret(std::env::args_os()) {
         Invocation::Start => start(),
         Invocation::Print(output) => print(&output),
+        Invocation::Check(request) => check(&request),
+    }
+}
+
+/// Checks invoice files and writes the result to stdout. The run succeeds only
+/// if every path led to invoices and every one of them conforms; a result that
+/// cannot be written is a failure as well.
+fn check(request: &BatchRequest) -> ExitCode {
+    match batch::run(request, &mut std::io::stdout().lock()) {
+        Ok(tally) if tally.all_conform() => ExitCode::SUCCESS,
+        _ => ExitCode::FAILURE,
     }
 }
 

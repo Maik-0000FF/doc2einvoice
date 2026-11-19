@@ -23,7 +23,28 @@ invoice that conforms to the European standard EN 16931.
 **Status: early development. The application cannot create invoices yet.** What
 it can do today is check an existing e-invoice: an XML file in UBL or CII is
 validated against EN 16931 or XRechnung, and every finding is listed with its
-rule. The validation is tested against the published rule sets.
+rule, in the window or on the command line. The validation is tested against
+the published rule sets.
+
+## Contents
+
+- [Usage](#usage)
+- [Principles](#principles)
+- [Planned output formats](#planned-output-formats)
+- [Conformance](#conformance)
+- [How validation works](#how-validation-works)
+- [References](#references)
+- [Downloads](#downloads)
+- [Disclaimer](#disclaimer)
+- [Development](#development)
+- [Support](#support)
+- [License](#license)
+
+## Usage
+
+The application checks e-invoices in its window and on the command line. The
+[usage guide](docs/usage.md) describes both, what a result shows and where the
+limits are.
 
 ## Principles
 

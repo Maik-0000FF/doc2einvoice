@@ -173,6 +173,21 @@ pub enum SeverityKind {
     Fatal,
 }
 
+impl ProfileKind {
+    /// Every profile, in the order they are offered.
+    pub const ALL: [Self; 2] = [Self::En16931, Self::XRechnung];
+
+    /// The name of the profile on the command line and in what the user
+    /// interface receives.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::En16931 => "en16931",
+            Self::XRechnung => "xrechnung",
+        }
+    }
+}
+
 impl InvoiceCheck {
     /// Describes a validation report for the user interface.
     #[must_use]
@@ -282,5 +297,19 @@ impl From<ValidationError> for Refusal {
             | ValidationError::RuleSet(_)
             | ValidationError::Evaluation(_) => Self::Internal,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ProfileKind;
+
+    /// The command line and the user interface must call a profile the same.
+    #[test]
+    fn a_profile_has_one_name_everywhere() -> Result<(), serde_json::Error> {
+        for profile in ProfileKind::ALL {
+            assert_eq!(serde_json::to_value(profile)?, profile.name());
+        }
+        Ok(())
     }
 }

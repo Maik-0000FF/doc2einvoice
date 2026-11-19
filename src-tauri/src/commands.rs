@@ -14,12 +14,12 @@ use tauri_plugin_dialog::DialogExt;
 
 use crate::app_info::AppInfo;
 use crate::checking;
+use crate::checking::document::INVOICE_EXTENSION;
 use crate::checking::outcome::{CheckOutcome, ProfileKind, Refusal};
 use crate::checking::service::ValidationService;
 
-/// The kind of file the dialog offers, as it names it, and its extensions.
+/// The kind of file the dialog offers, as it names it.
 const INVOICE_FILE_KIND: &str = "XML";
-const INVOICE_FILE_EXTENSIONS: [&str; 1] = ["xml"];
 
 /// Returns the program identity for the legal notice.
 #[tauri::command]
@@ -42,7 +42,7 @@ pub async fn check_invoice(app: AppHandle, window: WebviewWindow) -> CheckOutcom
             .dialog()
             .file()
             .set_parent(&window)
-            .add_filter(INVOICE_FILE_KIND, &INVOICE_FILE_EXTENSIONS)
+            .add_filter(INVOICE_FILE_KIND, &[INVOICE_EXTENSION])
             .blocking_pick_file()
         else {
             return CheckOutcome::Cancelled;
