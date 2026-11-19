@@ -20,8 +20,10 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Desktop application that turns a document, starting with PDF, into an electronic
 invoice that conforms to the European standard EN 16931.
 
-**Status: early development. The application cannot create invoices yet.** The
-validation core exists and is tested against the published rule sets.
+**Status: early development. The application cannot create invoices yet.** What
+it can do today is check an existing e-invoice: an XML file in UBL or CII is
+validated against EN 16931 or XRechnung, and every finding is listed with its
+rule. The validation is tested against the published rule sets.
 
 ## Principles
 
