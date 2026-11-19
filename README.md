@@ -210,3 +210,8 @@ version. See [LICENSE](LICENSE).
 
 Copyright and licence notices must be preserved in copies and in modified
 versions.
+
+The files of other publishers keep their own terms, stated in
+[REUSE.toml](REUSE.toml) and in full under [LICENSES](LICENSES). That includes
+the typeface of the interface, [Inter](https://rsms.me/inter/), licensed under
+the SIL Open Font License 1.1.
