@@ -56,6 +56,7 @@
   "refusal.tooLarge": "The file is larger than {mebibytes} MiB and is not read.",
   "refusal.notUtf8": "The file is not text in UTF-8. Other encodings are not supported.",
   "refusal.malformed": "The file is not well-formed XML: {detail}",
+  "refusal.tooDeeplyNested": "The file is nested deeper than {limit} levels and is not read. No invoice is nested that deeply.",
   "refusal.unsupportedDocument": "The file is XML, but not an invoice in UBL or CII. Its document element is \"{element}\".",
   "refusal.nothingToCheck": "There is no invoice to check again.",
   "refusal.internal": "The check failed for a reason that lies in the program, not in the file."

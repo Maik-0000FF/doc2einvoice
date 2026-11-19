@@ -13,7 +13,7 @@ use doc2einvoice_lib::checking::outcome::{
 };
 use doc2einvoice_lib::checking::service::ValidationService;
 use doc2einvoice_lib::checking::{check_again, check_file};
-use doc2einvoice_validation::Profile;
+use doc2einvoice_validation::{MAX_NESTING_DEPTH, Profile};
 use tempfile::TempDir;
 
 /// Invoices of the XRechnung test suite that conform to XRechnung.
@@ -157,6 +157,69 @@ fn what_is_no_invoice_is_refused_with_the_reason() -> Result<(), Fault> {
         refusal(check_file(&service, &directory.path().join("missing.xml")))?,
         Refusal::Unreadable
     );
+    Ok(())
+}
+
+/// The validation runs on a thread of its own, whose stack is smaller than
+/// the one of the main thread. A document nested far deeper than any stack
+/// allows must be refused there, not end the program.
+#[test]
+fn a_file_nested_too_deeply_is_refused_and_the_service_goes_on() -> Result<(), Fault> {
+    /// Deep enough to exhaust the stack of a thread if a tree were built.
+    const LEVELS: usize = 200_000;
+
+    let service = ValidationService::start()?;
+    let directory = TempDir::new()?;
+    let deep = written(
+        &directory,
+        "deep.xml",
+        &format!("{}{}", "<a>".repeat(LEVELS), "</a>".repeat(LEVELS)),
+    )?;
+
+    assert_eq!(
+        refusal(check_file(&service, &deep))?,
+        Refusal::TooDeeplyNested {
+            limit: MAX_NESTING_DEPTH
+        }
+    );
+    // The thread is still there and checks the next file.
+    assert!(checked(check_file(&service, &corpus(XRECHNUNG_UBL)))?.conforms);
+    Ok(())
+}
+
+/// The limit must be one the whole check can bear, not only the reading: the
+/// XML Schema step and the rules walk the tree as well, on the smaller stack
+/// of the validation thread.
+#[test]
+fn an_invoice_nested_exactly_to_the_limit_is_checked_in_full() -> Result<(), Fault> {
+    let service = ValidationService::start()?;
+    let directory = TempDir::new()?;
+    // The document element is the first level; the rest lies inside it.
+    let inside = MAX_NESTING_DEPTH - 1;
+    let nested = format!("{}{}", "<a>".repeat(inside), "</a>".repeat(inside));
+
+    for (name, open, close) in [
+        (
+            "ubl.xml",
+            r#"<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2">"#,
+            "</Invoice>",
+        ),
+        (
+            "cii.xml",
+            r#"<rsm:CrossIndustryInvoice xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100">"#,
+            "</rsm:CrossIndustryInvoice>",
+        ),
+    ] {
+        let file = written(&directory, name, &format!("{open}{nested}{close}"))?;
+
+        let check = checked(check_file(&service, &file))?;
+
+        // It is no valid invoice, but it was judged by the schema and by the
+        // rules, and the thread lived through it.
+        assert!(!check.conforms, "{name}");
+        assert!(!check.schema_findings.is_empty(), "{name}");
+        assert!(!check.rule_sets.is_empty(), "{name}");
+    }
     Ok(())
 }
 

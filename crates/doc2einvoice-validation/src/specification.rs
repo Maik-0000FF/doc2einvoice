@@ -9,6 +9,7 @@
 //! claim holds.
 
 use crate::error::ValidationError;
+use crate::nesting;
 use crate::profile::Profile;
 use crate::syntax::Syntax;
 
@@ -48,6 +49,7 @@ const XRECHNUNG_MARKER: &str = ":xrechnung";
 /// | an element of that name deeper in the document       | none: not BT-24     |
 /// | an element of that name in another namespace         | none                |
 /// | not well-formed XML                                  | an error            |
+/// | nested deeper than is read                           | an error            |
 /// | not a supported invoice                              | an error            |
 ///
 /// What is read is the string value of the element, as the rules and the XML
@@ -61,12 +63,12 @@ const XRECHNUNG_MARKER: &str = ":xrechnung";
 ///
 /// # Errors
 ///
-/// Returns [`ValidationError::Malformed`] if the document is not well-formed
-/// XML, and [`ValidationError::UnsupportedDocument`] if its document element
-/// is none of the supported invoices.
+/// Returns [`ValidationError::TooDeeplyNested`] if the document is nested
+/// deeper than is read, [`ValidationError::Malformed`] if it is not
+/// well-formed XML, and [`ValidationError::UnsupportedDocument`] if its
+/// document element is none of the supported invoices.
 pub fn specification_identifier(document: &str) -> Result<Option<String>, ValidationError> {
-    let parsed = roxmltree::Document::parse(document)
-        .map_err(|error| ValidationError::Malformed(error.to_string()))?;
+    let parsed = nesting::parse(document)?;
     let root = parsed.root_element();
 
     let element = match Syntax::of_document_element(root)? {

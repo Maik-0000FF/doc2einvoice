@@ -11,7 +11,11 @@ limitBytes: number, } | { "reason": "notUtf8" } | { "reason": "malformed",
 /**
  * The explanation of the XML parser, in English.
  */
-detail: string, } | { "reason": "unsupportedDocument", 
+detail: string, } | { "reason": "tooDeeplyNested", 
+/**
+ * The deepest nesting that is read.
+ */
+limit: number, } | { "reason": "unsupportedDocument", 
 /**
  * Local name of its document element.
  */

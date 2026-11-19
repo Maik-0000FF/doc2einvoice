@@ -71,6 +71,8 @@ export function refusalMessage(refusal: Refusal): Message {
       return { name: 'refusal.notUtf8' };
     case 'malformed':
       return { name: 'refusal.malformed', values: { detail: refusal.detail } };
+    case 'tooDeeplyNested':
+      return { name: 'refusal.tooDeeplyNested', values: { limit: refusal.limit } };
     case 'unsupportedDocument':
       return { name: 'refusal.unsupportedDocument', values: { element: refusal.element } };
     case 'nothingToCheck':

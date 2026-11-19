@@ -53,6 +53,7 @@ const REFUSALS: readonly Refusal[] = [
   { reason: 'tooLarge', limitBytes: 32 * 1024 * 1024 },
   { reason: 'notUtf8' },
   { reason: 'malformed', detail: 'unexpected end' },
+  { reason: 'tooDeeplyNested', limit: 256 },
   { reason: 'unsupportedDocument', element: 'Order' },
   { reason: 'nothingToCheck' },
   { reason: 'internal' },

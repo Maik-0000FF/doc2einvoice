@@ -31,6 +31,9 @@ thiserror = "2"
 # to precisely these versions.
 xee-xpath = "=0.1.5"
 xot = "0.31"
+# Cuts XML into its parts without building a tree; used to measure how deep a
+# document is nested before anything else reads it.
+xmlparser = "0.13"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

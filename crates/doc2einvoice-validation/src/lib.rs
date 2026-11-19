@@ -37,6 +37,7 @@
 
 mod embedded;
 mod error;
+mod nesting;
 mod profile;
 mod report;
 mod rule_set;
@@ -47,6 +48,7 @@ mod xml_schema;
 
 pub use embedded::EmbeddedFile;
 pub use error::{RuleSetError, ValidationError, XmlSchemaError};
+pub use nesting::MAX_NESTING_DEPTH;
 pub use profile::Profile;
 pub use report::{RuleSetResult, SchemaFinding, Severity, ValidationFinding, ValidationReport};
 pub use rule_set::{RuleSet, RuleSetInfo};
