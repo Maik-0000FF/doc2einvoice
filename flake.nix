@@ -63,6 +63,21 @@
           gsettingsSchemaDirs = lib.concatMapStringsSep ":" (
             pkg: "${pkg}/share/gsettings-schemas/${pkg.name}"
           ) gsettingsSchemaPackages;
+
+          # The graphics drivers the WebView renders with. A NixOS host offers
+          # its own under /run/opengl-driver, built against the C library of
+          # the host. If that one is newer than the C library of this shell,
+          # they cannot be loaded and the WebView aborts while it creates its
+          # EGL display. The shell therefore brings the drivers that belong to
+          # its own packages: this file names their EGL library by its full
+          # path, and the two variables below name the directories of the
+          # drivers it loads in turn.
+          eglVendorFile = pkgs.writeText "50_mesa.json" (
+            builtins.toJSON {
+              file_format_version = "1.0.0";
+              ICD.library_path = "${pkgs.mesa}/lib/libEGL_mesa.so.0";
+            }
+          );
         in
         {
           default = pkgs.mkShell {
@@ -84,6 +99,10 @@
 
             # rust-analyzer needs the standard library sources.
             RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
+
+            __EGL_VENDOR_LIBRARY_FILENAMES = "${eglVendorFile}";
+            LIBGL_DRIVERS_PATH = "${pkgs.mesa}/lib/dri";
+            GBM_BACKENDS_PATH = "${pkgs.mesa}/lib/gbm";
 
             shellHook = ''
               export XDG_DATA_DIRS="${gsettingsSchemaDirs}''${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"
