@@ -5,6 +5,7 @@
 # checksums are verified, so no line-ending conversion may touch them.
 /rulesets/** -text
 /schemas/** -text
+/src/lib/assets/fonts/** -text
 /tests/conformance/corpus/** -text
 /tests/conformance/expected/** -text
 /vendor/** -text
