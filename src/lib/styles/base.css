@@ -19,6 +19,22 @@ body {
   font-size: var(--font-size-md);
   font-weight: var(--font-weight-regular);
   line-height: var(--line-height-base);
+
+  /* Only the shapes the typeface contains: no slanted or emboldened stand-ins,
+     which every platform would draw differently. */
+  font-synthesis: none;
+  font-optical-sizing: auto;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* Controls take the typeface of the page instead of the one of the platform. */
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
 }
 
 h1,

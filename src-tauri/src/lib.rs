@@ -9,11 +9,13 @@
 //!   they hold no logic of their own.
 //! - [`app_info`]: program identity, the data of the legal notice and the
 //!   published files the validation uses.
+//! - [`cli`]: the command line, interpreted before the application starts.
 //!
 //! The core never opens a network connection: every document is processed on
 //! the local machine.
 
 pub mod app_info;
+pub mod cli;
 pub mod commands;
 
 /// Builds the application and runs it until the last window closes.

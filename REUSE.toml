@@ -35,6 +35,13 @@ precedence = "aggregate"
 SPDX-FileCopyrightText = "Maik-0000FF"
 SPDX-License-Identifier = "GPL-3.0-or-later"
 
+# The typeface of the interface, unchanged as published by its authors.
+[[annotations]]
+path = ["src/lib/assets/fonts/inter/**"]
+precedence = "override"
+SPDX-FileCopyrightText = "2016 The Inter Project Authors (https://github.com/rsms/inter)"
+SPDX-License-Identifier = "OFL-1.1"
+
 # The validation artefacts of EN 16931 and their test documents, unchanged as
 # published by CEN/TC 434. Each file states its licence in its own words; this
 # entry restates it in SPDX form.
