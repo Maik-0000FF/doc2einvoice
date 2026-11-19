@@ -3,7 +3,7 @@
 
 //! Loading the file a user chose into memory.
 
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::Read;
 use std::path::Path;
 
@@ -38,7 +38,8 @@ pub struct Document {
 /// | a file of exactly the size limit               | the document                 |
 /// | a file larger than the size limit              | refused: too large           |
 /// | a file that grows beyond the limit while read  | refused: too large           |
-/// | a directory                                    | refused: not a file          |
+/// | a directory, on every operating system         | refused: not a file          |
+/// | a path replaced between the look and the read  | judged by what was opened    |
 /// | a device or a pipe, which may never end        | refused: not a file          |
 /// | nothing, or a file that may not be read        | refused: not readable        |
 /// | a file in another encoding (Latin-1, UTF-16)   | refused: not UTF-8           |
@@ -51,7 +52,16 @@ pub struct Document {
 ///
 /// Returns the [`Refusal`] that says why the file was not read.
 pub fn load(path: &Path) -> Result<Document, Refusal> {
+    // Asked of the path before anything is opened: some systems refuse to open
+    // a directory at all, which would look like a file that may not be read.
+    if !fs::metadata(path)
+        .map_err(|_| Refusal::Unreadable)?
+        .is_file()
+    {
+        return Err(Refusal::NotAFile);
+    }
     let file = File::open(path).map_err(|_| Refusal::Unreadable)?;
+    // Asked again of what was opened: the path may lead elsewhere by now.
     let metadata = file.metadata().map_err(|_| Refusal::Unreadable)?;
     if !metadata.is_file() {
         return Err(Refusal::NotAFile);

@@ -8,7 +8,7 @@
 //! the crate manifest at compile time, and the rule sets and schemas describe
 //! themselves in the validation crate.
 
-use doc2einvoice_validation::{RuleSet, Syntax, XmlSchemaInfo};
+use doc2einvoice_validation::{RuleSet, RuleSetInfo, Syntax, XmlSchemaInfo};
 use serde::Serialize;
 use ts_rs::TS;
 
@@ -55,6 +55,18 @@ pub struct Publication {
     pub source: String,
 }
 
+impl From<&RuleSetInfo> for Publication {
+    fn from(info: &RuleSetInfo) -> Self {
+        Self {
+            title: info.title.to_owned(),
+            version: Some(info.version.to_owned()),
+            published: info.published.to_owned(),
+            license: Some(info.license.to_owned()),
+            source: info.source.to_owned(),
+        }
+    }
+}
+
 impl AppInfo {
     /// The identity of the running build.
     #[must_use]
@@ -76,14 +88,7 @@ impl AppInfo {
 fn rule_sets() -> Vec<Publication> {
     let mut publications = Vec::new();
     for rule_set in RuleSet::ALL {
-        let info = rule_set.info();
-        let publication = Publication {
-            title: info.title.to_owned(),
-            version: Some(info.version.to_owned()),
-            published: info.published.to_owned(),
-            license: Some(info.license.to_owned()),
-            source: info.source.to_owned(),
-        };
+        let publication = Publication::from(rule_set.info());
         if !publications.contains(&publication) {
             publications.push(publication);
         }

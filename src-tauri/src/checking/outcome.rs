@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use super::document::Document;
+use crate::app_info::Publication;
 
 /// How a request to check an invoice ended.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -99,12 +100,8 @@ pub struct InvoiceCheck {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct RuleSetCheck {
-    /// The name its publisher gives the rule set.
-    pub title: String,
-    /// The version of the release.
-    pub version: String,
-    /// The date of the release, as `YYYY-MM-DD`.
-    pub published: String,
+    /// The release of the rule set the findings are a statement about.
+    pub publication: Publication,
     /// The rules the invoice does not satisfy, in the order of the rule file.
     pub findings: Vec<RuleNote>,
 }
@@ -204,11 +201,8 @@ impl InvoiceCheck {
 
 impl From<&RuleSetResult> for RuleSetCheck {
     fn from(result: &RuleSetResult) -> Self {
-        let info = result.rule_set.info();
         Self {
-            title: info.title.to_owned(),
-            version: info.version.to_owned(),
-            published: info.published.to_owned(),
+            publication: Publication::from(result.rule_set.info()),
             findings: result.findings.iter().map(RuleNote::from).collect(),
         }
     }
