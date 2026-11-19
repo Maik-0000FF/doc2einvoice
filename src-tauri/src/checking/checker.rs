@@ -40,6 +40,6 @@ impl Checker {
             .validator
             .validate(&document.text, profile.unwrap_or(suggested))?;
 
-        Ok(InvoiceCheck::new(document, identifier, suggested, &report))
+        Ok(InvoiceCheck::new(document, identifier, &report))
     }
 }

@@ -24,6 +24,9 @@ const CII_CONTEXT_ELEMENT: &str = "ExchangedDocumentContext";
 const CII_GUIDELINE_ELEMENT: &str = "GuidelineSpecifiedDocumentContextParameter";
 const CII_IDENTIFIER_ELEMENT: &str = "ID";
 
+/// The specification identifier of EN 16931 itself, without anything added.
+const EN16931_IDENTIFIER: &str = "urn:cen.eu:en16931:2017";
+
 /// What every specification identifier of an XRechnung contains, in lower
 /// case: the publisher names its specification `xrechnung` as one part of a
 /// URN, in every version and for its extensions.
@@ -102,6 +105,70 @@ fn child<'a, 'input>(
         .find(|node| node.is_element() && node.has_tag_name((namespace, name)))
 }
 
+/// Whether the rules of the specification an invoice names were applied when
+/// it was validated.
+///
+/// A verdict only covers the rules that were applied. If the invoice names a
+/// specification whose rules were not among them, it was checked against less
+/// than it claims, and the verdict must say so.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RuleCoverage {
+    /// The invoice names no specification.
+    NotNamed,
+    /// The rules of the named specification were applied.
+    Applied,
+    /// The rules of the named specification were not applied: this crate does
+    /// not include them, or the invoice was validated as another profile.
+    NotApplied,
+}
+
+impl RuleCoverage {
+    /// The coverage of an invoice that names the given specification and was
+    /// validated as the given profile.
+    ///
+    /// | Identifier                                  | Validated as | Coverage    |
+    /// |---------------------------------------------|--------------|-------------|
+    /// | none                                        | any          | not named   |
+    /// | `urn:cen.eu:en16931:2017`                   | EN 16931     | applied     |
+    /// | `urn:cen.eu:en16931:2017`                   | XRechnung    | applied:    |
+    /// |                                             |              | XRechnung   |
+    /// |                                             |              | contains    |
+    /// |                                             |              | the rules   |
+    /// |                                             |              | of EN 16931 |
+    /// | an XRechnung, in any version or spelling    | XRechnung    | applied:    |
+    /// |                                             |              | its rules   |
+    /// |                                             |              | judge the   |
+    /// |                                             |              | identifier  |
+    /// | an XRechnung                                | EN 16931     | not applied |
+    /// | a profile of Factur-X, Peppol BIS Billing   | any          | not applied |
+    /// | `URN:CEN.EU:EN16931:2017`, wrong case       | any          | not applied |
+    /// | `urn:cen.eu:en16931:2017#`, anything added  | any          | not applied |
+    /// | `123`, any other text                       | any          | not applied |
+    ///
+    /// Identifiers are compared exactly. What is not known to be covered counts
+    /// as not applied: saying too often that rules are missing is harmless,
+    /// saying it too rarely lets a verdict claim more than was checked.
+    #[must_use]
+    pub fn of(identifier: Option<&str>, validated_as: Profile) -> Self {
+        let Some(identifier) = identifier else {
+            return Self::NotNamed;
+        };
+        // The profile whose rules are the rules of the named specification, if
+        // this crate has such a profile.
+        let named = if identifier == EN16931_IDENTIFIER {
+            Some(Profile::En16931)
+        } else if Profile::suggested_for(Some(identifier)) == Profile::XRechnung {
+            Some(Profile::XRechnung)
+        } else {
+            None
+        };
+        match named {
+            Some(named) if validated_as.applies_the_rules_of(named) => Self::Applied,
+            _ => Self::NotApplied,
+        }
+    }
+}
+
 impl Profile {
     /// The profile a specification identifier suggests validating as.
     ///
@@ -134,7 +201,7 @@ impl Profile {
 
 #[cfg(test)]
 mod tests {
-    use super::specification_identifier;
+    use super::{RuleCoverage, specification_identifier};
     use crate::error::ValidationError;
     use crate::profile::Profile;
 
@@ -279,6 +346,54 @@ mod tests {
             identifier("<Order/>"),
             Err(ValidationError::UnsupportedDocument { .. })
         ));
+    }
+
+    #[test]
+    fn rules_count_as_applied_only_if_they_were() {
+        const STANDARD: &str = "urn:cen.eu:en16931:2017";
+        const EXTENDED: &str = "urn:cen.eu:en16931:2017#conformant#urn:factur-x.eu:1p0:extended";
+        const PEPPOL: &str =
+            "urn:cen.eu:en16931:2017#compliant#urn:fdc:peppol.eu:2017:poacc:billing:3.0";
+        const OLD_XRECHNUNG: &str =
+            "urn:cen.eu:en16931:2017#compliant#urn:xoev-de:kosit:standard:xrechnung_2.3";
+
+        for (identifier, validated_as, expected) in [
+            (None, Profile::En16931, RuleCoverage::NotNamed),
+            (None, Profile::XRechnung, RuleCoverage::NotNamed),
+            (Some(STANDARD), Profile::En16931, RuleCoverage::Applied),
+            (Some(STANDARD), Profile::XRechnung, RuleCoverage::Applied),
+            (Some(XRECHNUNG_3), Profile::XRechnung, RuleCoverage::Applied),
+            (
+                Some(OLD_XRECHNUNG),
+                Profile::XRechnung,
+                RuleCoverage::Applied,
+            ),
+            (
+                Some(XRECHNUNG_3),
+                Profile::En16931,
+                RuleCoverage::NotApplied,
+            ),
+            (Some(EXTENDED), Profile::En16931, RuleCoverage::NotApplied),
+            (Some(EXTENDED), Profile::XRechnung, RuleCoverage::NotApplied),
+            (Some(PEPPOL), Profile::En16931, RuleCoverage::NotApplied),
+            (
+                Some("URN:CEN.EU:EN16931:2017"),
+                Profile::En16931,
+                RuleCoverage::NotApplied,
+            ),
+            (
+                Some("urn:cen.eu:en16931:2017#"),
+                Profile::En16931,
+                RuleCoverage::NotApplied,
+            ),
+            (Some("123"), Profile::XRechnung, RuleCoverage::NotApplied),
+        ] {
+            assert_eq!(
+                RuleCoverage::of(identifier, validated_as),
+                expected,
+                "{identifier:?} as {validated_as:?}"
+            );
+        }
     }
 
     #[test]
