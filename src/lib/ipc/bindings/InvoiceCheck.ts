@@ -22,15 +22,11 @@ syntax: SyntaxKind,
  */
 profile: ProfileKind, 
 /**
- * The profile its specification identifier suggests.
- */
-suggestedProfile: ProfileKind, 
-/**
  * The specification the invoice says it follows (BT-24), if it says so.
  */
 specificationIdentifier: string | null, 
 /**
- * Whether the rules of that specification are among those applied.
+ * Whether the rules of that specification were applied.
  */
 ruleCoverage: RuleCoverageKind, 
 /**

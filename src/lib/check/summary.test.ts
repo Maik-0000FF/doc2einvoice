@@ -28,7 +28,6 @@ function check(severities: readonly (readonly SeverityKind[])[]): InvoiceCheck {
     fileName: 'invoice.xml',
     syntax: 'ubl',
     profile: 'en16931',
-    suggestedProfile: 'en16931',
     specificationIdentifier: null,
     ruleCoverage: 'notNamed',
     conforms: false,

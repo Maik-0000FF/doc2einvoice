@@ -17,9 +17,10 @@ use super::checker::Checker;
 use super::document::{self, INVOICE_EXTENSION};
 use super::outcome::{InvoiceCheck, Refusal, RuleCoverageKind, SeverityKind};
 
-/// What follows the line of a file whose invoice names a specification with
-/// rules that are not included: its verdict covers less than the invoice claims.
-const RULES_NOT_INCLUDED: &str = "; the rules of the specification it names are not included";
+/// What follows the line of a file whose invoice names a specification the
+/// rules of which were not applied: its verdict covers less than the invoice
+/// claims.
+const RULES_NOT_APPLIED: &str = "; the rules of the specification it names were not applied";
 
 /// How the lines below a file are indented when its findings are listed.
 const FINDING_INDENT: &str = "    ";
@@ -211,8 +212,8 @@ fn write_check(
         count(SeverityKind::Fatal),
         count(SeverityKind::Warning),
         count(SeverityKind::Information),
-        if check.rule_coverage == RuleCoverageKind::NotIncluded {
-            RULES_NOT_INCLUDED
+        if check.rule_coverage == RuleCoverageKind::NotApplied {
+            RULES_NOT_APPLIED
         } else {
             ""
         },
@@ -415,7 +416,7 @@ mod tests {
     }
 
     #[test]
-    fn a_specification_without_included_rules_is_named_on_the_line() -> io::Result<()> {
+    fn rules_that_were_not_applied_are_named_on_the_line() -> io::Result<()> {
         let directory = TempDir::new()?;
         let named = |identifier: &str| {
             format!(
@@ -437,8 +438,23 @@ mod tests {
 
         let (lines, _) = lines(&request(&[&extended, &standard]))?;
 
-        assert!(lines[0].ends_with("; the rules of the specification it names are not included"));
+        assert!(lines[0].ends_with("; the rules of the specification it names were not applied"));
         assert!(lines[1].ends_with(')'));
+
+        // An XRechnung checked as the standard alone was not checked against
+        // the rules it names either.
+        let xrechnung = written(
+            directory.path(),
+            "xrechnung.xml",
+            &named("urn:cen.eu:en16931:2017#compliant#urn:xeinkauf.de:kosit:xrechnung_3.0"),
+        )?;
+        let mut as_the_standard = request(&[&xrechnung]);
+        as_the_standard.profile = Some(Profile::En16931);
+        let (lines, _) = super::tests::lines(&as_the_standard)?;
+        assert!(lines[0].ends_with("; the rules of the specification it names were not applied"));
+
+        let (lines, _) = super::tests::lines(&request(&[&xrechnung]))?;
+        assert!(lines[0].ends_with(')'));
         Ok(())
     }
 
@@ -495,7 +511,6 @@ mod tests {
             file_name: "a.xml".to_owned(),
             syntax: SyntaxKind::Ubl,
             profile: ProfileKind::En16931,
-            suggested_profile: ProfileKind::En16931,
             specification_identifier: None,
             rule_coverage: RuleCoverageKind::NotNamed,
             conforms: false,

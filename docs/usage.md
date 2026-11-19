@@ -44,7 +44,8 @@ The result shows:
 
 - the verdict: whether the invoice conforms,
 - the file, its syntax and the profile it was checked as,
-- the specification the invoice names,
+- the specification the invoice names, and a note if its rules were not
+  applied,
 - whether the file is valid against the XML Schema,
 - for every rule set its version and the date it was published, and the rules
   the invoice does not satisfy.
@@ -82,6 +83,11 @@ conform: 1, do not conform: 0, not checked: 1
 | `--profile PROFILE` | check every file as this profile instead of the one it names |
 | `--findings`        | list the findings of each file below its line, one per line  |
 | `--help`            | list the options                                             |
+
+If the rules of the specification an invoice names were not applied, its line
+ends with `; the rules of the specification it names were not applied` after
+the closing parenthesis. That is the case for a specification whose rules are
+not included, and for an XRechnung checked with `--profile en16931`.
 
 With `--findings`, each finding is one line whose fields are separated by tabs:
 the severity (or `schema`), the rule, the place in the document and the wording.
@@ -122,7 +128,7 @@ in content or fail the legal requirements of a country. See the
 - Only the rules of EN 16931 and of XRechnung are included. An invoice that
   names another specification, such as a profile of Factur-X or Peppol BIS
   Billing, is checked against the rules of EN 16931 only, and the result says
-  so. What that specification allows beyond EN 16931, as the EXTENDED profile of
+  that the rules it names were not applied. What that specification allows beyond EN 16931, as the EXTENDED profile of
   Factur-X does, is then reported as findings.
 - On Windows the released program has no console. Called from a terminal it
   shows no output there; redirect the output to a file or a pipe.

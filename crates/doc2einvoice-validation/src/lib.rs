@@ -15,7 +15,7 @@
 //! - [`Syntax`]: which XML syntax a document is written in.
 //! - [`Profile`]: what a document is validated as, which decides the rule sets.
 //! - [`specification_identifier`]: the specification a document says it follows.
-//! - [`RuleCoverage`]: whether the rules of that specification are included.
+//! - [`RuleCoverage`]: whether the rules of that specification were applied.
 //! - [`Validator`]: validates documents and returns a [`ValidationReport`].
 //!
 //! A document is checked in the two steps a specification requires: against

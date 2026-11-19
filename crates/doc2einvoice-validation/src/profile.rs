@@ -35,10 +35,33 @@ impl Profile {
     }
 }
 
+impl Profile {
+    /// Whether validating as this profile applies every rule set that
+    /// validating as the other one would, in every syntax.
+    #[must_use]
+    pub fn applies_the_rules_of(self, other: Self) -> bool {
+        Syntax::ALL.into_iter().all(|syntax| {
+            other
+                .rule_sets(syntax)
+                .iter()
+                .all(|rule_set| self.rule_sets(syntax).contains(rule_set))
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Profile;
     use crate::syntax::Syntax;
+
+    #[test]
+    fn xrechnung_applies_the_rules_of_the_standard_and_not_the_other_way_round() {
+        assert!(Profile::XRechnung.applies_the_rules_of(Profile::En16931));
+        assert!(!Profile::En16931.applies_the_rules_of(Profile::XRechnung));
+        for profile in Profile::ALL {
+            assert!(profile.applies_the_rules_of(profile));
+        }
+    }
 
     #[test]
     fn every_rule_set_of_a_profile_validates_the_syntax_of_the_document() {
