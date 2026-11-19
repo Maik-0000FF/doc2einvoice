@@ -11,6 +11,9 @@ SPDX-License-Identifier: GPL-3.0-or-later
 [![CI](https://github.com/Maik-0000FF/doc2einvoice/actions/workflows/ci.yml/badge.svg)](https://github.com/Maik-0000FF/doc2einvoice/actions/workflows/ci.yml)
 ![status: early development](https://img.shields.io/badge/status-early%20development-yellow)
 ![EN 16931](https://img.shields.io/badge/EN%2016931-validation%20core-0b7285)
+![Windows: tested](https://img.shields.io/badge/Windows-tested-555)
+![macOS: tested](https://img.shields.io/badge/macOS-tested-555)
+![Linux: tested](https://img.shields.io/badge/Linux-tested-555)
 [![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-pink?logo=github)](https://github.com/sponsors/Maik-0000FF)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20me-ff5e5b?logo=ko-fi&logoColor=white)](https://ko-fi.com/maik0000ff)
 
