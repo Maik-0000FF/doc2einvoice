@@ -34,9 +34,6 @@ export const SEVERITY_KEYS: Readonly<Record<SeverityKind, MessageKey>> = {
   information: 'severity.information',
 };
 
-/** The severities, the most serious first. */
-export const SEVERITIES = Object.keys(SEVERITY_KEYS) as readonly SeverityKind[];
-
 /** Sizes of files are stated in mebibytes. */
 const BYTES_PER_MEBIBYTE = 1024 * 1024;
 

@@ -28,6 +28,17 @@ SPDX-License-Identifier: GPL-3.0-or-later
   const PROFILE_ID = 'check-result-profile';
 
   const counts = $derived(countBySeverity(check));
+
+  let profileControl = $state<HTMLSelectElement>();
+
+  // The control states what the result below it was checked as. A choice that
+  // led to no new result (the check failed, or was refused) must not stay in
+  // it, so once no check is running it is set to the profile of the result.
+  $effect(() => {
+    if (profileControl !== undefined && !busy) {
+      profileControl.value = check.profile;
+    }
+  });
 </script>
 
 <section class="result">
@@ -44,6 +55,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
     <dt><label for={PROFILE_ID}>{i18n.t('check.profile')}</label></dt>
     <dd>
       <select
+        bind:this={profileControl}
         id={PROFILE_ID}
         value={check.profile}
         disabled={busy}

@@ -29,7 +29,7 @@
   "check.verdict.scope": "Das ist das Ergebnis einer technischen Prüfung gegen die unten genannten Ausgaben und gegen keine neuere. Es sagt nichts über den Inhalt der Rechnung oder die rechtlichen Anforderungen eines Landes aus.",
   "check.identifier.stated": "Von der Rechnung genannte Spezifikation (BT-24): {identifier}",
   "check.identifier.none": "Die Rechnung nennt keine Spezifikation (BT-24).",
-  "check.identifier.differs": "Die Rechnung nennt eine Spezifikation, die zum Profil {profile} gehört. Geprüft wurde sie als anderes Profil.",
+  "check.identifier.differs": "Nach ihrer Angabe wäre die Rechnung als {profile} zu prüfen. Geprüft wurde sie als anderes Profil.",
   "check.counts": "Fehler: {fatal} · Warnungen: {warning} · Hinweise: {information}",
   "check.ruleSets.heading": "Geprüft gegen",
   "check.ruleSets.release": "Version {version}, veröffentlicht am {published}",

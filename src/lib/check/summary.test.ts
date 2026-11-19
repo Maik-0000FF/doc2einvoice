@@ -15,7 +15,6 @@ import {
   PROFILE_KEYS,
   PROFILES,
   refusalMessage,
-  SEVERITIES,
   SEVERITY_KEYS,
   SYNTAX_KEYS,
 } from './summary.ts';
@@ -100,9 +99,8 @@ describe('refusalMessage', () => {
 });
 
 describe('the names of profiles, syntaxes and severities', () => {
-  it('offers every profile and lists the most serious severity first', () => {
+  it('offers every profile', () => {
     expect([...PROFILES].sort()).toEqual(Object.keys(PROFILE_KEYS).sort());
-    expect(SEVERITIES[0]).toBe('fatal');
   });
 
   it('gives every one a text of its own', () => {
