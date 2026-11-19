@@ -26,7 +26,25 @@ validated against EN 16931 or XRechnung, and every finding is listed with its
 rule, in the window or on the command line. The validation is tested against
 the published rule sets.
 
-How to use it is described in [docs/usage.md](docs/usage.md).
+## Contents
+
+- [Usage](#usage)
+- [Principles](#principles)
+- [Planned output formats](#planned-output-formats)
+- [Conformance](#conformance)
+- [How validation works](#how-validation-works)
+- [References](#references)
+- [Downloads](#downloads)
+- [Disclaimer](#disclaimer)
+- [Development](#development)
+- [Support](#support)
+- [License](#license)
+
+## Usage
+
+The application checks e-invoices in its window and on the command line. The
+[usage guide](docs/usage.md) describes both, what a result shows and where the
+limits are.
 
 ## Principles
 

@@ -11,6 +11,7 @@ invoices is not possible yet.
 - [What is checked](#what-is-checked)
 - [Checking an invoice in the window](#checking-an-invoice-in-the-window)
 - [Checking invoices on the command line](#checking-invoices-on-the-command-line)
+- [Version and help](#version-and-help)
 - [What a result means](#what-a-result-means)
 - [Limits](#limits)
 
@@ -89,6 +90,17 @@ The command ends with a status that scripts can use:
 | `0`    | every path led to invoices, and every one of them conforms                |
 | `1`    | an invoice does not conform, a path was not checked, or nothing was found |
 | `2`    | the command line was not understood                                       |
+
+## Version and help
+
+```sh
+doc2einvoice --version
+doc2einvoice --help
+```
+
+`--version` (or `-V`) prints the name and the version of the program, `--help`
+(or `-h`) the commands and options. Both answer without opening a window.
+Started without any argument, the program opens its window.
 
 ## What a result means
 
