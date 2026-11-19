@@ -14,6 +14,7 @@
 //! - [`RuleSet`]: one published rule file with its provenance and checksum.
 //! - [`Syntax`]: which XML syntax a document is written in.
 //! - [`Profile`]: what a document is validated as, which decides the rule sets.
+//! - [`specification_identifier`]: the specification a document says it follows.
 //! - [`Validator`]: validates documents and returns a [`ValidationReport`].
 //!
 //! A document is checked in the two steps a specification requires: against
@@ -38,6 +39,7 @@ mod error;
 mod profile;
 mod report;
 mod rule_set;
+mod specification;
 mod syntax;
 mod validator;
 mod xml_schema;
@@ -47,6 +49,7 @@ pub use error::{RuleSetError, ValidationError, XmlSchemaError};
 pub use profile::Profile;
 pub use report::{RuleSetResult, SchemaFinding, Severity, ValidationFinding, ValidationReport};
 pub use rule_set::{RuleSet, RuleSetInfo};
+pub use specification::specification_identifier;
 pub use syntax::Syntax;
 pub use validator::Validator;
 pub use xml_schema::{XmlSchema, XmlSchemaInfo};

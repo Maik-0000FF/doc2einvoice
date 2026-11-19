@@ -9,11 +9,13 @@
 //!   they hold no logic of their own.
 //! - [`app_info`]: program identity and the data of the legal notice.
 //! - [`cli`]: the command line, interpreted before the application starts.
+//! - [`checking`]: checks an invoice the user chose and describes the result.
 //!
 //! The core never opens a network connection: every document is processed on
 //! the local machine.
 
 pub mod app_info;
+pub mod checking;
 pub mod cli;
 pub mod commands;
 
@@ -21,10 +23,16 @@ pub mod commands;
 ///
 /// # Errors
 ///
-/// Returns the Tauri error if the application cannot be set up or its event
-/// loop fails.
+/// Returns the Tauri error if the validation thread cannot be started, the
+/// application cannot be set up or its event loop fails.
 pub fn run() -> tauri::Result<()> {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![commands::app_info])
+        .plugin(tauri_plugin_dialog::init())
+        .manage(checking::service::ValidationService::start()?)
+        .invoke_handler(tauri::generate_handler![
+            commands::app_info,
+            commands::check_invoice,
+            commands::check_invoice_again,
+        ])
         .run(tauri::generate_context!())
 }

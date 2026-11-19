@@ -19,6 +19,9 @@ pub enum Profile {
 }
 
 impl Profile {
+    /// Every profile, the one place they are listed.
+    pub const ALL: [Self; 2] = [Self::En16931, Self::XRechnung];
+
     /// The rule sets a document of the given syntax must satisfy, in the order
     /// they are applied.
     #[must_use]
@@ -39,7 +42,7 @@ mod tests {
 
     #[test]
     fn every_rule_set_of_a_profile_validates_the_syntax_of_the_document() {
-        for profile in [Profile::En16931, Profile::XRechnung] {
+        for profile in Profile::ALL {
             for syntax in [Syntax::Ubl, Syntax::Cii] {
                 for rule_set in profile.rule_sets(syntax) {
                     assert_eq!(rule_set.info().syntax, syntax, "{profile:?} {rule_set:?}");
