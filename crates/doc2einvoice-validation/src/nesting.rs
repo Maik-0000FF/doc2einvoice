@@ -8,6 +8,13 @@
 //! deep exhausts the stack of the thread, which ends the whole program; no
 //! error can be returned from there. Such a document is therefore refused
 //! before anything builds a tree from it.
+//!
+//! The guard stands at the entrances of this crate that take a document as it
+//! comes from outside: [`crate::Validator`], [`crate::Syntax::of`] and
+//! [`crate::specification_identifier`]. [`crate::XmlSchema`] and the Schematron
+//! interpreter read a document themselves and do not measure its depth; they
+//! are meant to be reached through the validator. That is a decision: whoever
+//! calls them directly answers for what is passed to them.
 
 use xmlparser::{ElementEnd, Token, Tokenizer};
 
