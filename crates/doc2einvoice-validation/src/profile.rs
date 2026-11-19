@@ -40,7 +40,7 @@ mod tests {
     #[test]
     fn every_rule_set_of_a_profile_validates_the_syntax_of_the_document() {
         for profile in [Profile::En16931, Profile::XRechnung] {
-            for syntax in [Syntax::Ubl, Syntax::Cii] {
+            for syntax in Syntax::ALL {
                 for rule_set in profile.rule_sets(syntax) {
                     assert_eq!(rule_set.info().syntax, syntax, "{profile:?} {rule_set:?}");
                 }
@@ -50,7 +50,7 @@ mod tests {
 
     #[test]
     fn xrechnung_includes_the_rules_of_the_standard() {
-        for syntax in [Syntax::Ubl, Syntax::Cii] {
+        for syntax in Syntax::ALL {
             let standard = Profile::En16931.rule_sets(syntax);
 
             assert!(Profile::XRechnung.rule_sets(syntax).starts_with(standard));

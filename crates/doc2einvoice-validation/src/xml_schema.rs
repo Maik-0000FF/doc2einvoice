@@ -358,8 +358,6 @@ mod tests {
     use crate::error::XmlSchemaError;
     use crate::syntax::Syntax;
 
-    const SYNTAXES: [Syntax; 2] = [Syntax::Ubl, Syntax::Cii];
-
     #[test]
     fn locations_are_resolved_among_the_embedded_files_only() {
         assert_eq!(
@@ -383,7 +381,7 @@ mod tests {
 
     #[test]
     fn every_embedded_file_is_the_published_file() {
-        for syntax in SYNTAXES {
+        for syntax in Syntax::ALL {
             for file in XmlSchemaInfo::of(syntax).files() {
                 assert!(file.is_unchanged(), "`{}` was altered", file.name);
             }
@@ -392,7 +390,7 @@ mod tests {
 
     #[test]
     fn every_schema_compiles_from_the_embedded_files_alone() -> Result<(), XmlSchemaError> {
-        for syntax in SYNTAXES {
+        for syntax in Syntax::ALL {
             XmlSchemaInfo::of(syntax).compile()?;
         }
         Ok(())
@@ -400,7 +398,7 @@ mod tests {
 
     #[test]
     fn a_document_of_another_vocabulary_is_invalid() -> Result<(), XmlSchemaError> {
-        for syntax in SYNTAXES {
+        for syntax in Syntax::ALL {
             let schema = XmlSchemaInfo::of(syntax).compile()?;
 
             assert!(!schema.validate("<unknown/>")?.is_empty());

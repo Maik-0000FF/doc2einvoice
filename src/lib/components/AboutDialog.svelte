@@ -12,6 +12,9 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
   let { info, open = $bindable(false) }: { info: AppInfo; open?: boolean } = $props();
 
+  // Lets a script focus an element that the Tab key does not stop at.
+  const NOT_IN_TAB_ORDER = -1;
+
   // Identifies the heading that names the dialog for assistive technology.
   const TITLE_ID = 'about-dialog-title';
 
@@ -28,13 +31,17 @@ SPDX-License-Identifier: GPL-3.0-or-later
   let dialog = $state<HTMLDialogElement>();
 
   // The dialog element is opened and closed by its own methods: only they make
-  // it modal, keep the focus inside and close it on Escape.
+  // it modal, keep the focus inside and close it on Escape. Opening would put
+  // the focus on the first control, the button at the very end, and scroll
+  // there; the dialog takes the focus itself and starts at its top.
   $effect(() => {
     if (dialog === undefined || dialog.open === open) {
       return;
     }
     if (open) {
       dialog.showModal();
+      dialog.scrollTop = 0;
+      dialog.focus();
     } else {
       dialog.close();
     }
@@ -44,6 +51,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 <dialog
   bind:this={dialog}
   class="about"
+  tabindex={NOT_IN_TAB_ORDER}
   aria-labelledby={TITLE_ID}
   onclose={() => {
     open = false;
@@ -79,9 +87,9 @@ SPDX-License-Identifier: GPL-3.0-or-later
         {#each publications as publication (publication.title)}
           <tr>
             <th scope="row">{publication.title}</th>
-            <td>{publication.version ?? i18n.t('about.publications.notStated')}</td>
+            <td>{publication.version ?? i18n.t('about.publications.notNumbered')}</td>
             <td>{i18n.date(publication.published)}</td>
-            <td>{publication.license ?? i18n.t('about.publications.notStated')}</td>
+            <td>{publication.license ?? i18n.t('about.publications.ownTerms')}</td>
           </tr>
         {/each}
       </tbody>

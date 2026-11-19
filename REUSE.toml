@@ -18,6 +18,7 @@ path = [
   "Cargo.lock",
   "src-tauri/tauri.conf.json",
   "src-tauri/capabilities/**",
+  "src/lib/i18n/messages/**",
   "src/lib/ipc/bindings/**",
   "tests/conformance/expected/**",
   "vendor/patches/**",

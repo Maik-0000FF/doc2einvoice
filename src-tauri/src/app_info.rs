@@ -12,9 +12,6 @@ use doc2einvoice_validation::{RuleSet, Syntax, XmlSchemaInfo};
 use serde::Serialize;
 use ts_rs::TS;
 
-/// The syntaxes whose XML Schema the validation embeds.
-const SCHEMA_SYNTAXES: [Syntax; 2] = [Syntax::Ubl, Syntax::Cii];
-
 /// What the program is, under which terms it is distributed and which
 /// published files its validation uses.
 ///
@@ -94,10 +91,10 @@ fn rule_sets() -> Vec<Publication> {
     publications
 }
 
-/// The embedded XML Schemas. Their publishers date the releases and state the
-/// terms in a notice of their own, not as a version and a licence identifier.
+/// The XML Schema of every syntax. Their publishers date the releases and state
+/// the terms in a notice of their own, not as a version and a licence identifier.
 fn xml_schemas() -> Vec<Publication> {
-    SCHEMA_SYNTAXES
+    Syntax::ALL
         .into_iter()
         .map(XmlSchemaInfo::of)
         .map(|info| Publication {
@@ -114,7 +111,7 @@ fn xml_schemas() -> Vec<Publication> {
 mod tests {
     use std::collections::HashSet;
 
-    use doc2einvoice_validation::RuleSet;
+    use doc2einvoice_validation::{RuleSet, Syntax};
 
     use super::{AppInfo, Publication};
 
@@ -155,6 +152,22 @@ mod tests {
 
         assert_eq!(named.len(), embedded.len());
         assert_eq!(named.iter().copied().collect::<HashSet<_>>(), embedded);
+    }
+
+    #[test]
+    fn the_schema_of_every_syntax_is_named() {
+        assert_eq!(AppInfo::current().xml_schemas.len(), Syntax::ALL.len());
+    }
+
+    /// The user interface tells the rows of its table apart by their title.
+    #[test]
+    fn no_two_publications_share_a_title() {
+        let info = AppInfo::current();
+        let titles: HashSet<&str> = publications(&info)
+            .map(|publication| publication.title.as_str())
+            .collect();
+
+        assert_eq!(titles.len(), publications(&info).count());
     }
 
     #[test]
