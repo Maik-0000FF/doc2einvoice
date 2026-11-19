@@ -83,6 +83,11 @@ conform: 1, do not conform: 0, not checked: 1
 | `--findings`        | list the findings of each file below its line, one per line  |
 | `--help`            | list the options                                             |
 
+With `--findings`, each finding is one line whose fields are separated by tabs:
+the severity (or `schema`), the rule, the place in the document and the wording.
+A rule that could not be evaluated has one more field, `not evaluated:` with the
+error code.
+
 The command ends with a status that scripts can use:
 
 | Status | Meaning                                                                   |

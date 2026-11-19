@@ -14,11 +14,8 @@ use std::path::{Path, PathBuf};
 use doc2einvoice_validation::Profile;
 
 use super::checker::Checker;
-use super::document;
+use super::document::{self, INVOICE_EXTENSION};
 use super::outcome::{InvoiceCheck, Refusal, SeverityKind};
-
-/// The extension of the files that are checked inside a directory.
-const INVOICE_EXTENSION: &str = "xml";
 
 /// How the lines below a file are indented when its findings are listed.
 const FINDING_INDENT: &str = "    ";
@@ -77,6 +74,8 @@ enum Entry {
 /// |                                        | in any case of letters, sorted     |
 /// | a directory without such a file        | not checked: nothing found         |
 /// | a directory that cannot be listed      | not checked, the others go on      |
+/// | a directory with an entry the system   | not checked, once per such entry;  |
+/// | fails to list                          | the entries it does list go on     |
 /// | a symbolic link to a file              | the file it leads to               |
 /// | a symbolic link to a directory, inside | not followed: links can form loops |
 /// | a directory                            |                                    |
@@ -142,7 +141,9 @@ fn entries(path: &Path) -> Vec<Entry> {
 }
 
 /// Adds the invoice files of a directory and of the directories below it, in
-/// the order of their names.
+/// the order of their names. What cannot be listed is reported, never left
+/// out: a file that silently went missing would let a run succeed that did not
+/// check everything.
 fn collect(directory: &Path, found: &mut Vec<Entry>) {
     let Ok(listing) = fs::read_dir(directory) else {
         found.push(Entry::NotChecked(
@@ -151,10 +152,16 @@ fn collect(directory: &Path, found: &mut Vec<Entry>) {
         ));
         return;
     };
-    let mut paths: Vec<PathBuf> = listing
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .collect();
+    let mut paths = Vec::new();
+    for entry in listing {
+        match entry {
+            Ok(entry) => paths.push(entry.path()),
+            Err(_) => found.push(Entry::NotChecked(
+                directory.to_owned(),
+                "an entry of the directory cannot be read",
+            )),
+        }
+    }
     paths.sort();
 
     for path in paths {
@@ -204,15 +211,18 @@ fn write_check(
     if !list_findings {
         return Ok(());
     }
+    // One finding per line, whatever line breaks its texts contain.
     for finding in &check.schema_findings {
         writeln!(
             output,
             "{FINDING_INDENT}schema\t{}\t{}\t{}",
-            finding.code, finding.location, finding.message
+            finding.code,
+            finding.location,
+            single_line(&finding.message)
         )?;
     }
     for finding in check.rule_sets.iter().flat_map(|rules| &rules.findings) {
-        writeln!(
+        write!(
             output,
             "{FINDING_INDENT}{}\t{}\t{}\t{}",
             severity_name(finding.severity),
@@ -220,6 +230,12 @@ fn write_check(
             finding.location,
             single_line(&finding.message)
         )?;
+        // A rule that could not be evaluated is no ordinary violation: a last
+        // column says so and names the error.
+        if let Some(code) = &finding.evaluation_error {
+            write!(output, "\tnot evaluated: {code}")?;
+        }
+        writeln!(output)?;
     }
     Ok(())
 }
@@ -228,7 +244,7 @@ fn write_not_checked(output: &mut impl Write, path: &Path, why: &str) -> io::Res
     writeln!(output, "{}: not checked: {why}", path.display())
 }
 
-/// The wording of a rule on one line: rule files break their texts freely.
+/// A text on one line: rule files and schema processors break theirs freely.
 fn single_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -269,7 +285,11 @@ mod tests {
     use doc2einvoice_validation::Profile;
     use tempfile::TempDir;
 
-    use super::{BatchRequest, Tally, run, single_line};
+    use super::{BatchRequest, Tally, run, single_line, write_check};
+    use crate::app_info::Publication;
+    use crate::checking::outcome::{
+        InvoiceCheck, ProfileKind, RuleNote, RuleSetCheck, SchemaNote, SeverityKind, SyntaxKind,
+    };
 
     const EMPTY_INVOICE: &str =
         r#"<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"/>"#;
@@ -428,6 +448,63 @@ mod tests {
                 .any(|line| line.starts_with("    error\tBR-"))
         );
         assert_eq!(lines.len(), findings.len() + 2);
+        Ok(())
+    }
+
+    #[test]
+    fn every_finding_is_one_line_and_an_unevaluated_rule_says_so() -> io::Result<()> {
+        let check = InvoiceCheck {
+            file_name: "a.xml".to_owned(),
+            syntax: SyntaxKind::Ubl,
+            profile: ProfileKind::En16931,
+            suggested_profile: ProfileKind::En16931,
+            specification_identifier: None,
+            conforms: false,
+            schema_findings: vec![SchemaNote {
+                code: "cvc-1".to_owned(),
+                message: "first\nsecond".to_owned(),
+                location: "/Invoice[1]".to_owned(),
+            }],
+            rule_sets: vec![RuleSetCheck {
+                publication: Publication {
+                    title: "Rules".to_owned(),
+                    version: None,
+                    published: "2026-01-01".to_owned(),
+                    license: None,
+                    source: "https://example.org".to_owned(),
+                },
+                findings: vec![
+                    RuleNote {
+                        rule_id: "BR-01".to_owned(),
+                        severity: SeverityKind::Fatal,
+                        message: "broken\n  rule".to_owned(),
+                        location: "/Invoice[1]".to_owned(),
+                        evaluation_error: None,
+                    },
+                    RuleNote {
+                        rule_id: "BR-02".to_owned(),
+                        severity: SeverityKind::Fatal,
+                        message: "rule".to_owned(),
+                        location: "/Invoice[1]".to_owned(),
+                        evaluation_error: Some("FORG0001".to_owned()),
+                    },
+                ],
+            }],
+        };
+        let mut output = Vec::new();
+
+        write_check(&mut output, Path::new("a.xml"), &check, true)?;
+
+        let text = String::from_utf8_lossy(&output);
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(
+            lines[1..],
+            [
+                "    schema\tcvc-1\t/Invoice[1]\tfirst second",
+                "    error\tBR-01\t/Invoice[1]\tbroken rule",
+                "    error\tBR-02\t/Invoice[1]\trule\tnot evaluated: FORG0001",
+            ]
+        );
         Ok(())
     }
 

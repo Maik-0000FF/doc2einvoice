@@ -14,6 +14,10 @@ use super::outcome::Refusal;
 /// only exhaust the memory.
 pub const MAX_DOCUMENT_BYTES: u64 = 32 * 1024 * 1024;
 
+/// The extension of the files that hold an invoice. The file dialog offers
+/// files of this kind, and inside a directory only these are checked.
+pub const INVOICE_EXTENSION: &str = "xml";
+
 /// The mark some editors put in front of a text in UTF-8. It is not part of
 /// the document.
 const BYTE_ORDER_MARK: char = '\u{FEFF}';

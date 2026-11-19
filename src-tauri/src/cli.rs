@@ -37,6 +37,8 @@
 //! | `check` with a path not in UTF-8 | the path is checked: a file name   |
 //! |                           | is no text                                |
 //! | `chec a.xml`              | usage error on stderr, no abbreviation    |
+//! | `help`, `help check`      | usage error on stderr: the help is the    |
+//! |                           | option `--help`, there is no such command |
 //!
 //! Arguments are read from left to right. `--version` and `--help` answer at
 //! once, as is customary; whatever follows them is not read. Up to that point
@@ -128,6 +130,7 @@ fn command() -> Command {
         .about(env!("CARGO_PKG_DESCRIPTION"))
         .infer_long_args(false)
         .infer_subcommands(false)
+        .disable_help_subcommand(true)
         .subcommand(check_command())
 }
 
@@ -324,6 +327,8 @@ mod tests {
             vec!["check", "--profile"],
             vec!["check", "--unknown", "a.xml"],
             vec!["chec", "a.xml"],
+            vec!["help"],
+            vec!["help", "check"],
         ] {
             assert!(is_usage_error(&invocation(&arguments)), "{arguments:?}");
         }
