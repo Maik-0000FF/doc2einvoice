@@ -119,8 +119,10 @@ in content or fail the legal requirements of a country. See the
 - Only XML files are read. An invoice embedded in a PDF (ZUGFeRD, Factur-X)
   cannot be checked yet.
 - Only files in UTF-8 are read, up to 32 MiB.
-- An invoice in a profile that goes beyond EN 16931, such as the EXTENDED
-  profile of Factur-X, is checked against the rules of EN 16931 only. What the
-  profile adds is then reported as findings.
+- Only the rules of EN 16931 and of XRechnung are included. An invoice that
+  names another specification, such as a profile of Factur-X or Peppol BIS
+  Billing, is checked against the rules of EN 16931 only, and the result says
+  so. What that specification allows beyond EN 16931, as the EXTENDED profile of
+  Factur-X does, is then reported as findings.
 - On Windows the released program has no console. Called from a terminal it
   shows no output there; redirect the output to a file or a pipe.

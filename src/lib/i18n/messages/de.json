@@ -30,6 +30,7 @@
   "check.identifier.stated": "Von der Rechnung genannte Spezifikation (BT-24): {identifier}",
   "check.identifier.none": "Die Rechnung nennt keine Spezifikation (BT-24).",
   "check.identifier.differs": "Nach ihrer Angabe wäre die Rechnung als {profile} zu prüfen. Geprüft wurde sie als anderes Profil.",
+  "check.identifier.notIncluded": "Die Regeln der von der Rechnung genannten Spezifikation sind nicht Teil dieses Programms. Geprüft wurde nur gegen {profile}. Was diese Spezifikation darüber hinaus verlangt oder erlaubt, wird nicht beurteilt und kann als Fund erscheinen.",
   "check.counts": "Fehler: {fatal} · Warnungen: {warning} · Hinweise: {information}",
   "check.ruleSets.heading": "Geprüft gegen",
   "check.ruleSets.release": "Version {version}, veröffentlicht am {published}",

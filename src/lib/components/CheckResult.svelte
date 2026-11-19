@@ -75,6 +75,11 @@ SPDX-License-Identifier: GPL-3.0-or-later
       ? i18n.t('check.identifier.none')
       : i18n.t('check.identifier.stated', { identifier: check.specificationIdentifier })}
   </p>
+  {#if check.ruleCoverage === 'notIncluded'}
+    <p class="result__note result__note--warning">
+      {i18n.t('check.identifier.notIncluded', { profile: i18n.t(PROFILE_KEYS[check.profile]) })}
+    </p>
+  {/if}
   {#if check.profile !== check.suggestedProfile}
     <p class="result__note result__note--warning">
       {i18n.t('check.identifier.differs', {

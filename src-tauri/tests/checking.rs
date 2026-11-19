@@ -241,6 +241,7 @@ fn the_outcome_is_serialized_with_the_names_the_frontend_bindings_use() -> Resul
         "profile",
         "suggestedProfile",
         "specificationIdentifier",
+        "ruleCoverage",
         "conforms",
         "schemaFindings",
         "ruleSets",

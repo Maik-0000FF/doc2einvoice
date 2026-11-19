@@ -23,6 +23,9 @@ const CII_CONTEXT_ELEMENT: &str = "ExchangedDocumentContext";
 const CII_GUIDELINE_ELEMENT: &str = "GuidelineSpecifiedDocumentContextParameter";
 const CII_IDENTIFIER_ELEMENT: &str = "ID";
 
+/// The specification identifier of EN 16931 itself, without anything added.
+const EN16931_IDENTIFIER: &str = "urn:cen.eu:en16931:2017";
+
 /// What every specification identifier of an XRechnung contains, in lower
 /// case: the publisher names its specification `xrechnung` as one part of a
 /// URN, in every version and for its extensions.
@@ -100,6 +103,57 @@ fn child<'a, 'input>(
         .find(|node| node.is_element() && node.has_tag_name((namespace, name)))
 }
 
+/// Whether the rules of the specification an invoice names are among the rule
+/// sets of this crate.
+///
+/// A verdict only covers the rules that were applied. An invoice that names a
+/// specification with rules of its own, which are not included here, is
+/// checked against less than it claims, and what that specification allows
+/// beyond EN 16931 is reported as findings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RuleCoverage {
+    /// The invoice names no specification.
+    NotNamed,
+    /// The rules of the named specification are included.
+    Included,
+    /// The named specification has rules that are not included.
+    NotIncluded,
+}
+
+impl RuleCoverage {
+    /// The coverage of the specification with the given identifier.
+    ///
+    /// | Identifier                                             | Coverage     |
+    /// |--------------------------------------------------------|--------------|
+    /// | none                                                   | not named    |
+    /// | `urn:cen.eu:en16931:2017`                              | included     |
+    /// | an XRechnung, in any version or spelling               | included:    |
+    /// |                                                        | its rules    |
+    /// |                                                        | judge the    |
+    /// |                                                        | identifier   |
+    /// | `…#compliant#urn:factur-x.eu:1p0:basic`                | not included |
+    /// | `…#conformant#urn:factur-x.eu:1p0:extended`            | not included |
+    /// | `…#compliant#urn:fdc:peppol.eu:2017:poacc:billing:3.0` | not included |
+    /// | `URN:CEN.EU:EN16931:2017`, wrong case                  | not included |
+    /// | `urn:cen.eu:en16931:2017#`, anything appended          | not included |
+    /// | `123`, any other text                                  | not included |
+    ///
+    /// Identifiers are compared exactly. What is not known to be covered counts
+    /// as not included: saying too often that rules are missing is harmless,
+    /// saying it too rarely lets a verdict claim more than was checked.
+    #[must_use]
+    pub fn of(identifier: Option<&str>) -> Self {
+        match identifier {
+            None => Self::NotNamed,
+            Some(EN16931_IDENTIFIER) => Self::Included,
+            Some(identifier) if Profile::suggested_for(Some(identifier)) == Profile::XRechnung => {
+                Self::Included
+            }
+            Some(_) => Self::NotIncluded,
+        }
+    }
+}
+
 impl Profile {
     /// The profile a specification identifier suggests validating as.
     ///
@@ -132,7 +186,7 @@ impl Profile {
 
 #[cfg(test)]
 mod tests {
-    use super::specification_identifier;
+    use super::{RuleCoverage, specification_identifier};
     use crate::error::ValidationError;
     use crate::profile::Profile;
 
@@ -277,6 +331,40 @@ mod tests {
             identifier("<Order/>"),
             Err(ValidationError::UnsupportedDocument { .. })
         ));
+    }
+
+    #[test]
+    fn only_known_specifications_count_as_covered() {
+        let extension =
+            format!("{XRECHNUNG_3}#conformant#urn:xeinkauf.de:kosit:extension:xrechnung_3.0");
+
+        for (identifier, expected) in [
+            (None, RuleCoverage::NotNamed),
+            (Some("urn:cen.eu:en16931:2017"), RuleCoverage::Included),
+            (Some(XRECHNUNG_3), RuleCoverage::Included),
+            (Some(extension.as_str()), RuleCoverage::Included),
+            (
+                Some("urn:cen.eu:en16931:2017#compliant#urn:xoev-de:kosit:standard:xrechnung_2.3"),
+                RuleCoverage::Included,
+            ),
+            (
+                Some("urn:cen.eu:en16931:2017#compliant#urn:factur-x.eu:1p0:basic"),
+                RuleCoverage::NotIncluded,
+            ),
+            (
+                Some("urn:cen.eu:en16931:2017#conformant#urn:factur-x.eu:1p0:extended"),
+                RuleCoverage::NotIncluded,
+            ),
+            (
+                Some("urn:cen.eu:en16931:2017#compliant#urn:fdc:peppol.eu:2017:poacc:billing:3.0"),
+                RuleCoverage::NotIncluded,
+            ),
+            (Some("URN:CEN.EU:EN16931:2017"), RuleCoverage::NotIncluded),
+            (Some("urn:cen.eu:en16931:2017#"), RuleCoverage::NotIncluded),
+            (Some("123"), RuleCoverage::NotIncluded),
+        ] {
+            assert_eq!(RuleCoverage::of(identifier), expected, "{identifier:?}");
+        }
     }
 
     #[test]

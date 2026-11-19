@@ -15,7 +15,11 @@ use doc2einvoice_validation::Profile;
 
 use super::checker::Checker;
 use super::document::{self, INVOICE_EXTENSION};
-use super::outcome::{InvoiceCheck, Refusal, SeverityKind};
+use super::outcome::{InvoiceCheck, Refusal, RuleCoverageKind, SeverityKind};
+
+/// What follows the line of a file whose invoice names a specification with
+/// rules that are not included: its verdict covers less than the invoice claims.
+const RULES_NOT_INCLUDED: &str = "; the rules of the specification it names are not included";
 
 /// How the lines below a file are indented when its findings are listed.
 const FINDING_INDENT: &str = "    ";
@@ -195,7 +199,7 @@ fn write_check(
     };
     writeln!(
         output,
-        "{}: {} (profile: {}, schema violations: {}, errors: {}, warnings: {}, notes: {})",
+        "{}: {} (profile: {}, schema violations: {}, errors: {}, warnings: {}, notes: {}){}",
         path.display(),
         if check.conforms {
             "conforms"
@@ -207,6 +211,11 @@ fn write_check(
         count(SeverityKind::Fatal),
         count(SeverityKind::Warning),
         count(SeverityKind::Information),
+        if check.rule_coverage == RuleCoverageKind::NotIncluded {
+            RULES_NOT_INCLUDED
+        } else {
+            ""
+        },
     )?;
     if !list_findings {
         return Ok(());
@@ -288,7 +297,8 @@ mod tests {
     use super::{BatchRequest, Tally, run, single_line, write_check};
     use crate::app_info::Publication;
     use crate::checking::outcome::{
-        InvoiceCheck, ProfileKind, RuleNote, RuleSetCheck, SchemaNote, SeverityKind, SyntaxKind,
+        InvoiceCheck, ProfileKind, RuleCoverageKind, RuleNote, RuleSetCheck, SchemaNote,
+        SeverityKind, SyntaxKind,
     };
 
     const EMPTY_INVOICE: &str =
@@ -405,6 +415,34 @@ mod tests {
     }
 
     #[test]
+    fn a_specification_without_included_rules_is_named_on_the_line() -> io::Result<()> {
+        let directory = TempDir::new()?;
+        let named = |identifier: &str| {
+            format!(
+                r#"<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+                    xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
+                    ><cbc:CustomizationID>{identifier}</cbc:CustomizationID></Invoice>"#
+            )
+        };
+        let extended = written(
+            directory.path(),
+            "extended.xml",
+            &named("urn:cen.eu:en16931:2017#conformant#urn:factur-x.eu:1p0:extended"),
+        )?;
+        let standard = written(
+            directory.path(),
+            "standard.xml",
+            &named("urn:cen.eu:en16931:2017"),
+        )?;
+
+        let (lines, _) = lines(&request(&[&extended, &standard]))?;
+
+        assert!(lines[0].ends_with("; the rules of the specification it names are not included"));
+        assert!(lines[1].ends_with(')'));
+        Ok(())
+    }
+
+    #[test]
     fn the_same_path_twice_is_checked_twice() -> io::Result<()> {
         let directory = TempDir::new()?;
         let invoice = written(directory.path(), "a.xml", EMPTY_INVOICE)?;
@@ -459,6 +497,7 @@ mod tests {
             profile: ProfileKind::En16931,
             suggested_profile: ProfileKind::En16931,
             specification_identifier: None,
+            rule_coverage: RuleCoverageKind::NotNamed,
             conforms: false,
             schema_findings: vec![SchemaNote {
                 code: "cvc-1".to_owned(),
