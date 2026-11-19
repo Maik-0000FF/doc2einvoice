@@ -4,6 +4,7 @@
 //! Recognising the XML syntax of an invoice.
 
 use crate::error::ValidationError;
+use crate::nesting;
 
 const UBL_INVOICE_NAMESPACE: &str = "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2";
 const UBL_INVOICE_ELEMENT: &str = "Invoice";
@@ -32,12 +33,12 @@ impl Syntax {
     ///
     /// # Errors
     ///
-    /// Returns [`ValidationError::Malformed`] if the document is not
+    /// Returns [`ValidationError::TooDeeplyNested`] if the document is nested
+    /// deeper than is read, [`ValidationError::Malformed`] if it is not
     /// well-formed XML, and [`ValidationError::UnsupportedDocument`] if its
     /// document element is none of the supported invoices.
     pub fn of(document: &str) -> Result<Self, ValidationError> {
-        let parsed = roxmltree::Document::parse(document)
-            .map_err(|error| ValidationError::Malformed(error.to_string()))?;
+        let parsed = nesting::parse(document)?;
         Self::of_document_element(parsed.root_element())
     }
 

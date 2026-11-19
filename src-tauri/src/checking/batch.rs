@@ -268,6 +268,9 @@ fn reason(refusal: &Refusal) -> String {
         ),
         Refusal::NotUtf8 => "the file is not text in UTF-8".to_owned(),
         Refusal::Malformed { detail } => format!("the file is not well-formed XML: {detail}"),
+        Refusal::TooDeeplyNested { limit } => {
+            format!("the file is nested deeper than {limit} levels")
+        }
         Refusal::UnsupportedDocument { element } => {
             format!("the document element `{element}` is no invoice in UBL or CII")
         }

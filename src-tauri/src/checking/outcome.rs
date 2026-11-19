@@ -60,6 +60,12 @@ pub enum Refusal {
         /// The explanation of the XML parser, in English.
         detail: String,
     },
+    /// The elements of the file are nested deeper than is read.
+    TooDeeplyNested {
+        /// The deepest nesting that is read.
+        #[ts(type = "number")]
+        limit: usize,
+    },
     /// The file is XML but none of the supported invoices.
     UnsupportedDocument {
         /// Local name of its document element.
@@ -290,6 +296,7 @@ impl From<ValidationError> for Refusal {
     fn from(error: ValidationError) -> Self {
         match error {
             ValidationError::Malformed(detail) => Self::Malformed { detail },
+            ValidationError::TooDeeplyNested { limit } => Self::TooDeeplyNested { limit },
             ValidationError::UnsupportedDocument { element } => {
                 Self::UnsupportedDocument { element }
             }

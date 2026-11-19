@@ -13,7 +13,7 @@ use doc2einvoice_lib::checking::outcome::{
 };
 use doc2einvoice_lib::checking::service::ValidationService;
 use doc2einvoice_lib::checking::{check_again, check_file};
-use doc2einvoice_validation::Profile;
+use doc2einvoice_validation::{MAX_NESTING_DEPTH, Profile};
 use tempfile::TempDir;
 
 /// Invoices of the XRechnung test suite that conform to XRechnung.
@@ -157,6 +157,33 @@ fn what_is_no_invoice_is_refused_with_the_reason() -> Result<(), Fault> {
         refusal(check_file(&service, &directory.path().join("missing.xml")))?,
         Refusal::Unreadable
     );
+    Ok(())
+}
+
+/// The validation runs on a thread of its own, whose stack is smaller than
+/// the one of the main thread. A document nested far deeper than any stack
+/// allows must be refused there, not end the program.
+#[test]
+fn a_file_nested_too_deeply_is_refused_and_the_service_goes_on() -> Result<(), Fault> {
+    /// Deep enough to exhaust the stack of a thread if a tree were built.
+    const LEVELS: usize = 200_000;
+
+    let service = ValidationService::start()?;
+    let directory = TempDir::new()?;
+    let deep = written(
+        &directory,
+        "deep.xml",
+        &format!("{}{}", "<a>".repeat(LEVELS), "</a>".repeat(LEVELS)),
+    )?;
+
+    assert_eq!(
+        refusal(check_file(&service, &deep))?,
+        Refusal::TooDeeplyNested {
+            limit: MAX_NESTING_DEPTH
+        }
+    );
+    // The thread is still there and checks the next file.
+    assert!(checked(check_file(&service, &corpus(XRECHNUNG_UBL)))?.conforms);
     Ok(())
 }
 

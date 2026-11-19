@@ -56,6 +56,7 @@
   "refusal.tooLarge": "Die Datei ist größer als {mebibytes} MiB und wird nicht gelesen.",
   "refusal.notUtf8": "Die Datei ist kein Text in UTF-8. Andere Kodierungen werden nicht unterstützt.",
   "refusal.malformed": "Die Datei ist kein wohlgeformtes XML: {detail}",
+  "refusal.tooDeeplyNested": "Die Datei ist tiefer als {limit} Ebenen verschachtelt und wird nicht gelesen. Keine Rechnung ist so tief verschachtelt.",
   "refusal.unsupportedDocument": "Die Datei ist XML, aber keine Rechnung in UBL oder CII. Ihr Dokumentelement ist „{element}“.",
   "refusal.nothingToCheck": "Es gibt keine Rechnung, die erneut geprüft werden könnte.",
   "refusal.internal": "Die Prüfung ist aus einem Grund gescheitert, der im Programm liegt, nicht in der Datei."

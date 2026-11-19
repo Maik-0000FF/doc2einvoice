@@ -118,7 +118,8 @@ in content or fail the legal requirements of a country. See the
 
 - Only XML files are read. An invoice embedded in a PDF (ZUGFeRD, Factur-X)
   cannot be checked yet.
-- Only files in UTF-8 are read, up to 32 MiB.
+- Only files in UTF-8 are read, up to 32 MiB, with elements nested up to 256
+  levels deep.
 - An invoice in a profile that goes beyond EN 16931, such as the EXTENDED
   profile of Factur-X, is checked against the rules of EN 16931 only. What the
   profile adds is then reported as findings.
