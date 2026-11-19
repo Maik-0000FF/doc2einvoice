@@ -5,6 +5,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 <script lang="ts">
   import { formatLegalNotice } from '#lib/app-info/legal-notice.ts';
   import AboutDialog from '#lib/components/AboutDialog.svelte';
+  import InvoiceCheck from '#lib/components/InvoiceCheck.svelte';
   import { i18n } from '#lib/i18n/i18n.svelte.ts';
   import { fetchAppInfo } from '#lib/ipc/app-info.ts';
 
@@ -25,6 +26,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
   <main class="shell">
     <h1 class="shell__name">{info.name}</h1>
     <p class="shell__version">{info.version}</p>
+    <InvoiceCheck />
     <button
       class="shell__about"
       onclick={() => {
@@ -47,7 +49,6 @@ SPDX-License-Identifier: GPL-3.0-or-later
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
     gap: var(--space-sm);
     min-height: 100vh;
     padding: var(--space-lg);
