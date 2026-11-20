@@ -21,6 +21,8 @@ pub mod app_info;
 pub mod checking;
 pub mod cli;
 pub mod commands;
+// Only the watch over the web view shows a text, and only Linux has one.
+#[cfg(target_os = "linux")]
 mod texts;
 mod web_view;
 

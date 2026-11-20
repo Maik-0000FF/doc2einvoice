@@ -10,7 +10,11 @@
 //! the one place texts are written, and they are part of the program.
 //!
 //! The language is the first of those the operating system reports that the
-//! interface is translated into, as in the interface itself.
+//! interface is translated into, as in the interface itself. The interface
+//! states its languages, its default and this rule a second time, in its own
+//! programming language (`src/lib/i18n/locale.ts`); the two cannot share one
+//! definition. A test holds the languages and the default of both against
+//! each other, and the tables of the rule are kept alike by hand.
 
 use std::collections::HashMap;
 
@@ -89,6 +93,7 @@ fn in_language(language: &Language, text: Text) -> String {
 /// | `fr`                  | the default                                      |
 /// | `dex`                 | the default: a different language                |
 /// | `` (empty), `de`      | German: what names no language is skipped        |
+/// | `not a tag`, `de`     | German                                           |
 /// | `de_DE`               | the default: no language tag, never guessed      |
 fn chosen(preferred: impl IntoIterator<Item = String>) -> &'static Language {
     preferred
@@ -118,6 +123,8 @@ mod tests {
     /// Where the language files lie, seen from the manifest of this crate.
     const LANGUAGE_FILES: &str = "../src/lib/i18n/messages";
     const LANGUAGE_FILE_EXTENSION: &str = "json";
+    /// Where the interface states its languages and its default.
+    const INTERFACE_LANGUAGES: &str = "../src/lib/i18n/locale.ts";
     /// Opens a placeholder in a text of the interface.
     const PLACEHOLDER_START: char = '{';
 
@@ -139,6 +146,7 @@ mod tests {
             (vec!["fr"], ENGLISH),
             (vec!["dex"], ENGLISH),
             (vec!["", "de"], GERMAN),
+            (vec!["not a tag", "de"], GERMAN),
             (vec!["de_DE"], ENGLISH),
         ] {
             assert_eq!(code_for(&preferred), expected, "{preferred:?}");
@@ -180,6 +188,28 @@ mod tests {
         let known: BTreeSet<String> = LANGUAGES.iter().map(|l| l.code.to_owned()).collect();
 
         assert_eq!(known, files);
+        Ok(())
+    }
+
+    #[test]
+    fn languages_and_default_are_those_the_interface_states() -> std::io::Result<()> {
+        let interface = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join(INTERFACE_LANGUAGES),
+        )?;
+        let codes: Vec<String> = LANGUAGES
+            .iter()
+            .map(|language| format!("'{}'", language.code))
+            .collect();
+        let languages = format!("export const LOCALES = [{}] as const;", codes.join(", "));
+        let default = format!(
+            "export const DEFAULT_LOCALE: Locale = '{}';",
+            LANGUAGES[0].code
+        );
+
+        // The statements are looked for as they are written there. A change
+        // of either side fails here until both say the same.
+        assert!(interface.contains(&languages), "{languages}");
+        assert!(interface.contains(&default), "{default}");
         Ok(())
     }
 }

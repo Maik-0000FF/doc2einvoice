@@ -14,10 +14,6 @@ use doc2einvoice_lib::Ending;
 use doc2einvoice_lib::checking::batch::{self, BatchRequest};
 use doc2einvoice_lib::cli::{Invocation, Output, Stream, USAGE_ERROR_STATUS, interpret};
 
-/// What stderr says when the user interface was lost.
-const WEB_VIEW_LOST: &str = "the web view that draws the window ended unexpectedly, \
-    the user interface cannot be shown; a graphics driver that does not work is a common cause";
-
 fn main() -> ExitCode {
     match interpret(std::env::args_os()) {
         Invocation::Start(file) => start(file),
@@ -38,14 +34,12 @@ fn check(request: &BatchRequest) -> ExitCode {
 
 /// Runs the application until its last window closes, with the file the
 /// command line named. A run that could not show its user interface is a
-/// failure, with the reason on stderr.
+/// failure; the reason is on stderr by then.
 fn start(file: Option<PathBuf>) -> ExitCode {
     match doc2einvoice_lib::run(file) {
         Ok(Ending::Closed) => ExitCode::SUCCESS,
-        Ok(Ending::WebViewLost) => {
-            eprintln!("{}: {WEB_VIEW_LOST}", env!("CARGO_PKG_NAME"));
-            ExitCode::FAILURE
-        }
+        // The reason was written to stderr when the loss was noticed.
+        Ok(Ending::WebViewLost) => ExitCode::FAILURE,
         Err(error) => {
             eprintln!("{}: {error}", env!("CARGO_PKG_NAME"));
             ExitCode::FAILURE

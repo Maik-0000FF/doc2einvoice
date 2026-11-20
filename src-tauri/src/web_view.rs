@@ -6,10 +6,16 @@
 //! The web view runs in a process of its own. If that process ends, the
 //! window stays open and shows nothing: without a working graphics driver,
 //! for instance, it ends before it has drawn anything. The application
-//! cannot be used from then on. A dialog of the operating system says so, and
-//! when it is closed the application ends, and the caller learns why. The
-//! dialog is needed because nobody may be reading stderr: a program started
-//! from a menu would otherwise just vanish.
+//! cannot be used from then on. The reason is written to stderr at once, a
+//! dialog of the operating system says so as well, and when the dialog is
+//! closed the application ends. The dialog is needed because nobody may be
+//! reading stderr: a program started from a menu would otherwise just vanish.
+//!
+//! The application waits for the dialog to be closed, however long that
+//! takes. That is a decision: a window that is gone when its user comes back
+//! is what the dialog is there to prevent. A start nobody watches, from a
+//! script, therefore does not end by itself; the line on stderr is what tells
+//! such a caller what happened.
 //!
 //! This holds wherever the process ends, also in the middle of a session. That
 //! is a decision: nothing here can bring the user interface back, and a window
@@ -25,6 +31,11 @@ use tauri::AppHandle;
 
 #[cfg(target_os = "linux")]
 use crate::texts::{self, Text};
+
+/// What stderr says when the web view was lost.
+#[cfg(target_os = "linux")]
+const LOST_ON_STDERR: &str = "the web view that draws the window ended unexpectedly, \
+    the user interface cannot be shown; a graphics driver that does not work is a common cause";
 
 /// Status the event loop is asked to end with when the web view was lost. The
 /// caller decides by [`Watch::web_view_lost`], not by this value.
@@ -43,8 +54,8 @@ impl Watch {
         self.lost.load(Ordering::SeqCst)
     }
 
-    /// Notes the loss, says so in a dialog and ends the application when the
-    /// dialog is closed.
+    /// Notes the loss, writes the reason to stderr, says so in a dialog and
+    /// ends the application when the dialog is closed.
     ///
     /// | The process of the web view                    | Result                 |
     /// |------------------------------------------------|------------------------|
@@ -69,6 +80,9 @@ impl Watch {
         if self.lost.swap(true, Ordering::SeqCst) {
             return;
         }
+        // At once, not when the dialog is closed: whoever reads stderr
+        // learns the reason while the application still waits.
+        eprintln!("{}: {LOST_ON_STDERR}", env!("CARGO_PKG_NAME"));
         let ending = app.clone();
         app.dialog()
             .message(texts::text(Text::WebViewLostText))
