@@ -23,6 +23,8 @@ use crate::search::Searches;
 
 /// Location reported for a finding that concerns no particular node.
 const DOCUMENT_LOCATION: &str = "/";
+/// Why the predicates after a search cannot be reported for an expression.
+const PREDICATE_NOT_IN_SOURCE: &str = "a predicate lies outside the text of the expression";
 /// Separates the items of a `value-of` in the text of an assertion.
 const VALUE_SEPARATOR: &str = " ";
 
@@ -131,7 +133,9 @@ impl Schema {
     /// # Errors
     ///
     /// Returns [`SchemaError::Expression`] if an expression cannot be parsed
-    /// again. That does not happen for a schema that compiled.
+    /// again, or if a predicate cannot be cut out of the expression it stands
+    /// in. Neither happens for a schema that compiled; what is returned is
+    /// therefore complete, or it is an error.
     pub fn search_predicates(&self) -> Result<BTreeSet<String>, SchemaError> {
         let mut found = BTreeSet::new();
         for expression in self.expressions() {
@@ -141,7 +145,12 @@ impl Schema {
                     subject: expression.source.clone(),
                     reason: format!("{error:?}"),
                 })?;
-            Searches::new(&expression.source, &mut found).collect(&parsed);
+            Searches::new(&expression.source, &mut found)
+                .collect(&parsed)
+                .map_err(|_| SchemaError::Expression {
+                    subject: expression.source.clone(),
+                    reason: PREDICATE_NOT_IN_SOURCE.to_owned(),
+                })?;
         }
         Ok(found)
     }

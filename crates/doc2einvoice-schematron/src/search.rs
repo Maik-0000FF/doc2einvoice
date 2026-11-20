@@ -14,6 +14,12 @@
 //! the branches of a condition and the predicates of other predicates. The
 //! matches below name every kind of expression the parser knows, so that a new
 //! kind cannot be skipped without the compiler saying so.
+//!
+//! What counts as a search, and that only a child step after it matters, is
+//! decided a second time in the XPath engine: in `src/descent.rs` of the
+//! patched copy of its compiler under `vendor/`, which merges exactly those
+//! steps. The two have to agree. If the engine comes to recognise a search
+//! differently, this module follows.
 
 use std::collections::BTreeSet;
 
@@ -24,16 +30,44 @@ pub(crate) struct Searches<'a> {
     /// The expression as it was parsed; the predicates are cut out of it.
     source: &'a str,
     found: &'a mut BTreeSet<String>,
+    /// Whether a predicate could not be cut out of the expression.
+    incomplete: bool,
 }
+
+/// A predicate lies where the expression has no text: what was collected is
+/// not everything the expression holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Incomplete;
 
 impl<'a> Searches<'a> {
     pub(crate) fn new(source: &'a str, found: &'a mut BTreeSet<String>) -> Self {
-        Self { source, found }
+        Self {
+            source,
+            found,
+            incomplete: false,
+        }
     }
 
     /// Adds every predicate that stands on a child step after a search.
-    pub(crate) fn collect(&mut self, xpath: &ast::XPath) {
+    ///
+    /// | Predicate after a search                          | Result            |
+    /// |---------------------------------------------------|-------------------|
+    /// | its place lies within the expression              | added as written  |
+    /// | its place lies outside the expression, or cuts a  | [`Incomplete`]:   |
+    /// | character in two                                  | never left out    |
+    /// |                                                   | silently          |
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Incomplete`] as the table states. The predicates that could
+    /// be cut out have been added all the same.
+    pub(crate) fn collect(&mut self, xpath: &ast::XPath) -> Result<(), Incomplete> {
         self.expr(&xpath.0.value);
+        if self.incomplete {
+            Err(Incomplete)
+        } else {
+            Ok(())
+        }
     }
 
     fn expr(&mut self, expression: &ast::Expr) {
@@ -112,9 +146,12 @@ impl<'a> Searches<'a> {
         }
         for predicate in &step.predicates {
             let span = predicate.span;
-            if let Some(text) = self.source.get(span.start..span.end) {
-                let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
-                self.found.insert(text);
+            match self.source.get(span.start..span.end) {
+                Some(text) => {
+                    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+                    self.found.insert(text);
+                }
+                None => self.incomplete = true,
             }
         }
     }
@@ -183,7 +220,9 @@ impl<'a> Searches<'a> {
     }
 }
 
-/// Whether a step is the search through all descendants `//` stands for.
+/// Whether a step is the search through all descendants `//` stands for. The
+/// XPath engine asks the same of a step before it merges it (see the module
+/// documentation).
 fn is_search(step: &ast::StepExpr) -> bool {
     match step {
         ast::StepExpr::AxisStep(step) => {
@@ -192,5 +231,49 @@ fn is_search(step: &ast::StepExpr) -> bool {
                 && step.predicates.is_empty()
         }
         ast::StepExpr::PrimaryExpr(_) | ast::StepExpr::PostfixExpr { .. } => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Incomplete, Searches};
+    use std::collections::BTreeSet;
+    use xee_xpath_ast::{Namespaces, VariableNames, ast};
+
+    const EXPRESSION: &str = "//a[b]";
+
+    fn parsed() -> Result<ast::XPath, String> {
+        ast::XPath::parse(
+            EXPRESSION,
+            &Namespaces::default(),
+            &VariableNames::default(),
+        )
+        .map_err(|error| format!("{error:?}"))
+    }
+
+    #[test]
+    fn a_predicate_within_the_expression_is_collected() -> Result<(), String> {
+        let mut found = BTreeSet::new();
+
+        assert_eq!(
+            Searches::new(EXPRESSION, &mut found).collect(&parsed()?),
+            Ok(())
+        );
+        assert_eq!(found.into_iter().collect::<Vec<_>>(), ["b"]);
+        Ok(())
+    }
+
+    #[test]
+    fn a_predicate_outside_the_expression_is_an_error() -> Result<(), String> {
+        // The tree is that of the whole expression, the text ends before the
+        // predicate: there is nothing to cut it out of.
+        let shorter = "//a";
+        let mut found = BTreeSet::new();
+
+        assert_eq!(
+            Searches::new(shorter, &mut found).collect(&parsed()?),
+            Err(Incomplete)
+        );
+        Ok(())
     }
 }

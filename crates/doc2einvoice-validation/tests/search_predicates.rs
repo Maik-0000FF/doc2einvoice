@@ -22,10 +22,18 @@
 //! are no concern: they have a focus of their own.
 //!
 //! The test fails when a rule file is updated and brings a predicate that is
-//! not listed, and when a listed predicate is no longer used. In the first
-//! case the predicate is read and, if it meets the conditions, added. If it
-//! does not meet them, it must be one the engine leaves as written; the tests
-//! of the search in the interpreter show how to find that out.
+//! on neither list below, and when a listed predicate is no longer used. A
+//! new predicate is read and then put on one of the two lists:
+//!
+//! - [`REVIEWED`] if it meets the conditions above.
+//! - [`DEPENDS_ON_POSITION`] if it does not. Such a search must be left as
+//!   it is written, and the engine has to be shown to do so: before the
+//!   predicate is listed, a search with a predicate of the same shape is added
+//!   to the tests of the search in the interpreter, where a search and its
+//!   written out form must select the same nodes.
+//!
+//! A predicate never goes on `REVIEWED` to make the test pass. That list is a
+//! statement about every entry on it.
 //!
 //! The predicates come from the parsed expressions, with white space
 //! collapsed, so the list does not depend on how a rule file is laid out.
@@ -115,6 +123,11 @@ const REVIEWED: [&str; 69] = [
     r"some $code in tokenize('49 59', '\s') satisfies normalize-space(ram:TypeCode) = $code",
 ];
 
+/// Every predicate that was read and found to depend on a position, with the
+/// test of the interpreter that shows the engine leaves its search as
+/// written. The rule files use none so far.
+const DEPENDS_ON_POSITION: [&str; 0] = [];
+
 /// The predicates every embedded rule file uses after a search.
 fn used() -> Result<BTreeSet<String>, Box<dyn std::error::Error>> {
     let mut used = BTreeSet::new();
@@ -126,7 +139,7 @@ fn used() -> Result<BTreeSet<String>, Box<dyn std::error::Error>> {
 
 #[test]
 fn every_predicate_after_a_search_was_reviewed() -> TestResult {
-    let reviewed: BTreeSet<&str> = REVIEWED.into_iter().collect();
+    let reviewed: BTreeSet<&str> = REVIEWED.into_iter().chain(DEPENDS_ON_POSITION).collect();
     let used = used()?;
     let not_reviewed: Vec<&str> = used
         .iter()
@@ -136,16 +149,17 @@ fn every_predicate_after_a_search_was_reviewed() -> TestResult {
 
     assert!(
         not_reviewed.is_empty(),
-        "predicates after a search that are not on the list: {not_reviewed:#?}"
+        "predicates after a search that are on neither list: {not_reviewed:#?}"
     );
     Ok(())
 }
 
 #[test]
-fn the_list_names_only_predicates_that_are_used() -> TestResult {
+fn the_lists_name_only_predicates_that_are_used() -> TestResult {
     let used = used()?;
     let not_used: Vec<&str> = REVIEWED
         .into_iter()
+        .chain(DEPENDS_ON_POSITION)
         .filter(|predicate| !used.contains(*predicate))
         .collect();
 
@@ -157,8 +171,8 @@ fn the_list_names_only_predicates_that_are_used() -> TestResult {
 }
 
 #[test]
-fn the_list_names_no_predicate_twice() {
-    let distinct: BTreeSet<&str> = REVIEWED.into_iter().collect();
+fn no_predicate_is_listed_twice() {
+    let distinct: BTreeSet<&str> = REVIEWED.into_iter().chain(DEPENDS_ON_POSITION).collect();
 
-    assert_eq!(distinct.len(), REVIEWED.len());
+    assert_eq!(distinct.len(), REVIEWED.len() + DEPENDS_ON_POSITION.len());
 }
