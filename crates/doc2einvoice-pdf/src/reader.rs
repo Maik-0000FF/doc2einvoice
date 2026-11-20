@@ -193,8 +193,20 @@ struct Collector {
     /// Whether a character was drawn after none could be kept any more.
     over_limit: bool,
     unreadable: usize,
-    /// The origins of the run before this one, if it was filled; else empty.
-    filled: Vec<Point>,
+    /// The run before this one, if it was filled; else empty.
+    filled: Vec<Drawn>,
+}
+
+/// What tells one drawn character from another: where the file puts it and
+/// which text it stands for, if the file says so.
+type Drawn = (Point, Option<String>);
+
+/// The text the file gives for a drawn character.
+fn text_of(drawn: &DrawnGlyph<'_>) -> Option<String> {
+    drawn.as_unicode().map(|unicode| match unicode {
+        BfString::Char(character) => character.to_string(),
+        BfString::String(text) => text,
+    })
 }
 
 /// A drawn character whose advance is not settled yet.
@@ -237,11 +249,13 @@ impl Collector {
     /// | place or size is not a finite number          | `None`                    |
     /// | its size is zero, or it has no extent along   | `None`: it has no         |
     /// | the baseline                                  | direction                 |
-    fn place(&self, drawn: &DrawnGlyph<'_>, placement: Affine) -> Option<Placed> {
-        let text = match drawn.as_unicode()? {
-            BfString::Char(character) => character.to_string(),
-            BfString::String(text) => text,
-        };
+    fn place(
+        &self,
+        drawn: &DrawnGlyph<'_>,
+        text: Option<String>,
+        placement: Affine,
+    ) -> Option<Placed> {
+        let text = text?;
         if text.is_empty() || text.chars().nth(MAX_GLYPH_TEXT_CHARS).is_some() {
             return None;
         }
@@ -340,33 +354,43 @@ impl Device<'_> for Collector {
     /// | filled                                            | read                  |
     /// | a contour only                                    | read                  |
     /// | invisible, as the text layer of a scan            | read                  |
-    /// | a contour directly after the same run, filled     | not read again, and   |
-    /// |                                                   | not counted           |
+    /// | a contour directly after the same run, filled:    | not read again, and   |
+    /// | every character at the same place with the same   | not counted           |
+    /// | text                                              |                       |
+    /// | a contour at the places of the filled run before  | read: it is another   |
+    /// | it, but with another text, as two amounts printed | text                  |
+    /// | over each other                                   |                       |
     /// | a contour after another filled run                | read                  |
     /// | the same text filled twice, as two instructions   | read twice: the       |
     /// | of the file                                       | layout sorts out      |
     /// |                                                   | copies by their place |
     fn draw_glyph_run(&mut self, run: &GlyphRun<'_, '_>, props: DrawProps<'_>, mode: &DrawMode) {
-        let origins: Vec<Point> = run
+        let drawn: Vec<Drawn> = run
             .glyphs()
             .iter()
-            .map(|drawn| props.transform * drawn.transform() * Point::ZERO)
+            .map(|glyph| {
+                let origin = props.transform * glyph.transform() * Point::ZERO;
+                (origin, text_of(glyph))
+            })
             .collect();
-        let repeats_fill = matches!(mode, DrawMode::Stroke(_)) && origins == self.filled;
-        self.filled = if matches!(mode, DrawMode::Fill(_)) {
-            origins
-        } else {
-            Vec::new()
-        };
-        if repeats_fill {
+        if matches!(mode, DrawMode::Stroke(_)) && drawn == self.filled {
+            self.filled.clear();
             return;
         }
 
         let placed: Vec<Option<Placed>> = run
             .glyphs()
             .iter()
-            .map(|drawn| self.place(drawn, props.transform * drawn.transform()))
+            .zip(&drawn)
+            .map(|(glyph, (_, text))| {
+                self.place(glyph, text.clone(), props.transform * glyph.transform())
+            })
             .collect();
+        self.filled = if matches!(mode, DrawMode::Fill(_)) {
+            drawn
+        } else {
+            Vec::new()
+        };
         let scale = horizontal_scale(&placed);
         for character in placed {
             let Some(character) = character else {

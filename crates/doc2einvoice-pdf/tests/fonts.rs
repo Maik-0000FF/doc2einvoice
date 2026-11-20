@@ -15,6 +15,7 @@
 //! | doubled letters and digits in heavily condensed text | every character is read           |
 //! | text that is filled and outlined, to look bold       | every character once              |
 //! | text that is outlined only                           | read                              |
+//! | an amount filled and another outlined over it        | both are read                     |
 //! | a character the file maps to a very long text        | not kept, counted as unreadable   |
 //! | a character the file maps to a ligature              | kept with its letters             |
 
@@ -160,6 +161,23 @@ fn outlined_text_is_read() -> Result<(), PdfError> {
     let content = format!("BT /F1 {FONT_SIZE} Tf 1 Tr {X} {Y} Td (Total) Tj ET");
 
     assert_eq!(texts(&words_of(&pdf(&content))?), ["Total"]);
+    Ok(())
+}
+
+#[test]
+fn another_text_outlined_over_a_filled_one_is_read() -> Result<(), PdfError> {
+    const FILLED: &str = "100,00";
+    const OUTLINED: &str = "999,99";
+    // The digits of a font are equally wide, so both amounts put their
+    // characters at the same places.
+    let content = format!(
+        "BT /F1 {FONT_SIZE} Tf {X} {Y} Td ({FILLED}) Tj ET\n\
+         BT /F1 {FONT_SIZE} Tf 1 Tr {X} {Y} Td ({OUTLINED}) Tj ET"
+    );
+    let pages = read(&pdf(&content))?;
+    let read_text: String = pages[0].glyphs.iter().map(|g| g.text.as_str()).collect();
+
+    assert_eq!(read_text, format!("{FILLED}{OUTLINED}"));
     Ok(())
 }
 
