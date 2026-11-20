@@ -37,8 +37,14 @@ pub enum Ending {
 ///
 /// # Errors
 ///
-/// Returns the Tauri error if the validation thread cannot be started, the
-/// application cannot be set up or its event loop fails.
+/// Returns the Tauri error if the validation thread cannot be started or the
+/// application cannot be built.
+///
+/// # Panics
+///
+/// Panics if the watch over the web view cannot be started. That happens
+/// inside the event loop, where the framework turns a failed setup into a
+/// panic instead of returning it.
 pub fn run() -> tauri::Result<Ending> {
     let watch = web_view::Watch::default();
     let watch_at_setup = watch.clone();
