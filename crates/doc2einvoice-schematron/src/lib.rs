@@ -59,6 +59,7 @@ mod include;
 mod location;
 mod report;
 mod schema;
+mod search;
 
 pub use engine::Schema;
 pub use error::{DocumentError, SchemaError};

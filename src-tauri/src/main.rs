@@ -7,14 +7,16 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::io::Write;
+use std::path::PathBuf;
 use std::process::ExitCode;
 
+use doc2einvoice_lib::Ending;
 use doc2einvoice_lib::checking::batch::{self, BatchRequest};
 use doc2einvoice_lib::cli::{Invocation, Output, Stream, USAGE_ERROR_STATUS, interpret};
 
 fn main() -> ExitCode {
     match interpret(std::env::args_os()) {
-        Invocation::Start => start(),
+        Invocation::Start(file) => start(file),
         Invocation::Print(output) => print(&output),
         Invocation::Check(request) => check(&request),
     }
@@ -30,10 +32,14 @@ fn check(request: &BatchRequest) -> ExitCode {
     }
 }
 
-/// Runs the application until its last window closes.
-fn start() -> ExitCode {
-    match doc2einvoice_lib::run() {
-        Ok(()) => ExitCode::SUCCESS,
+/// Runs the application until its last window closes, with the file the
+/// command line named. A run that could not show its user interface is a
+/// failure; the reason is on stderr by then.
+fn start(file: Option<PathBuf>) -> ExitCode {
+    match doc2einvoice_lib::run(file) {
+        Ok(Ending::Closed) => ExitCode::SUCCESS,
+        // The reason was written to stderr when the loss was noticed.
+        Ok(Ending::WebViewLost) => ExitCode::FAILURE,
         Err(error) => {
             eprintln!("{}: {error}", env!("CARGO_PKG_NAME"));
             ExitCode::FAILURE

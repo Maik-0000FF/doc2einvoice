@@ -59,5 +59,7 @@
   "refusal.tooDeeplyNested": "The file is nested deeper than {limit} levels and is not read. No invoice is nested that deeply.",
   "refusal.unsupportedDocument": "The file is XML, but not an invoice in UBL or CII. Its document element is \"{element}\".",
   "refusal.nothingToCheck": "There is no invoice to check again.",
-  "refusal.internal": "The check failed for a reason that lies in the program, not in the file."
+  "refusal.internal": "The check failed for a reason that lies in the program, not in the file.",
+  "fault.webViewLost.title": "The window cannot be shown",
+  "fault.webViewLost.text": "The part of the program that draws the window ended unexpectedly. The program closes now.\n\nA graphics driver that does not work is a common cause."
 }

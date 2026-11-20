@@ -17,19 +17,30 @@ publish = false
 # The argument parser, without colours, suggestions and procedural macros: the
 # command line is small and its output goes to terminals and pipes alike.
 clap = { version = "4.6", default-features = false, features = ["std", "help", "usage", "error-context"] }
+doc2einvoice-pdf = { path = "crates/doc2einvoice-pdf" }
 doc2einvoice-schematron = { path = "crates/doc2einvoice-schematron" }
 doc2einvoice-validation = { path = "crates/doc2einvoice-validation" }
+# The PDF interpreter, pinned exactly: it is young, and where it places a
+# character decides what the reader finds on a page. A new version is taken
+# only together with a new run of the reading tests.
+hayro-interpret = "=0.9.0"
 # The XML Schema processor, pinned exactly like the XPath engine below.
 oxixml-schema = "=0.1.2"
 roxmltree = "0.20"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.11"
+# Tells which languages the operating system prefers, for the texts the core
+# shows without the user interface.
+sys-locale = "0.3"
 thiserror = "2"
 # The XPath engine is pinned exactly: two of its crates are replaced by the
 # patched copies under vendor/ (see vendor/PATCHES.md), and those copies belong
 # to precisely these versions.
 xee-xpath = "=0.1.5"
+# The parser of the XPath engine, at the version the engine itself uses: its
+# syntax tree is read to see what the rule files search for.
+xee-xpath-ast = "=0.1.4"
 xot = "0.31"
 # Cuts XML into its parts without building a tree; used to measure how deep a
 # document is nested before anything else reads it.

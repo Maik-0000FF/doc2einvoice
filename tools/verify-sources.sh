@@ -3,10 +3,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Proves that the files of other publishers in this repository are the files
-# those publishers released: downloads every archive pinned in
-# tests/conformance/sources.env, checks its checksum and compares the rule
-# files, the XML Schema files, the test documents and the font files with it,
-# byte for byte.
+# those publishers released: downloads every archive pinned in sources.env,
+# checks its checksum and compares the rule files, the XML Schema files, the
+# test documents and the font files with it, byte for byte.
 #
 # The checksums stated in the code are computed from the files of this
 # repository. This script is what ties those files to their publishers.
@@ -22,8 +21,8 @@ set -euo pipefail
 
 # shellcheck source=tools/common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
-# shellcheck source=tests/conformance/sources.env
-source "$repository/tests/conformance/sources.env"
+# shellcheck source=sources.env
+source "$repository/sources.env"
 
 readonly corpus="tests/conformance/corpus"
 readonly fonts="src/lib/assets/fonts"

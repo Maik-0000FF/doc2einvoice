@@ -1,0 +1,67 @@
+# SPDX-FileCopyrightText: Maik-0000FF
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# What every job needs before it compiles the Rust code: the libraries the
+# WebView links against, where the platform does not bring them, and the build
+# cache. The repository has to be checked out before this action is called.
+#
+# The inputs are the values of this action, named once; a caller does not set
+# them.
+
+name: Prepare a Rust build
+description: Installs the libraries the WebView links against and restores the build cache.
+
+inputs:
+  linux-packages:
+    description: Libraries the WebView links against on Linux.
+    default: >-
+      libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev
+      libayatana-appindicator3-dev librsvg2-dev
+  package-archives:
+    description: >-
+      Where the downloaded packages of those libraries are kept between runs,
+      below the home directory of the runner.
+    default: apt-archives
+
+runs:
+  using: composite
+  steps:
+    # The packages are downloaded once and installed from the cache
+    # afterwards. The package manager still decides what is installed and
+    # fetches whatever the cache lacks.
+    - if: runner.os == 'Linux'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/${{ inputs.package-archives }}
+        key: apt-${{ runner.os }}-${{ hashFiles('.github/actions/prepare-rust-build/action.yml') }}
+        restore-keys: apt-${{ runner.os }}-
+    - name: Install the WebView libraries
+      if: runner.os == 'Linux'
+      shell: bash
+      env:
+        PACKAGES: ${{ inputs.linux-packages }}
+        ARCHIVES: ${{ inputs.package-archives }}
+      run: |
+        read -ra packages <<<"$PACKAGES"
+        archives="$HOME/$ARCHIVES"
+        mkdir -p "$archives/partial"
+        sudo apt-get update
+        sudo apt-get install --yes --no-install-recommends \
+          -o "Dir::Cache::Archives=$archives/" "${packages[@]}"
+        sudo chown -R "$(id -u):$(id -g)" "$archives"
+    # A cache is found by its exact key or, failing that, by the newest one of
+    # the same job: after a change of the dependencies only what changed is
+    # compiled. Jobs compile differently, lints unlike tests, and keep their
+    # own.
+    # A known limit: what an older set of dependencies left in the cache is
+    # never removed, so the cache grows with every such change until the
+    # platform evicts the oldest ones. Nothing stale is ever linked, only
+    # carried along.
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: cargo-${{ runner.os }}-${{ github.job }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+        restore-keys: cargo-${{ runner.os }}-${{ github.job }}-

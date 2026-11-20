@@ -4,6 +4,8 @@ use xee_schema_type::Xs;
 use xee_xpath_ast::{ast, ast::Span, span::Spanned, FN_NAMESPACE};
 use xot::xmlname::NameStrInfo;
 
+use crate::descent::Descent;
+
 #[derive(Debug)]
 pub struct IrConverter<'a> {
     variables: &'a mut Variables,
@@ -91,8 +93,11 @@ impl<'a> IrConverter<'a> {
     }
 
     fn path_expr(&mut self, ast: &ast::PathExpr) -> error::SpannedResult<Bindings> {
-        let first_step = &ast.steps[0];
-        let rest_steps = &ast.steps[1..];
+        // A search through all descendants is evaluated as one descent where
+        // that selects the same nodes.
+        let steps = Descent::new().merged(&ast.steps);
+        let first_step = &steps[0];
+        let rest_steps = &steps[1..];
         let first_step_bindings = Ok(self.step_expr(first_step)?);
         rest_steps
             .iter()
