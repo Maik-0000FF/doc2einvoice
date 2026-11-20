@@ -53,11 +53,13 @@
 //!
 //! A search for attributes is checked by its count: `count(//@k)` is 5.
 //!
-//! A predicate can also reach the position without naming it, through
-//! `function-lookup`. Whatever such a predicate yields here, the search and its
-//! written out form must yield the same.
+//! A predicate could also reach the position without naming it, through
+//! `function-lookup`. The engine cannot call a function it looked up that way:
+//! the call fails, in a search and in its written out form alike. The test
+//! pins that failure. It fails as soon as an engine can make the call, and
+//! then the two forms have to be compared by what they select.
 
-use doc2einvoice_schematron::{NoIncludes, Schema};
+use doc2einvoice_schematron::{Finding, NoIncludes, Outcome, Schema};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
@@ -152,17 +154,23 @@ fn a_wrong_selection_is_noticed() -> TestResult {
 }
 
 #[test]
-fn a_position_asked_for_indirectly_is_the_same_in_both_forms() -> TestResult {
+fn a_position_asked_for_indirectly_cannot_be_evaluated() -> TestResult {
     const PREDICATE: &str = "b[apply(function-lookup(xs:QName('fn:position'), 0), $none) = 2]";
-    let findings = |search: &str| -> Result<_, Box<dyn std::error::Error>> {
-        let test = selects(&format!("{search}{PREDICATE}"), "b2 b5");
-        Ok(Schema::compile(&rules(&test), &NoIncludes)?
-            .validate(DOCUMENT)?
-            .findings()
-            .to_vec())
-    };
+    /// The error the engine raises when the looked up function is called.
+    const CALL_FAILS: &str = "FORG0001";
 
-    assert_eq!(findings(SEARCH)?, findings(SEARCH_WRITTEN_OUT)?);
+    for search in [SEARCH, SEARCH_WRITTEN_OUT] {
+        let test = selects(&format!("{search}{PREDICATE}"), "b2 b5");
+        let report = Schema::compile(&rules(&test), &NoIncludes)?.validate(DOCUMENT)?;
+
+        assert!(
+            matches!(
+                report.findings(),
+                [Finding { outcome: Outcome::EvaluationError { error }, .. }] if error == CALL_FAILS
+            ),
+            "{search}"
+        );
+    }
     Ok(())
 }
 
