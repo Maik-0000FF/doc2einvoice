@@ -18,6 +18,9 @@
 //! | a letter that is doubled in the word                | both letters        |
 //! | a letter and an accent at the same place            | both                |
 //! | the same letter three times at nearly one place     | once, two counted   |
+//! | a doubled letter in text so condensed that a letter | both letters        |
+//! | is narrower than a tenth of the font size           |                     |
+//! | a copy in such text, moved by a fifth of the letter | once, one counted   |
 
 use doc2einvoice_pdf::{Glyph, PageLayout};
 
@@ -119,6 +122,31 @@ fn three_copies_are_read_once() {
 
     assert_eq!(block_texts(&glyphs), ["A"]);
     assert_eq!(PageLayout::of_glyphs(&glyphs).copied_glyphs, 2);
+}
+
+/// A letter in heavily condensed text: narrower than a tenth of the font size.
+const CONDENSED_WIDTH: f64 = FONT_SIZE * 0.09;
+
+#[test]
+fn a_doubled_letter_in_condensed_text_is_not_a_copy() {
+    let glyphs = [
+        glyph("l", 0.0, CONDENSED_WIDTH),
+        glyph("l", CONDENSED_WIDTH, CONDENSED_WIDTH),
+    ];
+
+    assert_eq!(block_texts(&glyphs), ["ll"]);
+    assert_eq!(PageLayout::of_glyphs(&glyphs).copied_glyphs, 0);
+}
+
+#[test]
+fn a_copy_in_condensed_text_is_read_once() {
+    let glyphs = [
+        glyph("l", 0.0, CONDENSED_WIDTH),
+        glyph("l", CONDENSED_WIDTH / 5.0, CONDENSED_WIDTH),
+    ];
+
+    assert_eq!(block_texts(&glyphs), ["l"]);
+    assert_eq!(PageLayout::of_glyphs(&glyphs).copied_glyphs, 1);
 }
 
 #[test]

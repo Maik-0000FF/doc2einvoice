@@ -12,6 +12,9 @@
 //! | text condensed to half its width                     | the stated font size; the words   |
 //! |                                                      | half as wide; words kept apart    |
 //! | a word whose letters are spaced out                  | one word                          |
+//! | doubled letters and digits in heavily condensed text | every character is read           |
+//! | text that is filled and outlined, to look bold       | every character once              |
+//! | text that is outlined only                           | read                              |
 //! | a character the file maps to a very long text        | not kept, counted as unreadable   |
 //! | a character the file maps to a ligature              | kept with its letters             |
 
@@ -126,6 +129,37 @@ fn spaced_out_letters_are_one_word() -> Result<(), PdfError> {
     let content = format!("BT /F1 {FONT_SIZE} Tf 3 Tc {X} {Y} Td (TOTAL) Tj ET");
 
     assert_eq!(texts(&words_of(&pdf(&content))?), ["TOTAL"]);
+    Ok(())
+}
+
+#[test]
+fn condensed_text_keeps_its_doubled_letters() -> Result<(), PdfError> {
+    let content = format!("BT /F1 {FONT_SIZE} Tf 40 Tz {X} {Y} Td (bill ill 11) Tj ET");
+    let data = pdf(&content);
+
+    assert_eq!(texts(&words_of(&data)?), ["bill", "ill", "11"]);
+    assert_eq!(PageLayout::of(&read(&data)?[0]).copied_glyphs, 0);
+    Ok(())
+}
+
+#[test]
+fn filled_and_outlined_text_is_read_once() -> Result<(), PdfError> {
+    const WORD: &str = "Total";
+    // Mode 2 fills the letters and draws their contours.
+    let content = format!("BT /F1 {FONT_SIZE} Tf 2 Tr {X} {Y} Td ({WORD}) Tj ET");
+    let pages = read(&pdf(&content))?;
+
+    assert_eq!(pages[0].glyphs.len(), WORD.len());
+    assert_eq!(PageLayout::of(&pages[0]).copied_glyphs, 0);
+    Ok(())
+}
+
+#[test]
+fn outlined_text_is_read() -> Result<(), PdfError> {
+    // Mode 1 draws the contours only.
+    let content = format!("BT /F1 {FONT_SIZE} Tf 1 Tr {X} {Y} Td (Total) Tj ET");
+
+    assert_eq!(texts(&words_of(&pdf(&content))?), ["Total"]);
     Ok(())
 }
 

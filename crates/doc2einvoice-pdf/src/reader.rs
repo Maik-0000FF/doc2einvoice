@@ -157,6 +157,7 @@ fn read_pages(data: &[u8], limits: Limits) -> Result<Vec<Page>, PdfError> {
             glyphs_left,
             over_limit: false,
             unreadable: 0,
+            filled: Vec::new(),
         };
         let mut context = Context::new(
             Affine::IDENTITY,
@@ -192,6 +193,8 @@ struct Collector {
     /// Whether a character was drawn after none could be kept any more.
     over_limit: bool,
     unreadable: usize,
+    /// The origins of the run before this one, if it was filled; else empty.
+    filled: Vec<Point>,
 }
 
 /// A drawn character whose advance is not settled yet.
@@ -326,7 +329,39 @@ fn horizontal_scale(run: &[Option<Placed>]) -> f64 {
 }
 
 impl Device<'_> for Collector {
-    fn draw_glyph_run(&mut self, run: &GlyphRun<'_, '_>, props: DrawProps<'_>, _: &DrawMode) {
+    /// Takes up a run of characters.
+    ///
+    /// Text that is filled and outlined, a common way to print bold, is
+    /// reported twice by the interpreter: once filled and once as a contour,
+    /// the very same characters at the very same places. It is one text.
+    ///
+    /// | Run                                               | Result                |
+    /// |---------------------------------------------------|-----------------------|
+    /// | filled                                            | read                  |
+    /// | a contour only                                    | read                  |
+    /// | invisible, as the text layer of a scan            | read                  |
+    /// | a contour directly after the same run, filled     | not read again, and   |
+    /// |                                                   | not counted           |
+    /// | a contour after another filled run                | read                  |
+    /// | the same text filled twice, as two instructions   | read twice: the       |
+    /// | of the file                                       | layout sorts out      |
+    /// |                                                   | copies by their place |
+    fn draw_glyph_run(&mut self, run: &GlyphRun<'_, '_>, props: DrawProps<'_>, mode: &DrawMode) {
+        let origins: Vec<Point> = run
+            .glyphs()
+            .iter()
+            .map(|drawn| props.transform * drawn.transform() * Point::ZERO)
+            .collect();
+        let repeats_fill = matches!(mode, DrawMode::Stroke(_)) && origins == self.filled;
+        self.filled = if matches!(mode, DrawMode::Fill(_)) {
+            origins
+        } else {
+            Vec::new()
+        };
+        if repeats_fill {
+            return;
+        }
+
         let placed: Vec<Option<Placed>> = run
             .glyphs()
             .iter()

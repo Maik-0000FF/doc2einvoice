@@ -42,12 +42,18 @@ const ASSUMED_ADVANCE_EM: f64 = 0.5;
 /// radians, about one degree) counts as horizontal.
 const HORIZONTAL_TOLERANCE: f64 = 0.02;
 
-/// Two characters with the same text whose origins are at most this far
-/// apart are one character drawn twice. Bold print and shadows are often made
-/// that way, with the copy moved by a few hundredths of the font size. Even
-/// the narrowest letters are about a fifth of the font size wide, so a letter
-/// that is truly doubled, as in "ll", stays far above the threshold.
+/// Two characters with the same text are one character drawn twice if their
+/// origins are at most this far apart, as a share of the font size, and at
+/// most [`COPY_ADVANCE_SHARE`] of the width of the character. Bold print and
+/// shadows are often made that way, with the copy moved by a few hundredths
+/// of the font size.
 const COPY_DISTANCE_EM: f64 = 0.1;
+
+/// The share of its own width a copy may be moved by at most. A letter that
+/// is truly doubled, as in "ll", follows a whole width later, however narrow
+/// the letter and however condensed the text. The bound by the font size
+/// alone would take such letters for copies in condensed text.
+const COPY_ADVANCE_SHARE: f64 = 1.0 / 3.0;
 
 const WORD_SEPARATOR: char = ' ';
 const LINE_SEPARATOR: char = '\n';
@@ -203,6 +209,15 @@ fn rows(mut glyphs: Vec<&Glyph>) -> Vec<Vec<&Glyph>> {
     rows
 }
 
+/// How wide a character is: the advance its font states, or the assumed one.
+fn width_of(glyph: &Glyph) -> f64 {
+    if glyph.advance > 0.0 {
+        glyph.advance
+    } else {
+        ASSUMED_ADVANCE_EM * glyph.font_size
+    }
+}
+
 /// Leaves out the characters of a row that repeat one already there, and
 /// counts them. The row comes ordered from left to right.
 ///
@@ -211,21 +226,26 @@ fn rows(mut glyphs: Vec<&Glyph>) -> Vec<Vec<&Glyph>> {
 /// | the same text, origins nearly on each other        | one                  |
 /// | the same text three times, nearly on each other    | one                  |
 /// | the same text a letter width apart, as in "ll"     | both                 |
+/// | the same, in text condensed so far that a letter   | both: the width of   |
+/// | is narrower than a tenth of the font size          | the letter decides   |
+/// | a copy in such condensed text, moved by less than  | one                  |
+/// | a third of the letter                              |                      |
 /// | different texts at the same place, as a letter     | both                 |
 /// | and its accent                                     |                      |
-/// | the same text, a copy moved further than the       | both: a shadow set   |
-/// | threshold                                          | far off is read as   |
+/// | the same text, a copy moved further than either    | both: a shadow set   |
+/// | bound                                              | far off is read as   |
 /// |                                                    | text of its own      |
 fn without_copies(row: Vec<&Glyph>) -> (Vec<&Glyph>, usize) {
     let mut kept: Vec<&Glyph> = Vec::with_capacity(row.len());
     let mut copies = 0;
     for glyph in row {
-        let reach = COPY_DISTANCE_EM * glyph.font_size;
+        let by_size = COPY_DISTANCE_EM * glyph.font_size;
+        let reach = by_size.min(COPY_ADVANCE_SHARE * width_of(glyph));
         let is_copy = kept
             .iter()
             .rev()
             .take_while(|earlier| glyph.x - earlier.x <= reach)
-            .any(|earlier| earlier.text == glyph.text && (glyph.y - earlier.y).abs() <= reach);
+            .any(|earlier| earlier.text == glyph.text && (glyph.y - earlier.y).abs() <= by_size);
         if is_copy {
             copies += 1;
         } else {
@@ -285,11 +305,6 @@ fn lines(glyphs: Vec<&Glyph>) -> (Vec<Line>, usize) {
             if gap.is_some_and(|gap| gap > WORD_GAP_EM * glyph.font_size) {
                 line.close_word();
             }
-            let advance = if glyph.advance > 0.0 {
-                glyph.advance
-            } else {
-                ASSUMED_ADVANCE_EM * glyph.font_size
-            };
             let word = line.word.get_or_insert_with(|| Word {
                 text: String::new(),
                 left: glyph.x,
@@ -298,7 +313,7 @@ fn lines(glyphs: Vec<&Glyph>) -> (Vec<Line>, usize) {
                 font_size: glyph.font_size,
             });
             word.text.push_str(&visible);
-            word.right = word.right.max(glyph.x + advance);
+            word.right = word.right.max(glyph.x + width_of(glyph));
             word.font_size = word.font_size.max(glyph.font_size);
             line.right = line.right.max(word.right);
         }
