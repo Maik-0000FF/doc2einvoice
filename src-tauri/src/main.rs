@@ -9,8 +9,13 @@
 use std::io::Write;
 use std::process::ExitCode;
 
+use doc2einvoice_lib::Ending;
 use doc2einvoice_lib::checking::batch::{self, BatchRequest};
 use doc2einvoice_lib::cli::{Invocation, Output, Stream, USAGE_ERROR_STATUS, interpret};
+
+/// What stderr says when the user interface was lost.
+const WEB_VIEW_LOST: &str = "the web view that draws the window ended unexpectedly, \
+    the user interface cannot be shown; a graphics driver that does not work is a common cause";
 
 fn main() -> ExitCode {
     match interpret(std::env::args_os()) {
@@ -30,10 +35,15 @@ fn check(request: &BatchRequest) -> ExitCode {
     }
 }
 
-/// Runs the application until its last window closes.
+/// Runs the application until its last window closes. A run that could not
+/// show its user interface is a failure, with the reason on stderr.
 fn start() -> ExitCode {
     match doc2einvoice_lib::run() {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(Ending::Closed) => ExitCode::SUCCESS,
+        Ok(Ending::WebViewLost) => {
+            eprintln!("{}: {WEB_VIEW_LOST}", env!("CARGO_PKG_NAME"));
+            ExitCode::FAILURE
+        }
         Err(error) => {
             eprintln!("{}: {error}", env!("CARGO_PKG_NAME"));
             ExitCode::FAILURE
