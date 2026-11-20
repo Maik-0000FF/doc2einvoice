@@ -12,6 +12,8 @@ invoices is not possible yet.
 - [Checking an invoice in the window](#checking-an-invoice-in-the-window)
 - [Checking invoices on the command line](#checking-invoices-on-the-command-line)
 - [Version and help](#version-and-help)
+- [Starting with a file](#starting-with-a-file)
+- [If the window cannot be shown](#if-the-window-cannot-be-shown)
 - [What a result means](#what-a-result-means)
 - [Limits](#limits)
 
@@ -131,6 +133,19 @@ starts with a hyphen or is `check` follows `--`:
 ```sh
 doc2einvoice -- check
 ```
+
+## If the window cannot be shown
+
+The window is drawn by a part of the program that runs on its own. If that part
+ends, most often because the graphics driver of the system does not work, the
+window stays empty and the program cannot be used. It then says so in a dialog
+of the operating system and ends when the dialog is closed, with status `1`.
+
+The reason is also written to the error output at once. The program itself
+waits for the dialog, however long that takes, so a script that starts it reads
+the reason there and does not wait for the program to end.
+
+This is noticed on Linux only.
 
 ## What a result means
 

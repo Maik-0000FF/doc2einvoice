@@ -46,9 +46,9 @@ the published rule sets.
 
 ## Usage
 
-The application checks e-invoices in its window and on the command line. The
-[usage guide](docs/usage.md) describes both, what a result shows and where the
-limits are.
+The application checks e-invoices in its window, also when it is started with a
+file, and on the command line. The [usage guide](docs/usage.md) describes both,
+what a result shows and where the limits are.
 
 ## Principles
 
