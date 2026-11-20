@@ -44,6 +44,7 @@
 //! | `//b[1]`                            | b1 b3 b4       | first among the children of a parent |
 //! | `//b[position() = 2]`               | b2 b5          | second among its siblings            |
 //! | `//b[last()]`                       | b2 b3 b5       | last among its siblings              |
+//! | `//b[position#0() = 2]`             | b2 b5          | the position, through a reference    |
 //! | `//b[count(b) + 1]`                 | b1 b4          | a number that is computed            |
 //! | `//b[$second]`                      | b2 b5          | a number from a variable             |
 //! | `//b[@k = '1'][1]`                  | b1 b3 b5       | a position after a comparison        |
@@ -76,7 +77,7 @@ const SEARCH: &str = "//";
 const SEARCH_WRITTEN_OUT: &str = "/descendant-or-self::node()[true()]/";
 
 /// Expressions and the elements they select.
-const SELECTIONS: [(&str, &str); 20] = [
+const SELECTIONS: [(&str, &str); 21] = [
     ("//b", "b1 b2 b3 b4 b5"),
     ("//*[@k = '3']", "b4"),
     ("//b[@k = '1']", "b1 b3 b5"),
@@ -91,6 +92,7 @@ const SELECTIONS: [(&str, &str); 20] = [
     ("//b[1]", "b1 b3 b4"),
     ("//b[position() = 2]", "b2 b5"),
     ("//b[last()]", "b2 b3 b5"),
+    ("//b[position#0() = 2]", "b2 b5"),
     ("//b[count(b) + 1]", "b1 b4"),
     ("//b[$second]", "b2 b5"),
     ("//b[@k = '1'][1]", "b1 b3 b5"),
