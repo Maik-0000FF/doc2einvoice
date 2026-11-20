@@ -20,6 +20,10 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Desktop application that turns a document, starting with PDF, into an electronic
 invoice that conforms to the European standard EN 16931.
 
+Its one purpose is a file that conforms technically. It does not check whether
+an invoice is correct in content or under tax law, and it does not aim to: that
+stays with whoever issues the invoice. See the [disclaimer](#disclaimer).
+
 **Status: early development. The application cannot create invoices yet.** What
 it can do today is check an existing e-invoice: an XML file in UBL or CII is
 validated against EN 16931 or XRechnung, and every finding is listed with its
@@ -113,10 +117,11 @@ Development targets as of 2026-11-19:
   reported.
 - **Patched XPath engine.** The rules are evaluated with the XPath engine
   [Xee](https://github.com/Paligo/xee). Two faults of its published version
-  make the official rules report wrong results, so two of its crates are used
-  as patched copies. [vendor/PATCHES.md](vendor/PATCHES.md) describes both
-  patches, and `tools/verify-vendor.sh` proves that each copy is the published
-  crate plus exactly that patch.
+  make the official rules report wrong results, and it takes very long to
+  search a large invoice, so two of its crates are used as patched copies.
+  [vendor/PATCHES.md](vendor/PATCHES.md) describes every change, and
+  `tools/verify-vendor.sh` proves that each copy is the published crate plus
+  exactly its patch.
 
 The rule files of Peppol BIS Billing 3.0 are not part of this repository.
 
