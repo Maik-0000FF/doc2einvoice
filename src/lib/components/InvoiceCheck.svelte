@@ -4,14 +4,15 @@ SPDX-License-Identifier: GPL-3.0-or-later
 -->
 <script lang="ts">
   // Checking an e-invoice: the user chooses a file, the application core
-  // validates it, and the result or the reason for a refusal is shown.
+  // validates it, and the result or the reason for a refusal is shown. A file
+  // the program was started with is checked without being chosen.
   import { refusalMessage } from '#lib/check/summary.ts';
   import { i18n } from '#lib/i18n/i18n.svelte.ts';
   import type { CheckOutcome } from '#lib/ipc/bindings/CheckOutcome.ts';
   import type { InvoiceCheck } from '#lib/ipc/bindings/InvoiceCheck.ts';
   import type { ProfileKind } from '#lib/ipc/bindings/ProfileKind.ts';
   import type { Refusal } from '#lib/ipc/bindings/Refusal.ts';
-  import { checkInvoice, checkInvoiceAgain } from '#lib/ipc/check-invoice.ts';
+  import { checkInvoice, checkInvoiceAgain, checkStartFile } from '#lib/ipc/check-invoice.ts';
 
   import CheckResult from './CheckResult.svelte';
 
@@ -25,13 +26,18 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
   const refused = $derived(refusal === undefined ? undefined : refusalMessage(refusal));
 
-  async function run(request: () => Promise<CheckOutcome>): Promise<void> {
+  // A request that resolves to nothing had nothing to check and changes
+  // nothing.
+  async function run(request: () => Promise<CheckOutcome | null>): Promise<void> {
     if (busy) {
       return;
     }
     busy = true;
     try {
-      show(await request());
+      const outcome = await request();
+      if (outcome !== null) {
+        show(outcome);
+      }
     } catch (error) {
       failure = String(error);
     } finally {
@@ -58,6 +64,9 @@ SPDX-License-Identifier: GPL-3.0-or-later
   function again(profile: ProfileKind): void {
     void run(() => checkInvoiceAgain(profile));
   }
+
+  // Asked once, when the window comes up.
+  void run(checkStartFile);
 </script>
 
 <section class="check" aria-busy={busy}>
