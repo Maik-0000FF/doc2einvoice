@@ -210,6 +210,7 @@ The Rust code is a workspace:
 | `rulesets`                       | the published rule files, unchanged                          |
 | `schemas`                        | the published XML Schema files, unchanged                    |
 | `tests/conformance`              | published test documents and the reference results           |
+| `sources.env`                    | where the files of other publishers come from, each pinned   |
 | `vendor`                         | patched copies of two crates of the XPath engine             |
 
 Two further checks need a network connection and are run on demand:
