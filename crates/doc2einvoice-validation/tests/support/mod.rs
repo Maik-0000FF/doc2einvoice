@@ -22,7 +22,7 @@ pub type Fault = Box<dyn std::error::Error>;
 
 const CORPUS_DIRECTORY: &str = "tests/conformance/corpus";
 const EXPECTED_DIRECTORY: &str = "tests/conformance/expected";
-const SOURCES_FILE: &str = "tests/conformance/sources.env";
+const SOURCES_FILE: &str = "sources.env";
 
 const XML_EXTENSION: &str = "xml";
 const XML_DECLARATION: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";

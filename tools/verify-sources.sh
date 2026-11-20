@@ -4,7 +4,7 @@
 #
 # Proves that the files of other publishers in this repository are the files
 # those publishers released: downloads every archive pinned in
-# tests/conformance/sources.env, checks its checksum and compares the rule
+# sources.env, checks its checksum and compares the rule
 # files, the XML Schema files, the test documents and the font files with it,
 # byte for byte.
 #
@@ -22,8 +22,8 @@ set -euo pipefail
 
 # shellcheck source=tools/common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
-# shellcheck source=tests/conformance/sources.env
-source "$repository/tests/conformance/sources.env"
+# shellcheck source=sources.env
+source "$repository/sources.env"
 
 readonly corpus="tests/conformance/corpus"
 readonly fonts="src/lib/assets/fonts"

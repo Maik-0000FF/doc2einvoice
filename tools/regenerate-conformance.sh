@@ -8,7 +8,7 @@
 # The reference is Saxon (Java) running the published rules: for EN 16931 the
 # stylesheets the publisher ships, for XRechnung stylesheets compiled from the
 # published Schematron with SchXslt. Everything is fetched at the versions and
-# checksums pinned in tests/conformance/sources.env.
+# checksums pinned in sources.env.
 #
 # Needed only when the corpus or a rule set changes. The tests themselves need
 # neither Java nor a network connection.
@@ -24,8 +24,8 @@ set -euo pipefail
 
 # shellcheck source=tools/common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
-# shellcheck source=tests/conformance/sources.env
-source "$repository/tests/conformance/sources.env"
+# shellcheck source=sources.env
+source "$repository/sources.env"
 
 readonly schxslt_pipeline="core/src/main/resources/xslt/2.0/pipeline-for-svrl.xsl"
 
