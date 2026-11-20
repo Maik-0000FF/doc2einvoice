@@ -12,6 +12,7 @@
 //! - [`cli`]: the command line, interpreted before the application starts.
 //! - [`checking`]: checks an invoice the user chose and describes the result.
 //! - `web_view`: notices when the web view of the window is lost.
+//! - `texts`: the texts the core shows itself when no interface is left.
 //!
 //! The core never opens a network connection: every document is processed on
 //! the local machine.
@@ -20,6 +21,9 @@ pub mod app_info;
 pub mod checking;
 pub mod cli;
 pub mod commands;
+// Only the watch over the web view shows a text, and only Linux has one.
+#[cfg(target_os = "linux")]
+mod texts;
 mod web_view;
 
 /// How a run of the application ended.

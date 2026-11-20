@@ -59,5 +59,7 @@
   "refusal.tooDeeplyNested": "Die Datei ist tiefer als {limit} Ebenen verschachtelt und wird nicht gelesen. Keine Rechnung ist so tief verschachtelt.",
   "refusal.unsupportedDocument": "Die Datei ist XML, aber keine Rechnung in UBL oder CII. Ihr Dokumentelement ist „{element}“.",
   "refusal.nothingToCheck": "Es gibt keine Rechnung, die erneut geprüft werden könnte.",
-  "refusal.internal": "Die Prüfung ist aus einem Grund gescheitert, der im Programm liegt, nicht in der Datei."
+  "refusal.internal": "Die Prüfung ist aus einem Grund gescheitert, der im Programm liegt, nicht in der Datei.",
+  "fault.webViewLost.title": "Das Fenster kann nicht angezeigt werden",
+  "fault.webViewLost.text": "Der Teil des Programms, der das Fenster zeichnet, wurde unerwartet beendet. Das Programm wird jetzt geschlossen.\n\nEine häufige Ursache ist ein Grafiktreiber, der nicht funktioniert."
 }

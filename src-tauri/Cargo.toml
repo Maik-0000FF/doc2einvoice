@@ -28,9 +28,13 @@ tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 ts-rs = "11"
 
-# The web view on Linux, at the version Tauri uses: only it tells when the
-# process that draws the window is lost.
+# What only Linux needs. The web view, at the version Tauri uses: only it
+# tells when the process that draws the window is lost. And what the dialog
+# about that loss takes: the languages the system prefers and a reader for the
+# language files.
 [target.'cfg(target_os = "linux")'.dependencies]
+serde_json.workspace = true
+sys-locale.workspace = true
 webkit2gtk = { version = "2", features = ["v2_20"] }
 
 [dev-dependencies]
