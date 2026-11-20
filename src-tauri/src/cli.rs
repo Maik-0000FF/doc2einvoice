@@ -81,6 +81,10 @@ const ONE_FILE_ONLY: &str =
 
 /// Names of the subcommand that checks invoices and of its arguments.
 const FILE_ARGUMENT: &str = "file";
+/// Takes whatever follows the one file, so that the program can say itself
+/// why that is too much. It is not part of the help: there is nothing to
+/// offer.
+const FURTHER_FILES_ARGUMENT: &str = "further-files";
 const CHECK_COMMAND: &str = "check";
 const PATHS_ARGUMENT: &str = "paths";
 const PROFILE_ARGUMENT: &str = "profile";
@@ -140,17 +144,13 @@ where
 
 /// Starts the application, with the file the command line names.
 fn start(matches: &ArgMatches) -> Invocation {
-    let mut files = matches
-        .get_many::<PathBuf>(FILE_ARGUMENT)
-        .into_iter()
-        .flatten();
-    match (files.next(), files.next()) {
-        (file, None) => Invocation::Start(file.cloned()),
-        (_, Some(_)) => Invocation::Print(Output {
+    if matches.contains_id(FURTHER_FILES_ARGUMENT) {
+        return Invocation::Print(Output {
             text: ONE_FILE_ONLY.to_owned(),
             stream: Stream::Stderr,
-        }),
+        });
     }
+    Invocation::Start(matches.get_one::<PathBuf>(FILE_ARGUMENT).cloned())
 }
 
 /// The command line as the argument parser knows it. Name, version and
@@ -167,8 +167,11 @@ fn command() -> Command {
             Arg::new(FILE_ARGUMENT)
                 .value_name("FILE")
                 .help("An e-invoice file (XML in UBL or CII) to open and check in the window")
-                // Several are accepted here and refused in `start`, which
-                // can say why.
+                .value_parser(value_parser!(PathBuf)),
+        )
+        .arg(
+            Arg::new(FURTHER_FILES_ARGUMENT)
+                .hide(true)
                 .num_args(1..)
                 .value_parser(value_parser!(PathBuf)),
         )
@@ -287,6 +290,28 @@ mod tests {
         for arguments in [["--help"], ["-h"]] {
             assert!(is_help(&invocation(&arguments)), "{arguments:?}");
         }
+    }
+
+    #[test]
+    fn the_help_offers_one_file() {
+        /// How the help marks an argument that may be given several times.
+        const REPEATABLE: &str = "...";
+
+        let Invocation::Print(Output { text, .. }) = invocation(&["--help"]) else {
+            unreachable!("the help is printed");
+        };
+        let lines_about_the_file: Vec<&str> = text
+            .lines()
+            .filter(|line| line.contains("[FILE]"))
+            .collect();
+
+        assert!(!lines_about_the_file.is_empty());
+        assert!(
+            lines_about_the_file
+                .iter()
+                .all(|line| !line.contains(REPEATABLE)),
+            "{text}"
+        );
     }
 
     #[test]
