@@ -130,12 +130,14 @@ jobs:
     timeout-minutes: 5
     steps:
       # The results arrive as one entry per job, read as such: every entry
-      # has to say success, and there has to be at least one.
+      # has to say success, and there has to be at least one. Each result is
+      # written to the log first, so that a failure names its gate.
       - name: Every gate passed
         env:
           GATES: ${{ toJSON(needs) }}
         run: |
-          jq --exit-status 'length > 0 and all(.[]; .result == "success")' <<<"$GATES"
+          jq --raw-output 'to_entries[] | "\(.key): \(.value.result)"' <<<"$GATES"
+          jq --exit-status 'length > 0 and all(.[]; .result == "success")' <<<"$GATES" >/dev/null
 
   dependencies:
     name: Dependencies
