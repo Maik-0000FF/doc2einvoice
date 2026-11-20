@@ -137,15 +137,15 @@ doc2einvoice -- check
 ## If the window cannot be shown
 
 The window is drawn by a part of the program that runs on its own. If that part
-ends, most often because the graphics driver of the system does not work, the
+ends, for example because the graphics driver of the system does not work, the
 window stays empty and the program cannot be used. It then says so in a dialog
 of the operating system and ends when the dialog is closed, with status `1`.
 
 The reason is also written to the error output at once. The program itself
-waits for the dialog, however long that takes, so a script that starts it reads
-the reason there and does not wait for the program to end.
+waits for the dialog, however long that takes. A script that starts it has to
+read the reason there; waiting for the program to end would not return.
 
-This is noticed on Linux only.
+This is noticed on Linux only; on the other systems the window stays empty.
 
 ## What a result means
 
@@ -166,5 +166,7 @@ in content or fail the legal requirements of a country. See the
   that the rules of the specification it names were not applied. What that
   specification allows beyond EN 16931, as the EXTENDED profile of Factur-X
   does, is then reported as findings.
+- If the operating system cannot show the dialog that says the window cannot be
+  shown, the program stays open with its empty window until it is closed.
 - On Windows the released program has no console. Called from a terminal it
   shows no output there; redirect the output to a file or a pipe.
