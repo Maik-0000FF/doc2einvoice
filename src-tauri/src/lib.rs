@@ -42,9 +42,10 @@ pub enum Ending {
 ///
 /// # Panics
 ///
-/// Panics if the watch over the web view cannot be started. That happens
-/// inside the event loop, where the framework turns a failed setup into a
-/// panic instead of returning it.
+/// Panics if a window of the configuration cannot be created or the watch
+/// over the web view cannot be started. Both happen inside the event loop,
+/// where the framework turns a failed setup into a panic instead of returning
+/// it.
 pub fn run() -> tauri::Result<Ending> {
     let watch = web_view::Watch::default();
     let watch_at_setup = watch.clone();
