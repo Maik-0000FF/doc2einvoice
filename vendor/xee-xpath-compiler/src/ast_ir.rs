@@ -95,7 +95,7 @@ impl<'a> IrConverter<'a> {
     fn path_expr(&mut self, ast: &ast::PathExpr) -> error::SpannedResult<Bindings> {
         // A search through all descendants is evaluated as one descent where
         // that selects the same nodes.
-        let steps = Descent::new(&self.fn_position, &self.fn_last).merged(&ast.steps);
+        let steps = Descent::new().merged(&ast.steps);
         let first_step = &steps[0];
         let rest_steps = &steps[1..];
         let first_step_bindings = Ok(self.step_expr(first_step)?);

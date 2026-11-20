@@ -52,6 +52,10 @@
 //! | `(//b[@k = '3'] \| //b[@k = '2'])`   | b2 b4          | a union                              |
 //!
 //! A search for attributes is checked by its count: `count(//@k)` is 5.
+//!
+//! A predicate can also reach the position without naming it, through
+//! `function-lookup`. Whatever such a predicate yields here, the search and its
+//! written out form must yield the same.
 
 use doc2einvoice_schematron::{NoIncludes, Schema};
 
@@ -93,13 +97,15 @@ const SELECTIONS: [(&str, &str); 20] = [
     ("(//b[@k = '3'] | //b[@k = '2'])", "b2 b4"),
 ];
 
-/// A rule file with one assertion on `/doc`, and the variable `$second`.
+/// A rule file with one assertion on `/doc`, the variable `$second` and
+/// `$none`, an empty list of arguments.
 fn rules(test: &str) -> String {
     format!(
         r#"<schema xmlns="http://purl.oclc.org/dsdl/schematron">
              <pattern>
                <rule context="/doc">
                  <let name="second" value="2"/>
+                 <let name="none" value="[]"/>
                  <assert id="R-1" flag="fatal" test="{test}">text</assert>
                </rule>
              </pattern>
@@ -142,6 +148,21 @@ fn a_wrong_selection_is_noticed() -> TestResult {
     // Guards the two tests above: a comparison that could not fail would
     // prove nothing.
     assert!(!holds(&selects("//b", "b1"))?);
+    Ok(())
+}
+
+#[test]
+fn a_position_asked_for_indirectly_is_the_same_in_both_forms() -> TestResult {
+    const PREDICATE: &str = "b[apply(function-lookup(xs:QName('fn:position'), 0), $none) = 2]";
+    let findings = |search: &str| -> Result<_, Box<dyn std::error::Error>> {
+        let test = selects(&format!("{search}{PREDICATE}"), "b2 b5");
+        Ok(Schema::compile(&rules(&test), &NoIncludes)?
+            .validate(DOCUMENT)?
+            .findings()
+            .to_vec())
+    };
+
+    assert_eq!(findings(SEARCH)?, findings(SEARCH_WRITTEN_OUT)?);
     Ok(())
 }
 
