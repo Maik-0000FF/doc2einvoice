@@ -17,8 +17,13 @@ publish = false
 # The argument parser, without colours, suggestions and procedural macros: the
 # command line is small and its output goes to terminals and pipes alike.
 clap = { version = "4.6", default-features = false, features = ["std", "help", "usage", "error-context"] }
+doc2einvoice-pdf = { path = "crates/doc2einvoice-pdf" }
 doc2einvoice-schematron = { path = "crates/doc2einvoice-schematron" }
 doc2einvoice-validation = { path = "crates/doc2einvoice-validation" }
+# The PDF interpreter, pinned exactly: it is young, and where it places a
+# character decides what the reader finds on a page. A new version is taken
+# only together with a new run of the reading tests.
+hayro-interpret = "=0.9.0"
 # The XML Schema processor, pinned exactly like the XPath engine below.
 oxixml-schema = "=0.1.2"
 roxmltree = "0.20"
