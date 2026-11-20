@@ -12,19 +12,30 @@
 //! |---------------------------|-------------------------------------------|
 //! | none                      | the application starts                    |
 //! | `--`                      | the application starts, nothing follows   |
+//! | `invoice.xml`             | the application starts and checks that    |
+//! |                           | file in its window                        |
+//! | `-- invoice.xml`          | the same                                  |
+//! | `-- --version`, `-- check`| the application starts with a file of     |
+//! |                           | that name: after `--` nothing is an option|
+//! | `help`, `chec`            | the application starts with a file of     |
+//! |                           | that name: there is no such command       |
+//! | `a.xml b.xml`             | usage error on stderr: the window opens   |
+//! |                           | one file                                  |
+//! | `help check`, `chec a.xml`| the same: two words, two files            |
+//! | `a.xml check b.xml`       | the same: a command stands first          |
+//! | `""`                      | usage error on stderr: a file has a name  |
+//! | an argument not in UTF-8  | the application starts with a file of     |
+//! |                           | that name: a file name is no text         |
 //! | `--version`, `-V`         | name and version on stdout, success       |
 //! | `--help`, `-h`            | the help text on stdout, success          |
 //! | `--version --help`        | the version: the first of the two decides |
 //! | `--help --version`        | the help: the first of the two decides    |
-//! | `--version invoice.pdf`   | the version: what follows is not read     |
-//! | `invoice.pdf --version`   | usage error on stderr                     |
+//! | `--version invoice.xml`   | the version: what follows is not read     |
+//! | `invoice.xml --version`   | the version: the file is not opened       |
+//! | `invoice.xml --unknown`   | usage error on stderr                     |
 //! | `--version=1`             | usage error on stderr                     |
 //! | `--unknown`, `-x`         | usage error on stderr                     |
 //! | `--versio`                | usage error on stderr, no abbreviation    |
-//! | `invoice.pdf`             | usage error on stderr, no file is opened  |
-//! | `""`                      | usage error on stderr                     |
-//! | `-- --version`            | usage error on stderr, it is a value      |
-//! | an argument not in UTF-8  | usage error on stderr                     |
 //! | `check a.xml`             | the file is checked, no window opens      |
 //! | `check a.xml b.xml dir`   | every path is checked, in that order      |
 //! | `check`                   | usage error on stderr: nothing to check   |
@@ -36,13 +47,13 @@
 //! | `check -- --odd-name.xml` | the file of that name is checked          |
 //! | `check` with a path not in UTF-8 | the path is checked: a file name   |
 //! |                           | is no text                                |
-//! | `chec a.xml`              | usage error on stderr, no abbreviation    |
-//! | `help`, `help check`      | usage error on stderr: the help is the    |
-//! |                           | option `--help`, there is no such command |
 //!
 //! Arguments are read from left to right. `--version` and `--help` answer at
-//! once, as is customary; whatever follows them is not read. Up to that point
-//! nothing is guessed: an argument that is not understood never starts the
+//! once, as is customary; whatever follows them is not read. A word that is
+//! neither an option nor the command `check` is the name of a file: that is
+//! how a file manager hands a file over ("Open with"). Whether the file exists
+//! and is an invoice is found out in the window, which says so, exactly as for
+//! a file chosen in its dialog. An option that is not known never starts the
 //! application.
 //!
 //! On Windows the released program has no console of its own. Its answers
@@ -64,7 +75,16 @@ use crate::checking::outcome::ProfileKind;
 /// usage errors.
 pub const USAGE_ERROR_STATUS: u8 = 2;
 
+/// What stderr says when more than one file is named for the window.
+const ONE_FILE_ONLY: &str =
+    "error: the window opens one file; to check several files, use `check`\n";
+
 /// Names of the subcommand that checks invoices and of its arguments.
+const FILE_ARGUMENT: &str = "file";
+/// Takes whatever follows the one file, so that the program can say itself
+/// why that is too much. It is not part of the help: there is nothing to
+/// offer.
+const FURTHER_FILES_ARGUMENT: &str = "further-files";
 const CHECK_COMMAND: &str = "check";
 const PATHS_ARGUMENT: &str = "paths";
 const PROFILE_ARGUMENT: &str = "profile";
@@ -73,8 +93,8 @@ const FINDINGS_ARGUMENT: &str = "findings";
 /// What a command line asks the program to do.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Invocation {
-    /// Start the application.
-    Start,
+    /// Start the application, and check this file at once if one is named.
+    Start(Option<PathBuf>),
     /// Print a text and end without starting the application.
     Print(Output),
     /// Check invoice files and end without starting the application.
@@ -109,7 +129,7 @@ where
     match command().try_get_matches_from(arguments) {
         Ok(matches) => match matches.subcommand() {
             Some((CHECK_COMMAND, check)) => Invocation::Check(batch_request(check)),
-            _ => Invocation::Start,
+            _ => start(&matches),
         },
         Err(error) => Invocation::Print(Output {
             text: error.render().to_string(),
@@ -122,6 +142,17 @@ where
     }
 }
 
+/// Starts the application, with the file the command line names.
+fn start(matches: &ArgMatches) -> Invocation {
+    if matches.contains_id(FURTHER_FILES_ARGUMENT) {
+        return Invocation::Print(Output {
+            text: ONE_FILE_ONLY.to_owned(),
+            stream: Stream::Stderr,
+        });
+    }
+    Invocation::Start(matches.get_one::<PathBuf>(FILE_ARGUMENT).cloned())
+}
+
 /// The command line as the argument parser knows it. Name, version and
 /// description come from the crate manifest, the one place they are stated.
 fn command() -> Command {
@@ -131,6 +162,19 @@ fn command() -> Command {
         .infer_long_args(false)
         .infer_subcommands(false)
         .disable_help_subcommand(true)
+        .args_conflicts_with_subcommands(true)
+        .arg(
+            Arg::new(FILE_ARGUMENT)
+                .value_name("FILE")
+                .help("An e-invoice file (XML in UBL or CII) to open and check in the window")
+                .value_parser(value_parser!(PathBuf)),
+        )
+        .arg(
+            Arg::new(FURTHER_FILES_ARGUMENT)
+                .hide(true)
+                .num_args(1..)
+                .value_parser(value_parser!(PathBuf)),
+        )
         .subcommand(check_command())
 }
 
@@ -226,12 +270,12 @@ mod tests {
 
     #[test]
     fn no_argument_starts_the_application() {
-        assert_eq!(invocation(&[]), Invocation::Start);
+        assert_eq!(invocation(&[]), Invocation::Start(None));
     }
 
     #[test]
     fn a_bare_separator_starts_the_application() {
-        assert_eq!(invocation(&["--"]), Invocation::Start);
+        assert_eq!(invocation(&["--"]), Invocation::Start(None));
     }
 
     #[test]
@@ -249,26 +293,82 @@ mod tests {
     }
 
     #[test]
+    fn the_help_offers_one_file() {
+        /// How the help marks an argument that may be given several times.
+        const REPEATABLE: &str = "...";
+
+        let Invocation::Print(Output { text, .. }) = invocation(&["--help"]) else {
+            unreachable!("the help is printed");
+        };
+        let lines_about_the_file: Vec<&str> = text
+            .lines()
+            .filter(|line| line.contains("[FILE]"))
+            .collect();
+
+        assert!(!lines_about_the_file.is_empty());
+        assert!(
+            lines_about_the_file
+                .iter()
+                .all(|line| !line.contains(REPEATABLE)),
+            "{text}"
+        );
+    }
+
+    #[test]
     fn the_first_of_version_and_help_answers_and_the_rest_is_not_read() {
         assert!(is_version(&invocation(&["--version", "--help"])));
         assert!(is_help(&invocation(&["--help", "--version"])));
-        assert!(is_version(&invocation(&["--version", "invoice.pdf"])));
+        assert!(is_version(&invocation(&["--version", "invoice.xml"])));
     }
 
     #[test]
     fn what_is_not_understood_is_a_usage_error() {
         for arguments in [
-            vec!["invoice.pdf", "--version"],
+            vec!["invoice.xml", "--unknown"],
             vec!["--version=1"],
             vec!["--unknown"],
             vec!["-x"],
             vec!["--versio"],
-            vec!["invoice.pdf"],
             vec![""],
-            vec!["--", "--version"],
         ] {
             assert!(is_usage_error(&invocation(&arguments)), "{arguments:?}");
         }
+    }
+
+    #[test]
+    fn a_file_name_starts_the_application_with_that_file() {
+        for (arguments, file) in [
+            (vec!["invoice.xml"], "invoice.xml"),
+            (vec!["--", "invoice.xml"], "invoice.xml"),
+            (vec!["--", "--version"], "--version"),
+            (vec!["--", "check"], "check"),
+            (vec!["help"], "help"),
+            (vec!["chec"], "chec"),
+        ] {
+            assert_eq!(
+                invocation(&arguments),
+                Invocation::Start(Some(PathBuf::from(file))),
+                "{arguments:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn more_than_one_file_is_a_usage_error() {
+        for arguments in [
+            vec!["a.xml", "b.xml"],
+            vec!["help", "check"],
+            vec!["chec", "a.xml"],
+            vec!["a.xml", "check", "b.xml"],
+            vec!["--", "a.xml", "b.xml"],
+        ] {
+            assert!(is_usage_error(&invocation(&arguments)), "{arguments:?}");
+        }
+    }
+
+    #[test]
+    fn the_version_answers_also_after_a_file_name() {
+        assert!(is_version(&invocation(&["invoice.xml", "--version"])));
     }
 
     fn check_request(arguments: &[&str]) -> Option<BatchRequest> {
@@ -326,9 +426,6 @@ mod tests {
             vec!["check", "--profile", "other", "a.xml"],
             vec!["check", "--profile"],
             vec!["check", "--unknown", "a.xml"],
-            vec!["chec", "a.xml"],
-            vec!["help"],
-            vec!["help", "check"],
         ] {
             assert!(is_usage_error(&invocation(&arguments)), "{arguments:?}");
         }
@@ -370,15 +467,19 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn an_argument_that_is_not_utf8_is_a_usage_error() {
+    fn an_argument_that_is_not_utf8_is_a_file_name() {
         use std::ffi::OsString;
         use std::os::unix::ffi::OsStringExt;
 
         /// A byte that is no character in UTF-8.
         const NOT_UTF8: u8 = 0xFF;
 
-        let arguments = [OsString::from(PROGRAM), OsString::from_vec(vec![NOT_UTF8])];
+        let name = OsString::from_vec(vec![NOT_UTF8]);
+        let arguments = [OsString::from(PROGRAM), name.clone()];
 
-        assert!(is_usage_error(&interpret(arguments)));
+        assert_eq!(
+            interpret(arguments),
+            Invocation::Start(Some(PathBuf::from(name)))
+        );
     }
 }

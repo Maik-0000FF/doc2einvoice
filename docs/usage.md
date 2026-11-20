@@ -113,6 +113,25 @@ doc2einvoice --help
 (or `-h`) the commands and options. Both answer without opening a window.
 Started without any argument, the program opens its window.
 
+## Starting with a file
+
+```sh
+doc2einvoice invoice.xml
+```
+
+Started with the name of a file, the program opens its window and checks that
+file at once, as if it had been chosen in the dialog. That is how a file manager
+hands a file over ("Open with"). A file that does not exist or is no invoice is
+not checked, and the window states the reason.
+
+The window opens one file. Several names end the program with a usage error;
+`doc2einvoice check` checks several files without a window. A file whose name
+starts with a hyphen or is `check` follows `--`:
+
+```sh
+doc2einvoice -- check
+```
+
 ## What a result means
 
 A result is the outcome of a technical validation against the named releases of

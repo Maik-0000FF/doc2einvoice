@@ -33,7 +33,8 @@ pub enum Ending {
 }
 
 /// Builds the application and runs it until the last window closes or the
-/// user interface is lost.
+/// user interface is lost. If `file` names a file, the window checks it as
+/// soon as it is up.
 ///
 /// # Errors
 ///
@@ -46,16 +47,18 @@ pub enum Ending {
 /// over the web view cannot be started. Both happen inside the event loop,
 /// where the framework turns a failed setup into a panic instead of returning
 /// it.
-pub fn run() -> tauri::Result<Ending> {
+pub fn run(file: Option<std::path::PathBuf>) -> tauri::Result<Ending> {
     let watch = web_view::Watch::default();
     let watch_at_setup = watch.clone();
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(checking::service::ValidationService::start()?)
+        .manage(commands::StartFile::new(file))
         .invoke_handler(tauri::generate_handler![
             commands::app_info,
             commands::check_invoice,
             commands::check_invoice_again,
+            commands::check_start_file,
         ])
         .setup(move |app| Ok(watch_at_setup.start(app.handle())?))
         .build(tauri::generate_context!())?;

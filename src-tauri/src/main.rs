@@ -7,6 +7,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::io::Write;
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use doc2einvoice_lib::Ending;
@@ -19,7 +20,7 @@ const WEB_VIEW_LOST: &str = "the web view that draws the window ended unexpected
 
 fn main() -> ExitCode {
     match interpret(std::env::args_os()) {
-        Invocation::Start => start(),
+        Invocation::Start(file) => start(file),
         Invocation::Print(output) => print(&output),
         Invocation::Check(request) => check(&request),
     }
@@ -35,10 +36,11 @@ fn check(request: &BatchRequest) -> ExitCode {
     }
 }
 
-/// Runs the application until its last window closes. A run that could not
-/// show its user interface is a failure, with the reason on stderr.
-fn start() -> ExitCode {
-    match doc2einvoice_lib::run() {
+/// Runs the application until its last window closes, with the file the
+/// command line named. A run that could not show its user interface is a
+/// failure, with the reason on stderr.
+fn start(file: Option<PathBuf>) -> ExitCode {
+    match doc2einvoice_lib::run(file) {
         Ok(Ending::Closed) => ExitCode::SUCCESS,
         Ok(Ending::WebViewLost) => {
             eprintln!("{}: {WEB_VIEW_LOST}", env!("CARGO_PKG_NAME"));

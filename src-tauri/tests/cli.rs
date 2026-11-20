@@ -49,6 +49,16 @@ fn an_unknown_argument_is_explained_on_stderr_with_the_usage_status() -> std::io
     Ok(())
 }
 
+#[test]
+fn more_than_one_file_for_the_window_is_explained_with_the_usage_status() -> std::io::Result<()> {
+    let output = run(&["first.xml", "second.xml"])?;
+
+    assert_eq!(output.status.code(), Some(i32::from(USAGE_ERROR_STATUS)));
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("one file"));
+    Ok(())
+}
+
 /// An invoice of the conformance corpus that conforms to XRechnung.
 fn conforming_invoice() -> String {
     format!(
