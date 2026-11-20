@@ -286,6 +286,10 @@ impl Descent {
 }
 
 /// Whether a step is the search through all descendants `//` stands for.
+///
+/// Whoever lists the predicates of the steps that are merged here has to
+/// recognise a search the same way and to look at the same step after it, a
+/// child step. If this changes, that listing changes with it.
 fn is_search(step: &ast::StepExpr) -> bool {
     match step {
         ast::StepExpr::AxisStep(step) => {

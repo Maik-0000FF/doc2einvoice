@@ -35,6 +35,9 @@ thiserror = "2"
 # patched copies under vendor/ (see vendor/PATCHES.md), and those copies belong
 # to precisely these versions.
 xee-xpath = "=0.1.5"
+# The parser of the XPath engine, at the version the engine itself uses: its
+# syntax tree is read to see what the rule files search for.
+xee-xpath-ast = "=0.1.4"
 xot = "0.31"
 # Cuts XML into its parts without building a tree; used to measure how deep a
 # document is nested before anything else reads it.

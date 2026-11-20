@@ -15,6 +15,7 @@ publish.workspace = true
 roxmltree.workspace = true
 thiserror.workspace = true
 xee-xpath.workspace = true
+xee-xpath-ast.workspace = true
 xot.workspace = true
 
 [lints]
