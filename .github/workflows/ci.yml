@@ -5,6 +5,11 @@
 # reaches main, on macOS, and the checks of the dependencies. Actions are pinned
 # to a commit; the comment after each one names the release that commit belongs
 # to.
+#
+# The gates are spread over jobs that run side by side, so that a change waits
+# for the slowest of them and not for their sum. What `npm run verify` runs in
+# one go locally is run here in parts: the static checks, the Rust lints and
+# the tests.
 
 name: CI
 
@@ -22,6 +27,11 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # A runner builds once and is thrown away. Incremental compilation and debug
+  # information only cost time and room in the cache there; neither changes
+  # what is compiled, linted or tested.
+  CARGO_INCREMENTAL: '0'
+  CARGO_PROFILE_DEV_DEBUG: '0'
   NODE_VERSION: '24'
   # The licence checker, at the version the development shell provides.
   REUSE_VERSION: '6.2.0'
@@ -29,10 +39,34 @@ env:
   LINUX_PACKAGES: >-
     libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev
     libayatana-appindicator3-dev librsvg2-dev
+  # Where the downloaded packages of those libraries are kept between runs,
+  # below the home directory of the runner.
+  LINUX_PACKAGE_ARCHIVES: apt-archives
 
 jobs:
-  quality:
-    name: Quality gates (Linux)
+  static:
+    name: Static checks (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm run check
+      - name: Check the licence of every file
+        run: |
+          pipx install "reuse==$REUSE_VERSION"
+          npm run license:check
+
+  lint:
+    name: Rust lints (Linux)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -43,33 +77,39 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
+      # The same two steps as in the tests below: the packages are downloaded
+      # once and installed from the cache afterwards. The package manager
+      # still decides what is installed and fetches whatever the cache lacks.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/${{ env.LINUX_PACKAGE_ARCHIVES }}
+          key: apt-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: apt-${{ runner.os }}-
       - name: Install the WebView libraries
         run: |
           read -ra packages <<<"$LINUX_PACKAGES"
+          archives="$HOME/$LINUX_PACKAGE_ARCHIVES"
+          mkdir -p "$archives/partial"
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends "${packages[@]}"
+          sudo apt-get install --yes --no-install-recommends \
+            -o "Dir::Cache::Archives=$archives/" "${packages[@]}"
+          sudo chown -R "$(id -u):$(id -g)" "$archives"
+      # A cache is found by its exact key or, failing that, by the newest one
+      # of the same job: after a change of the dependencies only what changed
+      # is compiled. Lints and tests compile differently and keep their own.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          key: cargo-${{ runner.os }}-${{ github.job }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: cargo-${{ runner.os }}-${{ github.job }}-
       - run: npm ci
-      - run: npm run format:check
-      - run: npm run lint
-      - run: npm run check
-      - run: npm run test
       # The application embeds the built frontend, so it is built before Rust.
       - run: npm run build
       - run: npm run rust:format:check
       - run: npm run rust:lint
-      - run: npm run rust:test
-      - run: npm run bindings:check
-      - name: Check the licence of every file
-        run: |
-          pipx install "reuse==$REUSE_VERSION"
-          npm run license:check
 
   tests:
     name: Tests (${{ matrix.os }})
@@ -81,8 +121,8 @@ jobs:
         # Runners for macOS are scarce, and a job that gets none fails. The tests
         # therefore run there only before a change reaches main: for a pull
         # request into main and for main itself. Pull requests of the daily
-        # development are tested on Windows.
-        os: ${{ fromJSON((github.base_ref == 'main' || github.ref == 'refs/heads/main') && '["macos-15", "windows-2025"]' || '["windows-2025"]') }}
+        # development are tested on Linux and Windows.
+        os: ${{ fromJSON((github.base_ref == 'main' || github.ref == 'refs/heads/main') && '["ubuntu-24.04", "macos-15", "windows-2025"]' || '["ubuntu-24.04", "windows-2025"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -91,17 +131,39 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
+      - if: runner.os == 'Linux'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/${{ env.LINUX_PACKAGE_ARCHIVES }}
+          key: apt-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: apt-${{ runner.os }}-
+      - name: Install the WebView libraries
+        if: runner.os == 'Linux'
+        run: |
+          read -ra packages <<<"$LINUX_PACKAGES"
+          archives="$HOME/$LINUX_PACKAGE_ARCHIVES"
+          mkdir -p "$archives/partial"
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            -o "Dir::Cache::Archives=$archives/" "${packages[@]}"
+          sudo chown -R "$(id -u):$(id -g)" "$archives"
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          key: cargo-${{ runner.os }}-${{ github.job }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: cargo-${{ runner.os }}-${{ github.job }}-
       - run: npm ci
       - run: npm run test
+      # The application embeds the built frontend, so it is built before Rust.
       - run: npm run build
       - run: npm run rust:test
+      # The Rust tests regenerate the bindings; they must not differ from the
+      # committed ones. One platform answers that.
+      - if: runner.os == 'Linux'
+        run: npm run bindings:check
 
   dependencies:
     name: Dependencies
