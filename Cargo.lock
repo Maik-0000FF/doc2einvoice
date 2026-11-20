@@ -903,6 +903,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tempfile",
  "ts-rs",
+ "webkit2gtk",
 ]
 
 [[package]]
