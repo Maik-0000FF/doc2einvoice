@@ -35,13 +35,6 @@ env:
   NODE_VERSION: '24'
   # The licence checker, at the version the development shell provides.
   REUSE_VERSION: '6.2.0'
-  # Libraries the WebView links against on Linux.
-  LINUX_PACKAGES: >-
-    libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev
-    libayatana-appindicator3-dev librsvg2-dev
-  # Where the downloaded packages of those libraries are kept between runs,
-  # below the home directory of the runner.
-  LINUX_PACKAGE_ARCHIVES: apt-archives
 
 jobs:
   static:
@@ -77,38 +70,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-      # The same two steps as in the tests below: the packages are downloaded
-      # once and installed from the cache afterwards. The package manager
-      # still decides what is installed and fetches whatever the cache lacks.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/${{ env.LINUX_PACKAGE_ARCHIVES }}
-          key: apt-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
-          restore-keys: apt-${{ runner.os }}-
-      - name: Install the WebView libraries
-        run: |
-          read -ra packages <<<"$LINUX_PACKAGES"
-          archives="$HOME/$LINUX_PACKAGE_ARCHIVES"
-          mkdir -p "$archives/partial"
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends \
-            -o "Dir::Cache::Archives=$archives/" "${packages[@]}"
-          sudo chown -R "$(id -u):$(id -g)" "$archives"
-      # A cache is found by its exact key or, failing that, by the newest one
-      # of the same job: after a change of the dependencies only what changed
-      # is compiled. Lints and tests compile differently and keep their own.
-      # A known limit: what an older set of dependencies left in the cache is
-      # never removed, so the cache grows with every such change until the
-      # platform evicts the oldest ones. Nothing stale is ever linked, only
-      # carried along.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: cargo-${{ runner.os }}-${{ github.job }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-          restore-keys: cargo-${{ runner.os }}-${{ github.job }}-
+      - uses: ./.github/actions/prepare-rust-build
       - run: npm ci
       # The application embeds the built frontend, so it is built before Rust.
       - run: npm run build
@@ -135,30 +97,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-      - if: runner.os == 'Linux'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/${{ env.LINUX_PACKAGE_ARCHIVES }}
-          key: apt-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
-          restore-keys: apt-${{ runner.os }}-
-      - name: Install the WebView libraries
-        if: runner.os == 'Linux'
-        run: |
-          read -ra packages <<<"$LINUX_PACKAGES"
-          archives="$HOME/$LINUX_PACKAGE_ARCHIVES"
-          mkdir -p "$archives/partial"
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends \
-            -o "Dir::Cache::Archives=$archives/" "${packages[@]}"
-          sudo chown -R "$(id -u):$(id -g)" "$archives"
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: cargo-${{ runner.os }}-${{ github.job }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-          restore-keys: cargo-${{ runner.os }}-${{ github.job }}-
+      - uses: ./.github/actions/prepare-rust-build
       - run: npm ci
       - run: npm run test
       # The application embeds the built frontend, so it is built before Rust.
@@ -174,11 +113,13 @@ jobs:
   # know how they are spread over jobs. The tests it waits for include the
   # other platforms.
   #
-  # | The jobs it waits for                     | This job |
-  # |-------------------------------------------|----------|
-  # | all ended in success                      | passes   |
-  # | one failed, was cancelled or was skipped  | fails    |
-  # | none reported a result                    | fails    |
+  # | The jobs it waits for                           | This job |
+  # |-------------------------------------------------|----------|
+  # | all ended in success                            | passes   |
+  # | one failed, was cancelled or was skipped        | fails    |
+  # | one reported no result, or an empty one         | fails    |
+  # | there are none                                  | fails    |
+  # | what is reported cannot be read                 | fails    |
   quality:
     name: Quality gates (Linux)
     needs: [static, lint, tests]
@@ -188,14 +129,13 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      # The results arrive as one entry per job, read as such: every entry
+      # has to say success, and there has to be at least one.
       - name: Every gate passed
         env:
-          RESULTS: ${{ join(needs.*.result, ' ') }}
+          GATES: ${{ toJSON(needs) }}
         run: |
-          [ -n "$RESULTS" ] || { echo "no gate reported a result"; exit 1; }
-          for result in $RESULTS; do
-            [ "$result" = success ] || { echo "a gate ended as: $result"; exit 1; }
-          done
+          jq --exit-status 'length > 0 and all(.[]; .result == "success")' <<<"$GATES"
 
   dependencies:
     name: Dependencies
