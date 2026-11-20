@@ -113,6 +113,19 @@ impl Sequence {
             }
         }
         if non_node_seen {
+            return Ok(self);
+        }
+        // Nodes that already stand in document order, each once, are the
+        // result as they are. That is the common case: one step from one
+        // node yields them so.
+        let mut previous = None;
+        let ordered = self.nodes().filter_map(Result::ok).all(|node| {
+            let order = annotations.get(node);
+            let follows = previous.map_or(true, |before| before < order);
+            previous = Some(order);
+            follows
+        });
+        if ordered {
             Ok(self)
         } else {
             Ok(Self::process_set_result(s, annotations))
@@ -125,7 +138,8 @@ impl Sequence {
     ) -> Self {
         // sort nodes by document order
         let mut nodes = s.into_iter().collect::<Vec<_>>();
-        nodes.sort_by_key(|n| annotations.get(*n));
+        // The order of a node is looked up once, not once per comparison.
+        nodes.sort_by_cached_key(|n| annotations.get(*n));
         nodes.into()
     }
 
