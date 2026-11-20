@@ -72,6 +72,9 @@ shapes.
 
 `crates/doc2einvoice-schematron/tests/descendant_search.rs` pins the results,
 above all for predicates that depend on a position.
+`crates/doc2einvoice-validation/tests/search_predicates.rs` lists every
+predicate the embedded rule files use after a search, each read by a person; a
+rule file that brings a new one fails that test until it has been read.
 
 ## Removing a patch
 

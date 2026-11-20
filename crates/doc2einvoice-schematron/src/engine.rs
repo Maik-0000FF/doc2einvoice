@@ -3,7 +3,7 @@
 
 //! Compiling a rule file and evaluating it on documents.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use xee_xpath::context::{StaticContextBuilder, Variables};
@@ -19,6 +19,7 @@ use crate::include::{self, IncludeResolver};
 use crate::location::{name_of, path_of};
 use crate::report::{Finding, Outcome, Report};
 use crate::schema::{self, MessagePart, ParsedAssertion, ParsedRule, Variable};
+use crate::search::Searches;
 
 /// Location reported for a finding that concerns no particular node.
 const DOCUMENT_LOCATION: &str = "/";
@@ -30,6 +31,7 @@ const VALUE_SEPARATOR: &str = " ";
 /// Compiling is the expensive step; a schema is meant to be compiled once and
 /// used for many documents. A schema is bound to the thread it was compiled on.
 pub struct Schema {
+    namespaces: Vec<(String, String)>,
     global_variables: Vec<CompiledVariable>,
     patterns: Vec<Vec<CompiledRule>>,
 }
@@ -40,6 +42,11 @@ struct Expression {
     /// The variables declared outside the expression that it reads, in the
     /// order they are declared.
     reads: Vec<String>,
+    /// The expression as it was compiled, with the functions it calls put in
+    /// front of it.
+    source: String,
+    /// The variables the expression was compiled to see.
+    visible: Vec<String>,
 }
 
 struct CompiledVariable {
@@ -106,9 +113,56 @@ impl Schema {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(Self {
+            namespaces: parsed.namespaces.clone(),
             global_variables,
             patterns,
         })
+    }
+
+    /// The predicates the rule file puts on a step that follows a search
+    /// through all descendants, as in `//name[predicate]`: each as it is
+    /// written, with white space collapsed.
+    ///
+    /// Every expression of the rule file is looked into: rule contexts,
+    /// variables, tests, the values an assertion text shows, and the bodies
+    /// of the functions they call. A rule context that is not anchored at the
+    /// root is such a search itself.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SchemaError::Expression`] if an expression cannot be parsed
+    /// again. That does not happen for a schema that compiled.
+    pub fn search_predicates(&self) -> Result<BTreeSet<String>, SchemaError> {
+        let mut found = BTreeSet::new();
+        for expression in self.expressions() {
+            let parsed = static_context(&self.namespaces, &expression.visible)
+                .parse_xpath(&expression.source)
+                .map_err(|error| SchemaError::Expression {
+                    subject: expression.source.clone(),
+                    reason: format!("{error:?}"),
+                })?;
+            Searches::new(&expression.source, &mut found).collect(&parsed);
+        }
+        Ok(found)
+    }
+
+    /// Every compiled expression of the rule file.
+    fn expressions(&self) -> impl Iterator<Item = &Expression> {
+        let globals = self.global_variables.iter().map(|variable| &variable.value);
+        let rules = self.patterns.iter().flatten().flat_map(|rule| {
+            let variables = rule.variables.iter().map(|variable| &variable.value);
+            let assertions = rule.assertions.iter().flat_map(|assertion| {
+                let shown = assertion.message.iter().filter_map(|part| match part {
+                    CompiledMessagePart::ValueOf(expression) => Some(expression),
+                    CompiledMessagePart::Text(_) | CompiledMessagePart::ContextName => None,
+                });
+                std::iter::once(&assertion.test).chain(shown)
+            });
+            std::iter::once(&rule.selection)
+                .chain(variables)
+                .chain(assertions)
+        });
+        globals.chain(rules)
     }
 
     /// The identifiers of all assertions of the rule file, in document order.
@@ -357,6 +411,22 @@ fn error_code(error: &impl std::fmt::Display) -> String {
     text.split_whitespace().next().unwrap_or(&text).to_owned()
 }
 
+/// What an expression is parsed and compiled against: the namespaces of the
+/// rule file and the variables the expression may read.
+fn static_context(
+    namespaces: &[(String, String)],
+    visible: &[String],
+) -> xee_xpath::context::StaticContext {
+    let mut builder = StaticContextBuilder::default();
+    builder.namespaces(
+        namespaces
+            .iter()
+            .map(|(prefix, uri)| (prefix.as_str(), uri.as_str())),
+    );
+    builder.variable_names(visible.iter().map(|name| OwnedName::name(name)));
+    builder.build()
+}
+
 struct Compiler<'a> {
     namespaces: &'a [(String, String)],
     functions: &'a [Function],
@@ -419,22 +489,20 @@ impl Compiler<'_> {
             })
             .cloned()
             .collect();
-        Ok(Expression { query, reads })
+        Ok(Expression {
+            query,
+            reads,
+            source: complete,
+            visible: visible.to_vec(),
+        })
     }
 
     /// Compiles an expression that declares exactly the variables in `visible`.
     /// The engine requires a value for every variable an expression declares,
     /// so no expression declares more than exists where it is evaluated.
     fn query(&self, expression: &str, visible: &[String]) -> Result<SequenceQuery, String> {
-        let mut builder = StaticContextBuilder::default();
-        builder.namespaces(
-            self.namespaces
-                .iter()
-                .map(|(prefix, uri)| (prefix.as_str(), uri.as_str())),
-        );
-        builder.variable_names(visible.iter().map(|name| OwnedName::name(name)));
         self.queries
-            .sequence_with_context(expression, builder.build())
+            .sequence_with_context(expression, static_context(self.namespaces, visible))
             .map_err(|error| error.to_string())
     }
 

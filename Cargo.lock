@@ -921,6 +921,7 @@ dependencies = [
  "roxmltree",
  "thiserror 2.0.21",
  "xee-xpath",
+ "xee-xpath-ast",
  "xot",
 ]
 
