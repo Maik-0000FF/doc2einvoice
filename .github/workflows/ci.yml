@@ -97,6 +97,10 @@ jobs:
       # A cache is found by its exact key or, failing that, by the newest one
       # of the same job: after a change of the dependencies only what changed
       # is compiled. Lints and tests compile differently and keep their own.
+      # A known limit: what an older set of dependencies left in the cache is
+      # never removed, so the cache grows with every such change until the
+      # platform evicts the oldest ones. Nothing stale is ever linked, only
+      # carried along.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -164,6 +168,34 @@ jobs:
       # committed ones. One platform answers that.
       - if: runner.os == 'Linux'
         run: npm run bindings:check
+
+  # The one check that says the gates on Linux passed. Whoever requires the
+  # gates, as the protection of a branch does, asks for this name and need not
+  # know how they are spread over jobs. The tests it waits for include the
+  # other platforms.
+  #
+  # | The jobs it waits for                     | This job |
+  # |-------------------------------------------|----------|
+  # | all ended in success                      | passes   |
+  # | one failed, was cancelled or was skipped  | fails    |
+  # | none reported a result                    | fails    |
+  quality:
+    name: Quality gates (Linux)
+    needs: [static, lint, tests]
+    # Without this the job would be skipped when a gate fails, and a skipped
+    # check counts as passed.
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every gate passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          [ -n "$RESULTS" ] || { echo "no gate reported a result"; exit 1; }
+          for result in $RESULTS; do
+            [ "$result" = success ] || { echo "a gate ended as: $result"; exit 1; }
+          done
 
   dependencies:
     name: Dependencies
