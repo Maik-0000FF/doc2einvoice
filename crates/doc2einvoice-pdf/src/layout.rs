@@ -42,6 +42,13 @@ const ASSUMED_ADVANCE_EM: f64 = 0.5;
 /// radians, about one degree) counts as horizontal.
 const HORIZONTAL_TOLERANCE: f64 = 0.02;
 
+/// Two characters with the same text whose origins are at most this far
+/// apart are one character drawn twice. Bold print and shadows are often made
+/// that way, with the copy moved by a few hundredths of the font size. Even
+/// the narrowest letters are about a fifth of the font size wide, so a letter
+/// that is truly doubled, as in "ll", stays far above the threshold.
+const COPY_DISTANCE_EM: f64 = 0.1;
+
 const WORD_SEPARATOR: char = ' ';
 const LINE_SEPARATOR: char = '\n';
 
@@ -122,6 +129,9 @@ pub struct PageLayout {
     /// Characters that were left out because their baseline is not
     /// horizontal, such as a watermark written across the page.
     pub off_axis_glyphs: usize,
+    /// Characters that were left out because they repeat a character at the
+    /// same place, as bold print made by drawing text twice does.
+    pub copied_glyphs: usize,
 }
 
 impl PageLayout {
@@ -147,15 +157,18 @@ impl PageLayout {
     /// | a font that states no advance                       | half the font size is      |
     /// |                                                     | assumed as the width       |
     /// | on a baseline that is not horizontal                | left out and counted       |
+    /// | the same text drawn twice at nearly the same place  | read once, the copy is     |
+    /// |                                                     | counted                    |
     #[must_use]
     pub fn of_glyphs(glyphs: &[Glyph]) -> Self {
         let (horizontal, off_axis): (Vec<&Glyph>, Vec<&Glyph>) = glyphs
             .iter()
             .partition(|glyph| glyph.rotation.abs() <= HORIZONTAL_TOLERANCE);
-        let lines = lines(horizontal);
+        let (lines, copied_glyphs) = lines(horizontal);
         Self {
             blocks: blocks(lines),
             off_axis_glyphs: off_axis.len(),
+            copied_glyphs,
         }
     }
 }
@@ -190,6 +203,38 @@ fn rows(mut glyphs: Vec<&Glyph>) -> Vec<Vec<&Glyph>> {
     rows
 }
 
+/// Leaves out the characters of a row that repeat one already there, and
+/// counts them. The row comes ordered from left to right.
+///
+/// | Two characters                                     | Result               |
+/// |----------------------------------------------------|----------------------|
+/// | the same text, origins nearly on each other        | one                  |
+/// | the same text three times, nearly on each other    | one                  |
+/// | the same text a letter width apart, as in "ll"     | both                 |
+/// | different texts at the same place, as a letter     | both                 |
+/// | and its accent                                     |                      |
+/// | the same text, a copy moved further than the       | both: a shadow set   |
+/// | threshold                                          | far off is read as   |
+/// |                                                    | text of its own      |
+fn without_copies(row: Vec<&Glyph>) -> (Vec<&Glyph>, usize) {
+    let mut kept: Vec<&Glyph> = Vec::with_capacity(row.len());
+    let mut copies = 0;
+    for glyph in row {
+        let reach = COPY_DISTANCE_EM * glyph.font_size;
+        let is_copy = kept
+            .iter()
+            .rev()
+            .take_while(|earlier| glyph.x - earlier.x <= reach)
+            .any(|earlier| earlier.text == glyph.text && (glyph.y - earlier.y).abs() <= reach);
+        if is_copy {
+            copies += 1;
+        } else {
+            kept.push(glyph);
+        }
+    }
+    (kept, copies)
+}
+
 /// A line that is still being read from left to right.
 struct OpenLine {
     words: Vec<Word>,
@@ -209,10 +254,14 @@ impl OpenLine {
     }
 }
 
-/// Cuts every row into lines and their words.
-fn lines(glyphs: Vec<&Glyph>) -> Vec<Line> {
+/// Cuts every row into lines and their words. Also returns how many
+/// characters were left out as copies.
+fn lines(glyphs: Vec<&Glyph>) -> (Vec<Line>, usize) {
     let mut lines = Vec::new();
+    let mut left_out = 0;
     for row in rows(glyphs) {
+        let (row, copies) = without_copies(row);
+        left_out += copies;
         let mut open: Option<OpenLine> = None;
         for glyph in row {
             let gap = open.as_ref().map(|line| glyph.x - line.right);
@@ -255,7 +304,7 @@ fn lines(glyphs: Vec<&Glyph>) -> Vec<Line> {
         }
         lines.extend(open.and_then(OpenLine::into_line));
     }
-    lines
+    (lines, left_out)
 }
 
 /// The representative of the set a line belongs to, in a forest of parents.

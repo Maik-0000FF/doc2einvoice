@@ -15,6 +15,9 @@
 //! | a row of spaces between two cells                   | two blocks          |
 //! | a ligature                                          | its letters, in one |
 //! |                                                     | word                |
+//! | a letter that is doubled in the word                | both letters        |
+//! | a letter and an accent at the same place            | both                |
+//! | the same letter three times at nearly one place     | once, two counted   |
 
 use doc2einvoice_pdf::{Glyph, PageLayout};
 
@@ -80,6 +83,42 @@ fn spaces_do_not_bridge_a_column_gap() {
     ));
 
     assert_eq!(block_texts(&glyphs), ["A", "B"]);
+}
+
+#[test]
+fn a_doubled_letter_is_not_a_copy() {
+    // The narrowest letters are about a fifth of the font size wide.
+    let narrow = FONT_SIZE / 5.0;
+    let glyphs = [
+        glyph("a", 0.0, LETTER_WIDTH),
+        glyph("l", LETTER_WIDTH, narrow),
+        glyph("l", LETTER_WIDTH + narrow, narrow),
+    ];
+    let layout = PageLayout::of_glyphs(&glyphs);
+
+    assert_eq!(block_texts(&glyphs), ["all"]);
+    assert_eq!(layout.copied_glyphs, 0);
+}
+
+#[test]
+fn an_accent_over_a_letter_is_not_a_copy() {
+    let glyphs = [glyph("e", 0.0, LETTER_WIDTH), glyph("\u{301}", 0.0, 0.0)];
+
+    assert_eq!(block_texts(&glyphs), ["e\u{301}"]);
+    assert_eq!(PageLayout::of_glyphs(&glyphs).copied_glyphs, 0);
+}
+
+#[test]
+fn three_copies_are_read_once() {
+    let shift = FONT_SIZE / 50.0;
+    let glyphs = [
+        glyph("A", 0.0, LETTER_WIDTH),
+        glyph("A", shift, LETTER_WIDTH),
+        glyph("A", 2.0 * shift, LETTER_WIDTH),
+    ];
+
+    assert_eq!(block_texts(&glyphs), ["A"]);
+    assert_eq!(PageLayout::of_glyphs(&glyphs).copied_glyphs, 2);
 }
 
 #[test]

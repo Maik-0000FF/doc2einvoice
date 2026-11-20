@@ -8,8 +8,9 @@
 //! place it would be painted at.
 //!
 //! A PDF comes from outside and may be far larger than any invoice, by
-//! accident or on purpose. [`Limits`] bound what is read. They bound the
-//! memory a reading takes. They do not bound its time: the interpreter cannot
+//! accident or on purpose. [`Limits`] bound what is read. Together with the
+//! longest text a single character may stand for, they bound the memory a
+//! reading takes. They do not bound its time: the interpreter cannot
 //! be stopped inside a page, so a single page that draws a vast number of
 //! characters is run to its end before it is refused. That is a decision: the
 //! limit on the size of the data keeps such a page within what a machine
@@ -35,6 +36,15 @@ const GLYPH_UNITS_PER_EM: f64 = 1000.0;
 /// Half the side of the area the interpreter is told is visible. Characters
 /// are noted wherever they stand, so the area only has to contain any page.
 const VISIBLE_HALF_EXTENT: f64 = 1.0e6;
+
+/// The longest text one character may stand for, in characters. A ligature
+/// stands for a few letters. A file can map a character to a text of any
+/// length; without this limit the number of characters would say nothing
+/// about the memory they take.
+const MAX_GLYPH_TEXT_CHARS: usize = 16;
+
+/// The scale of text that is neither condensed nor spread.
+const FULL_WIDTH: f64 = 1.0;
 
 const BYTES_PER_MEBIBYTE: usize = 1024 * 1024;
 
@@ -91,8 +101,8 @@ pub fn read(data: &[u8]) -> Result<Vec<Page>, PdfError> {
 /// | one page more than the limit                     | [`PdfError::TooManyPages`]  |
 /// | one character more than the limit, on one page   | [`PdfError::TooMuchText`]   |
 /// | or spread over several                           |                             |
-/// | characters the file gives no text for            | not counted against the     |
-/// |                                                  | limit: they are not kept    |
+/// | characters the file gives no text for, or a text | not counted against the     |
+/// | no single character stands for                   | limit: they are not kept    |
 /// | no data at all, or data that is no PDF           | [`PdfError::Invalid`]       |
 /// | an encrypted PDF that opens without a password   | read like any other         |
 /// | an encrypted PDF that does not                   | [`PdfError::Encrypted`]     |
@@ -184,52 +194,80 @@ struct Collector {
     unreadable: usize,
 }
 
+/// A drawn character whose advance is not settled yet.
+struct Placed {
+    text: String,
+    origin: Point,
+    font_size: f64,
+    rotation: f64,
+    /// The width the font states, in thousandths of the font size.
+    width: Option<f64>,
+}
+
+impl Placed {
+    /// How far the font alone moves the next character, at full width.
+    fn nominal_advance(&self) -> Option<f64> {
+        self.width
+            .map(|width| self.font_size * width / GLYPH_UNITS_PER_EM)
+            .filter(|advance| advance.is_finite() && *advance > 0.0)
+    }
+}
+
 impl Collector {
-    /// Turns a drawn character into a [`Glyph`].
+    /// Reads the place of a drawn character.
+    ///
+    /// The font size is measured upwards from the baseline. Along the baseline
+    /// the interpreter may have stretched the character, to condense the text
+    /// or to fit the shape of a substitute font to the width of the missing
+    /// one; that direction says nothing about the size.
     ///
     /// | Character                                     | Result                    |
     /// |-----------------------------------------------|---------------------------|
-    /// | has a text, a finite place and a size above 0 | kept                      |
-    /// | its text is white space only                  | kept: the layout reads it |
+    /// | has a text, a finite place and a size above 0 | read                      |
+    /// | its text is white space only                  | read: the layout takes it |
     /// |                                               | as a gap                  |
+    /// | stretched or condensed along the baseline     | read, with the size it    |
+    /// |                                               | has upwards               |
     /// | the file gives no text for it                 | `None`                    |
     /// | its text is empty                             | `None`                    |
+    /// | its text is longer than the limit             | `None`                    |
     /// | place or size is not a finite number          | `None`                    |
-    /// | its size is zero                              | `None`                    |
-    /// | the font states no advance, or not a finite   | kept with advance zero    |
-    /// | one                                           |                           |
-    fn glyph(&self, drawn: &DrawnGlyph<'_>, placement: Affine) -> Option<Glyph> {
+    /// | its size is zero, or it has no extent along   | `None`: it has no         |
+    /// | the baseline                                  | direction                 |
+    fn place(&self, drawn: &DrawnGlyph<'_>, placement: Affine) -> Option<Placed> {
         let text = match drawn.as_unicode()? {
             BfString::Char(character) => character.to_string(),
             BfString::String(text) => text,
         };
+        if text.is_empty() || text.chars().nth(MAX_GLYPH_TEXT_CHARS).is_some() {
+            return None;
+        }
         let placement = self.to_display * placement;
         let origin = placement * Point::ZERO;
-        let em = placement * Point::new(GLYPH_UNITS_PER_EM, 0.0) - origin;
-        let font_size = em.hypot();
-        let usable = !text.is_empty()
-            && origin.x.is_finite()
+        let along = placement * Point::new(GLYPH_UNITS_PER_EM, 0.0) - origin;
+        let upwards = placement * Point::new(0.0, GLYPH_UNITS_PER_EM) - origin;
+        let font_size = upwards.hypot();
+        let extent = along.hypot();
+        let usable = origin.x.is_finite()
             && origin.y.is_finite()
             && font_size.is_finite()
-            && font_size > 0.0;
+            && font_size > 0.0
+            && extent.is_finite()
+            && extent > 0.0;
         if !usable {
             return None;
         }
-        let advance = match drawn {
+        let width = match drawn {
             DrawnGlyph::Outline(outline) => outline.advance_width(),
             DrawnGlyph::Type3(type3) => type3.advance_width(),
-        }
-        .map(|units| font_size * f64::from(units) / GLYPH_UNITS_PER_EM)
-        .filter(|advance| advance.is_finite())
-        .unwrap_or(0.0);
+        };
 
-        Some(Glyph {
+        Some(Placed {
             text,
-            x: origin.x,
-            y: origin.y,
-            advance,
+            origin,
             font_size,
-            rotation: em.y.atan2(em.x),
+            rotation: along.y.atan2(along.x),
+            width: width.map(f64::from),
         })
     }
 
@@ -245,13 +283,72 @@ impl Collector {
     }
 }
 
+/// How much the characters of a run are condensed or spread along the
+/// baseline, compared to the widths their font states.
+///
+/// It is measured on the run itself: the distance from each character to the
+/// next, divided by the width the font states for it. The middle value of all
+/// pairs is taken, so that the few pairs a file moves apart or together by
+/// hand (kerning, a gap instead of a space) do not change it.
+///
+/// | Run                                               | Scale                     |
+/// |---------------------------------------------------|---------------------------|
+/// | characters following each other at their widths   | 1                         |
+/// | text condensed to half its width                  | 0.5                       |
+/// | a substitute font with stretched shapes           | 1: the shapes are not     |
+/// |                                                   | looked at                 |
+/// | some pairs kerned or set apart                    | as without them           |
+/// | every letter spaced out                           | above 1: the spacing      |
+/// |                                                   | counts as width, the      |
+/// |                                                   | letters stay one word     |
+/// | a single character, or none with a stated width   | 1: nothing to measure.    |
+/// |                                                   | Such a character in       |
+/// |                                                   | condensed text gets the   |
+/// |                                                   | advance of full width     |
+/// | characters drawn on top of each other             | 1                         |
+fn horizontal_scale(run: &[Option<Placed>]) -> f64 {
+    let mut ratios: Vec<f64> = run
+        .windows(2)
+        .filter_map(|pair| match pair {
+            [Some(this), Some(next)] => {
+                let distance = (next.origin - this.origin).hypot();
+                this.nominal_advance().map(|nominal| distance / nominal)
+            }
+            _ => None,
+        })
+        .filter(|ratio| ratio.is_finite() && *ratio > 0.0)
+        .collect();
+    if ratios.is_empty() {
+        return FULL_WIDTH;
+    }
+    ratios.sort_by(f64::total_cmp);
+    ratios[ratios.len() / 2]
+}
+
 impl Device<'_> for Collector {
     fn draw_glyph_run(&mut self, run: &GlyphRun<'_, '_>, props: DrawProps<'_>, _: &DrawMode) {
-        for drawn in run.glyphs() {
-            match self.glyph(drawn, props.transform * drawn.transform()) {
-                Some(glyph) => self.keep(glyph),
-                None => self.unreadable += 1,
-            }
+        let placed: Vec<Option<Placed>> = run
+            .glyphs()
+            .iter()
+            .map(|drawn| self.place(drawn, props.transform * drawn.transform()))
+            .collect();
+        let scale = horizontal_scale(&placed);
+        for character in placed {
+            let Some(character) = character else {
+                self.unreadable += 1;
+                continue;
+            };
+            let advance = character
+                .nominal_advance()
+                .map_or(0.0, |nominal| nominal * scale);
+            self.keep(Glyph {
+                text: character.text,
+                x: character.origin.x,
+                y: character.origin.y,
+                advance,
+                font_size: character.font_size,
+                rotation: character.rotation,
+            });
         }
     }
 

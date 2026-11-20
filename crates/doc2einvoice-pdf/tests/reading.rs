@@ -16,6 +16,7 @@
 //! | the same text drawn in another order                | the same layout                      |
 //! | a page shown turned, with text upright as shown     | read upright, page size as shown     |
 //! | text written at an angle across the page            | left out and counted                 |
+//! | a word drawn twice, slightly moved, to look bold    | read once, the copy is counted       |
 //! | a page without text                                 | a page without glyphs and blocks     |
 //! | no data, and data that is no PDF                    | `Invalid`                            |
 
@@ -156,6 +157,20 @@ fn text_at_an_angle_is_left_out_and_counted() -> Result<(), PdfError> {
 
     assert!(layout.blocks.is_empty());
     assert_eq!(layout.off_axis_glyphs, WATERMARK.len());
+    Ok(())
+}
+
+#[test]
+fn text_drawn_twice_is_read_once() -> Result<(), PdfError> {
+    const WORD: &str = "Total";
+    /// How far the copy is moved to the right, in points.
+    const SHIFT: f64 = 0.3;
+    let content = text_at(LEFT_COLUMN, FIRST_BASELINE, WORD)
+        + &text_at(LEFT_COLUMN + SHIFT, FIRST_BASELINE, WORD);
+    let layout = layout_of(&content)?;
+
+    assert_eq!(block_texts(&layout), [WORD]);
+    assert_eq!(layout.copied_glyphs, WORD.len());
     Ok(())
 }
 
