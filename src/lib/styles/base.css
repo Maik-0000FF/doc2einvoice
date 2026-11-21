@@ -37,6 +37,13 @@ textarea {
   color: inherit;
 }
 
+/* The one focus ring: every control the keyboard reaches shows it, in the same
+   colour and width. Only keyboard focus is marked, not a click with the mouse. */
+:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus);
+  outline-offset: var(--focus-ring-offset);
+}
+
 /* A path, an address or an identifier is one word that may be longer than the
    space it is shown in. The building blocks take this rule from here. */
 .long-words {

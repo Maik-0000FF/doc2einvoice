@@ -85,6 +85,12 @@ SPDX-License-Identifier: GPL-3.0-or-later
     color: var(--color-text);
   }
 
+  /* The dialog takes the focus only so that reading starts at its top; it is
+     no control, so it is not marked as one. */
+  .dialog:focus-visible {
+    outline: none;
+  }
+
   .dialog::backdrop {
     background: var(--color-backdrop);
   }
