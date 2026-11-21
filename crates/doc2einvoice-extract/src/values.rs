@@ -13,6 +13,7 @@ use std::str::FromStr;
 
 use chrono::NaiveDate;
 use doc2einvoice_model::{Amount, CurrencyCode, DATE_FORMAT};
+use iban::{Iban, IbanLike};
 use rust_decimal::Decimal;
 
 use crate::labels::{NUMBER_MARKERS, normalized};
@@ -91,6 +92,21 @@ const GROUP_DIGITS: usize = 3;
 
 /// Currency marks that name exactly one currency.
 const CURRENCY_SYMBOLS: [(&str, &str); 2] = [("€", "EUR"), ("£", "GBP")];
+
+/// The letters of the country a VAT identifier starts with.
+const VAT_COUNTRY_LETTERS: usize = 2;
+
+/// The longest VAT identifier of a member state, its country letters
+/// included.
+const VAT_IDENTIFIER_MOST: usize = 14;
+
+/// Characters a VAT identifier holds after its country letters, besides
+/// digits and capital letters.
+const VAT_IDENTIFIER_MARKS: [char; 2] = ['+', '*'];
+
+/// How many words an IBAN printed in groups of four spans at most: 34
+/// characters.
+const IBAN_WORDS_MOST: usize = 9;
 
 /// The sign of a rate, as in `19 %` or `19%`.
 const PERCENT: char = '%';
@@ -426,6 +442,66 @@ pub fn joined_symbol(word: &str) -> Option<String> {
     has_decimals(word).then(|| (*code).to_owned())
 }
 
+/// The VAT identifier the first word stands for: two capital letters of a
+/// country, then digits and capital letters, a digit among them.
+///
+/// | Words           | Read            |
+/// |-----------------|-----------------|
+/// | `DE123456789`   | `DE123456789`   |
+/// | `ATU12345678`   | `ATU12345678`   |
+/// | `FR11999999998` | `FR11999999998` |
+/// | `DE123456789,`  | `DE123456789`   |
+/// | `DE`            | none            |
+/// | `123456789`     | none (no country) |
+/// | `DEUTSCHLAND`   | none (no digit) |
+/// | `de123456789`   | none            |
+/// | `DE123456789012345` | none (too long) |
+/// | `CHE-123.456.789` | none (not the form of a member state) |
+pub fn vat_identifier(words: &[&str]) -> Option<Read> {
+    let word = words.first()?.trim_end_matches(TRAILING);
+    let (country, rest) = (
+        word.get(..VAT_COUNTRY_LETTERS)?,
+        word.get(VAT_COUNTRY_LETTERS..)?,
+    );
+    let well_formed = country.chars().all(|c| c.is_ascii_uppercase())
+        && word.len() <= VAT_IDENTIFIER_MOST
+        && rest.chars().any(|c| c.is_ascii_digit())
+        && rest.chars().all(|c| {
+            c.is_ascii_digit() || c.is_ascii_uppercase() || VAT_IDENTIFIER_MARKS.contains(&c)
+        });
+    well_formed.then(|| Read {
+        text: word.to_owned(),
+        skipped: 0,
+        used: 1,
+    })
+}
+
+/// The IBAN the first words stand for, whether printed in one or in groups
+/// of four, as the library for IBANs checks it: the fewest words from the
+/// first on that form a valid IBAN. It is written in its electronic form.
+///
+/// | Words                                    | Read                      |
+/// |------------------------------------------|---------------------------|
+/// | `DE02120300000000202051`                 | that, one word            |
+/// | `DE02` `1203` `0000` `0000` `2020` `51`  | `DE02120300000000202051`, six words |
+/// | the same, then `BIC:`                    | the same                  |
+/// | `DE02` `1203` `0000` `0000` `2020` `52`  | none (wrong check digits) |
+/// | `4711`                                   | none                      |
+pub fn iban(words: &[&str]) -> Option<Read> {
+    (1..=IBAN_WORDS_MOST.min(words.len())).find_map(|used| {
+        let joined: String = words[..used]
+            .iter()
+            .map(|word| word.trim_end_matches(TRAILING))
+            .collect();
+        let parsed = joined.parse::<Iban>().ok()?;
+        Some(Read {
+            text: parsed.electronic_str().to_owned(),
+            skipped: 0,
+            used,
+        })
+    })
+}
+
 /// A text as printed: all the words, one space between each, if one of
 /// them holds a letter.
 ///
@@ -465,8 +541,8 @@ pub fn currency(words: &[&str]) -> Option<Read> {
 #[cfg(test)]
 mod tests {
     use super::{
-        amount, currency, currency_mark, date, has_decimals, identifier, joined_symbol, monetary,
-        text as text_of,
+        amount, currency, currency_mark, date, has_decimals, iban, identifier, joined_symbol,
+        monetary, text as text_of, vat_identifier,
     };
 
     fn text(read: Option<super::Read>) -> Option<String> {
@@ -595,6 +671,38 @@ mod tests {
             let expected = expected.map(|(text, skipped)| (text.to_owned(), skipped));
             assert_eq!(read, expected, "{words:?}");
         }
+    }
+
+    #[test]
+    fn vat_identifiers_follow_their_table() {
+        let rows = [
+            ("DE123456789", Some("DE123456789")),
+            ("ATU12345678", Some("ATU12345678")),
+            ("FR11999999998", Some("FR11999999998")),
+            ("DE123456789,", Some("DE123456789")),
+            ("DE", None),
+            ("123456789", None),
+            ("DEUTSCHLAND", None),
+            ("de123456789", None),
+            ("DE123456789012345", None),
+            ("CHE-123.456.789", None),
+        ];
+        for (word, expected) in rows {
+            assert_eq!(text(vat_identifier(&[word])).as_deref(), expected, "{word}");
+        }
+    }
+
+    #[test]
+    fn ibans_follow_their_table() {
+        let grouped = ["DE02", "1203", "0000", "0000", "2020", "51", "BIC:"];
+        let read = iban(&grouped).map(|read| (read.text, read.used));
+        assert_eq!(read, Some(("DE02120300000000202051".to_owned(), 6)));
+        assert_eq!(
+            text(iban(&["DE02120300000000202051"])).as_deref(),
+            Some("DE02120300000000202051")
+        );
+        assert_eq!(iban(&["DE02", "1203", "0000", "0000", "2020", "52"]), None);
+        assert_eq!(iban(&["4711"]), None);
     }
 
     #[test]

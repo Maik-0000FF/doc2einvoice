@@ -971,6 +971,7 @@ dependencies = [
  "doc2einvoice-model",
  "doc2einvoice-pdf",
  "doc2einvoice-syntax",
+ "iban_validate",
  "lopdf",
  "roxmltree",
  "rust_decimal",

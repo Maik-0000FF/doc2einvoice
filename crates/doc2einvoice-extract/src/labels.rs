@@ -58,9 +58,16 @@ pub enum Names {
     /// "Bestelldatum": the label only keeps its words from the labels read
     /// here.
     Nothing,
-    /// The name of a party, whichever party the section it stands in is
-    /// about: "Name".
-    PartyName,
+    /// A field of a party, whichever party the section it stands in is
+    /// about: "Name", "USt-IdNr.".
+    PartyField(PartyField),
+}
+
+/// A field every party has, which its section gives a business term.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PartyField {
+    Name,
+    VatIdentifier,
 }
 
 /// A label: its words, what it names, where it counts and how much it says.
@@ -72,19 +79,12 @@ pub struct Label {
     pub weight: Weight,
 }
 
-impl Label {
-    /// Whether the label names the business term `term`.
-    pub fn names_term(&self, term: u16) -> bool {
-        self.names == Names::Term(term)
-    }
-}
-
 /// The business terms of the labels.
 pub const INVOICE_NUMBER: u16 = 1;
 pub const ISSUE_DATE: u16 = 2;
 pub const CURRENCY: u16 = 5;
 pub const DUE_DATE: u16 = 9;
-const PURCHASE_ORDER: u16 = 13;
+pub const PURCHASE_ORDER: u16 = 13;
 const PRECEDING_INVOICE: u16 = 25;
 pub const DELIVERY_DATE: u16 = 72;
 const LINE_TOTAL: u16 = 106;
@@ -94,12 +94,15 @@ pub const TOTAL_WITHOUT_VAT: u16 = 109;
 pub const VAT_TOTAL: u16 = 110;
 pub const TOTAL_WITH_VAT: u16 = 112;
 const PAID: u16 = 113;
+/// The account to transfer to (BT-84), and the account a direct debit
+/// takes from (BT-91), which only keeps its words from the other.
+pub const PAYMENT_ACCOUNT: u16 = 84;
+const DEBITED_ACCOUNT: u16 = 91;
 /// Terms whose labels only keep their words from the labels read here.
 const BUYER_IDENTIFIER: u16 = 46;
 const SELLER_TAX_NUMBER: u16 = 32;
 const DESPATCH_ADVICE: u16 = 16;
 const SALES_ORDER: u16 = 14;
-const SELLER_VAT_IDENTIFIER: u16 = 31;
 pub const AMOUNT_DUE: u16 = 115;
 
 const fn label(words: &'static [Word], term: u16, scope: Scope) -> Label {
@@ -117,6 +120,17 @@ const fn general(words: &'static [Word], term: u16, scope: Scope) -> Label {
         names: Names::Term(term),
         scope,
         weight: Weight::General,
+    }
+}
+
+/// A label of a field of a party, which the section it stands in gives a
+/// term.
+const fn party(words: &'static [Word], field: PartyField) -> Label {
+    Label {
+        words,
+        names: Names::PartyField(field),
+        scope: Scope::Anywhere,
+        weight: Weight::Specific,
     }
 }
 
@@ -326,7 +340,28 @@ pub const LABELS: &[Label] = &[
         Anywhere,
     ),
     // Terms not read yet, which keep their words from shorter labels.
+    // The purchase order reference (BT-13).
     label(&[Is("bestellung"), Is("nr")], PURCHASE_ORDER, Anywhere),
+    label(
+        &[Is("bestellung"), Is("nr"), Is("kunde")],
+        PURCHASE_ORDER,
+        Anywhere,
+    ),
+    label(&[Is("ihre"), Is("bestellung")], PURCHASE_ORDER, Anywhere),
+    label(&[Is("ihre"), Is("bestellnummer")], PURCHASE_ORDER, Anywhere),
+    label(&[Is("purchase"), Is("order")], PURCHASE_ORDER, Anywhere),
+    label(&[Is("order"), Is("reference")], PURCHASE_ORDER, Anywhere),
+    label(&[Is("po"), Is("number")], PURCHASE_ORDER, Anywhere),
+    label(&[Is("votre"), Is("commande")], PURCHASE_ORDER, Anywhere),
+    label(
+        &[Is("n°"), Is("de"), Is("commande")],
+        PURCHASE_ORDER,
+        Anywhere,
+    ),
+    // The account to transfer to (BT-84).
+    label(&[Is("iban")], PAYMENT_ACCOUNT, Anywhere),
+    label(&[Is("verkäufer-iban")], PAYMENT_ACCOUNT, Anywhere),
+    label(&[Is("käufer-iban")], DEBITED_ACCOUNT, Anywhere),
     label(&[Is("bestellnummer")], PURCHASE_ORDER, Anywhere),
     label(&[Is("your"), Is("order")], PURCHASE_ORDER, Anywhere),
     label(&[Is("facture"), Is("liée")], PRECEDING_INVOICE, Anywhere),
@@ -346,12 +381,7 @@ pub const LABELS: &[Label] = &[
     label(&[Is("bereits"), Is("gezahlt")], PAID, Anywhere),
     label(&[Is("paid"), Is("amount")], PAID, Anywhere),
     // "Name" outside any section; a section gives it its term.
-    Label {
-        words: NAME,
-        names: Names::PartyName,
-        scope: Anywhere,
-        weight: Weight::Specific,
-    },
+    party(NAME, PartyField::Name),
     // Other numbers, which keep a title such as "Rechnung" from them.
     label(&[Is("kunden"), Is("nr")], BUYER_IDENTIFIER, Anywhere),
     label(&[Is("kunden-nr")], BUYER_IDENTIFIER, Anywhere),
@@ -373,10 +403,55 @@ pub const LABELS: &[Label] = &[
     label(&[Is("steuer-nr")], SELLER_TAX_NUMBER, Anywhere),
     label(&[Is("steuernummer")], SELLER_TAX_NUMBER, Anywhere),
     label(&[Is("steuer"), Is("nr")], SELLER_TAX_NUMBER, Anywhere),
-    label(&[Is("ust-idnr")], SELLER_VAT_IDENTIFIER, Anywhere),
-    label(&[Is("ust.-id.-nr")], SELLER_VAT_IDENTIFIER, Anywhere),
-    label(&[Is("ust-id")], SELLER_VAT_IDENTIFIER, Anywhere),
-    label(&[Is("vat"), Is("id")], SELLER_VAT_IDENTIFIER, Anywhere),
+    // The VAT identifier of the party whose section it stands in.
+    party(&[Is("ust-idnr")], PartyField::VatIdentifier),
+    party(&[Is("ust.-id.-nr")], PartyField::VatIdentifier),
+    party(&[Is("ust-id")], PartyField::VatIdentifier),
+    party(&[Is("ust-id-nr")], PartyField::VatIdentifier),
+    party(&[Is("ust.-idnr")], PartyField::VatIdentifier),
+    party(
+        &[Is("umsatzsteuer-identifikationsnummer")],
+        PartyField::VatIdentifier,
+    ),
+    party(&[Is("vat"), Is("id")], PartyField::VatIdentifier),
+    party(&[Is("vat"), Is("number")], PartyField::VatIdentifier),
+    party(&[Is("vat"), Is("no")], PartyField::VatIdentifier),
+    party(&[Is("vat"), Is("reg"), Is("no")], PartyField::VatIdentifier),
+    party(&[Is("n°"), Is("tva")], PartyField::VatIdentifier),
+    party(
+        &[Is("numéro"), Is("de"), Is("tva")],
+        PartyField::VatIdentifier,
+    ),
+    party(
+        &[Is("tva"), Is("intracommunautaire")],
+        PartyField::VatIdentifier,
+    ),
+    // VAT identifiers whose label says whose they are.
+    label(
+        &[Is("unsere"), Is("ust-idnr")],
+        SELLER_VAT_IDENTIFIER,
+        Anywhere,
+    ),
+    label(
+        &[Is("our"), Is("vat"), Is("id")],
+        SELLER_VAT_IDENTIFIER,
+        Anywhere,
+    ),
+    label(
+        &[Is("ihre"), Is("ust-idnr")],
+        BUYER_VAT_IDENTIFIER,
+        Anywhere,
+    ),
+    label(
+        &[Is("your"), Is("vat"), Is("id")],
+        BUYER_VAT_IDENTIFIER,
+        Anywhere,
+    ),
+    label(
+        &[Is("n°"), Is("tva"), Is("client")],
+        BUYER_VAT_IDENTIFIER,
+        Anywhere,
+    ),
     // Other dates, which keep "Datum" and "Date" from them.
     blocking(&[Is("bestelldatum")], Anywhere),
     blocking(&[Is("order"), Is("date")], Anywhere),
@@ -405,28 +480,24 @@ pub enum Party {
     TaxRepresentative,
 }
 
-/// The business terms of the names of the parties.
+/// The business terms of the fields of the parties.
 pub const SELLER_NAME: u16 = 27;
+pub const SELLER_VAT_IDENTIFIER: u16 = 31;
 pub const BUYER_NAME: u16 = 44;
+pub const BUYER_VAT_IDENTIFIER: u16 = 48;
 const PAYEE_NAME: u16 = 59;
 const TAX_REPRESENTATIVE_NAME: u16 = 62;
+const TAX_REPRESENTATIVE_VAT_IDENTIFIER: u16 = 63;
 const DELIVER_TO_NAME: u16 = 70;
 
 /// The label "Name", which names the name of the party whose section it
 /// stands in.
 const NAME: &[Word] = &[Is("name")];
 
-/// "Name" in the section of each party.
-const SELLER_NAME_LABEL: Label = label(NAME, SELLER_NAME, Anywhere);
-const BUYER_NAME_LABEL: Label = label(NAME, BUYER_NAME, Anywhere);
-const DELIVER_TO_NAME_LABEL: Label = label(NAME, DELIVER_TO_NAME, Anywhere);
-const PAYEE_NAME_LABEL: Label = label(NAME, PAYEE_NAME, Anywhere);
-const TAX_REPRESENTATIVE_NAME_LABEL: Label = label(NAME, TAX_REPRESENTATIVE_NAME, Anywhere);
-
 /// What a section of an invoice is about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Section {
-    /// A party, whose name "Name" in the section names.
+    /// A party, whose fields the labels in the section name.
     Party(Party),
     /// Something else, as the bank account: it ends the section of a party,
     /// so that the name of the bank is not the name of the seller.
@@ -522,20 +593,27 @@ pub fn heading(words: &[&str]) -> Option<Section> {
     })
 }
 
-/// The label "Name" stands for in the section of `party`.
-pub fn party_name(party: Party) -> &'static Label {
-    match party {
-        Party::Seller => &SELLER_NAME_LABEL,
-        Party::Buyer => &BUYER_NAME_LABEL,
-        Party::DeliverTo => &DELIVER_TO_NAME_LABEL,
-        Party::Payee => &PAYEE_NAME_LABEL,
-        Party::TaxRepresentative => &TAX_REPRESENTATIVE_NAME_LABEL,
+/// The business term `field` is in the section of `party`, if the standard
+/// has one: the party delivered to has a name but no VAT identifier.
+///
+/// | Field          | Seller | Buyer | Deliver to | Payee | Tax representative |
+/// |----------------|--------|-------|------------|-------|--------------------|
+/// | name           | BT-27  | BT-44 | BT-70      | BT-59 | BT-62              |
+/// | VAT identifier | BT-31  | BT-48 | none       | none  | BT-63              |
+pub fn party_term(field: PartyField, party: Party) -> Option<u16> {
+    match (field, party) {
+        (PartyField::Name, Party::Seller) => Some(SELLER_NAME),
+        (PartyField::Name, Party::Buyer) => Some(BUYER_NAME),
+        (PartyField::Name, Party::DeliverTo) => Some(DELIVER_TO_NAME),
+        (PartyField::Name, Party::Payee) => Some(PAYEE_NAME),
+        (PartyField::Name, Party::TaxRepresentative) => Some(TAX_REPRESENTATIVE_NAME),
+        (PartyField::VatIdentifier, Party::Seller) => Some(SELLER_VAT_IDENTIFIER),
+        (PartyField::VatIdentifier, Party::Buyer) => Some(BUYER_VAT_IDENTIFIER),
+        (PartyField::VatIdentifier, Party::TaxRepresentative) => {
+            Some(TAX_REPRESENTATIVE_VAT_IDENTIFIER)
+        }
+        (PartyField::VatIdentifier, Party::DeliverTo | Party::Payee) => None,
     }
-}
-
-/// Whether `found` is the label "Name", which only a section gives a term.
-pub fn is_party_name(found: &Found) -> bool {
-    found.label.names == Names::PartyName
 }
 
 /// Characters a printed word may end in that do not belong to the word of
@@ -571,6 +649,9 @@ fn matches(pattern: Word, word: &str) -> bool {
 #[derive(Debug, Clone, Copy)]
 pub struct Found {
     pub label: &'static Label,
+    /// What the label names where it stands: what the label itself names,
+    /// or the term of the field of the party whose section it stands in.
+    pub names: Names,
     /// The first word of the label.
     pub first: usize,
     /// The word after the label.
@@ -604,6 +685,7 @@ pub fn find(words: &[&str]) -> Vec<Found> {
             Some((label, end)) => {
                 found.push(Found {
                     label,
+                    names: label.names,
                     first: at,
                     end,
                 });
@@ -641,7 +723,7 @@ mod tests {
             .iter()
             .filter_map(|found| match found.label.names {
                 Names::Term(term) => Some((term, found.first, found.end)),
-                Names::Nothing | Names::PartyName => None,
+                Names::Nothing | Names::PartyField(_) => None,
             })
             .collect()
     }

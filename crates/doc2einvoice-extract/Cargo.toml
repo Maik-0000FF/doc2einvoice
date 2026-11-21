@@ -15,6 +15,7 @@ publish.workspace = true
 chrono.workspace = true
 doc2einvoice-model.workspace = true
 doc2einvoice-pdf.workspace = true
+iban_validate.workspace = true
 rust_decimal.workspace = true
 
 [dev-dependencies]
