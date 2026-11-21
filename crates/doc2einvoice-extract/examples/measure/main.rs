@@ -6,8 +6,11 @@
 //! the values the XML holds the draft found, and how many it got wrong.
 //!
 //! ```text
-//! cargo run --example measure -- <folder>...
+//! cargo run --example measure -- [--differences] <folder>...
 //! ```
+//!
+//! With `--differences`, the report also lists each place at which the draft
+//! differs from the XML, for the terms the extraction found anywhere.
 //!
 //! Every PDF below the folders is read; links to folders are not followed.
 //! The report goes to standard output as Markdown; the invoices themselves
@@ -28,6 +31,9 @@ use doc2einvoice_extract::extract;
 use doc2einvoice_model::{Draft, Term, term_by_number};
 use doc2einvoice_pdf::PageLayout;
 use expected::{Expected, Place};
+
+/// The option that lists the differences.
+const DIFFERENCES: &str = "--differences";
 
 /// The extension of the files read.
 const PDF_EXTENSION: &str = "pdf";
@@ -68,16 +74,29 @@ impl Count {
     }
 }
 
+/// A place at which the draft differs from the XML.
+struct Difference {
+    place: Place,
+    expected: Vec<String>,
+    found: Vec<String>,
+}
+
 enum Measured {
-    Values(BTreeMap<u16, Count>, Vec<u16>),
+    Values(BTreeMap<u16, Count>, Vec<Difference>, Vec<u16>),
     WithoutInvoice,
     Unreadable,
 }
 
 fn main() -> ExitCode {
-    let folders: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
+    let arguments: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    let listed = arguments.iter().any(|argument| argument == DIFFERENCES);
+    let folders: Vec<PathBuf> = arguments
+        .into_iter()
+        .filter(|argument| argument != DIFFERENCES)
+        .map(PathBuf::from)
+        .collect();
     if folders.is_empty() {
-        eprintln!("usage: measure <folder>...");
+        eprintln!("usage: measure [{DIFFERENCES}] <folder>...");
         return ExitCode::FAILURE;
     }
     let mut paths = Vec::new();
@@ -93,9 +112,10 @@ fn main() -> ExitCode {
     let expected = Expected::new();
     let mut files = Files::default();
     let mut counts: BTreeMap<u16, Count> = BTreeMap::new();
+    let mut differences: Vec<(PathBuf, Difference)> = Vec::new();
     for path in paths {
         match measure(&path, &expected) {
-            Measured::Values(found, unevaluated) => {
+            Measured::Values(found, differing, unevaluated) => {
                 files.measured += 1;
                 for term in unevaluated {
                     *files.unevaluated.entry(term).or_default() += 1;
@@ -103,12 +123,20 @@ fn main() -> ExitCode {
                 for (term, count) in found {
                     counts.entry(term).or_default().add(count);
                 }
+                differences.extend(
+                    differing
+                        .into_iter()
+                        .map(|difference| (path.clone(), difference)),
+                );
             }
             Measured::WithoutInvoice => files.without_invoice += 1,
             Measured::Unreadable => files.unreadable.push(path),
         }
     }
     print!("{}", report(&files, &counts));
+    if listed {
+        print!("{}", listing(&differences, &counts));
+    }
     ExitCode::SUCCESS
 }
 
@@ -161,7 +189,8 @@ fn measure(path: &Path, expected: &Expected) -> Measured {
     let Some(values) = expected.values(&xml) else {
         return Measured::Unreadable;
     };
-    Measured::Values(tally(&draft, &values.found), values.unevaluated)
+    let (counts, differing) = tally(&draft, &values.found);
+    Measured::Values(counts, differing, values.unevaluated)
 }
 
 /// The counts per business term, over every place the XML or the draft has
@@ -179,7 +208,12 @@ fn measure(path: &Path, expected: &Expected) -> Measured {
 /// | `A`              | `A`, `A`                | 1        | 2     | 1       |
 /// | `A` of BT-1      | `A` under a number no term has | BT-1: 1 | 0 | 0 |
 /// |                  |                         | the number: 0 | 1 | 0 |
-fn tally(draft: &Draft, expected: &BTreeMap<Place, Vec<String>>) -> BTreeMap<u16, Count> {
+///
+/// The places at which not every value matches are returned as well.
+fn tally(
+    draft: &Draft,
+    expected: &BTreeMap<Place, Vec<String>>,
+) -> (BTreeMap<u16, Count>, Vec<Difference>) {
     let mut found: BTreeMap<Place, Vec<&str>> = BTreeMap::new();
     for entry in &draft.entries {
         let place = Place {
@@ -190,15 +224,21 @@ fn tally(draft: &Draft, expected: &BTreeMap<Place, Vec<String>>) -> BTreeMap<u16
     }
     let places: BTreeSet<Place> = expected.keys().chain(found.keys()).copied().collect();
     let mut counts: BTreeMap<u16, Count> = BTreeMap::new();
+    let mut differences = Vec::new();
     for place in places {
         let wanted = expected.get(&place).map_or(&[][..], Vec::as_slice);
         let given = found.get(&place).map_or(&[][..], Vec::as_slice);
-        counts
-            .entry(place.term)
-            .or_default()
-            .add(count(place.term, given, wanted));
+        let count = count(place.term, given, wanted);
+        if count.wrong() > 0 || count.missing() > 0 {
+            differences.push(Difference {
+                place,
+                expected: wanted.to_vec(),
+                found: given.iter().map(|text| (*text).to_owned()).collect(),
+            });
+        }
+        counts.entry(place.term).or_default().add(count);
     }
-    counts
+    (counts, differences)
 }
 
 /// How many of `expected` are among `found`, each value found used once.
@@ -231,6 +271,42 @@ fn label(term: u16) -> (String, &'static str) {
         || (term.to_string(), ""),
         |known| (Term::id(known), known.name),
     )
+}
+
+/// What separates several values in one cell of the listing.
+const VALUE_SEPARATOR: &str = " / ";
+
+/// `text` as one cell of a Markdown table: its bars escaped, its line breaks
+/// turned into spaces.
+///
+/// | Text      | Cell       |
+/// |-----------|------------|
+/// | `A`       | `A`        |
+/// | `A \| B`  | `A \\| B`  |
+/// | `A`, line break, `B` | `A B` |
+fn cell(text: &str) -> String {
+    text.replace('|', "\\|").replace(['\n', '\r'], " ")
+}
+
+/// The differences at terms the extraction found a value for anywhere.
+fn listing(differences: &[(PathBuf, Difference)], counts: &BTreeMap<u16, Count>) -> String {
+    let mut out =
+        String::from("\n## Differences\n\n| File | Term | Expected | Found |\n|---|---|---|---|\n");
+    for (path, difference) in differences {
+        let term = difference.place.term;
+        if counts.get(&term).is_none_or(|count| count.found == 0) {
+            continue;
+        }
+        let _ = writeln!(
+            out,
+            "| {} | {} | {} | {} |",
+            cell(&path.display().to_string()),
+            label(term).0,
+            cell(&difference.expected.join(VALUE_SEPARATOR)),
+            cell(&difference.found.join(VALUE_SEPARATOR))
+        );
+    }
+    out
 }
 
 fn report(files: &Files, counts: &BTreeMap<u16, Count>) -> String {
@@ -286,7 +362,7 @@ mod tests {
 
     use doc2einvoice_model::{Draft, Entry, Occurrence, Origin};
 
-    use super::{Count, Place, pdf_files, tally};
+    use super::{Count, Place, cell, pdf_files, tally};
 
     /// The business group of an invoice line, and two terms: the invoice
     /// number and the item name.
@@ -328,6 +404,7 @@ mod tests {
             entries: draft.to_vec(),
         };
         tally(&draft, &xml(expected))
+            .0
             .get(&term)
             .copied()
             .unwrap_or_default()
@@ -432,6 +509,14 @@ mod tests {
             expected.sort_unstable();
         }
         assert_eq!(names, expected);
+    }
+
+    #[test]
+    fn cells_follow_their_table() {
+        assert_eq!(cell("A"), "A");
+        assert_eq!(cell("A | B"), "A \\| B");
+        assert_eq!(cell("A\nB"), "A B");
+        assert_eq!(cell("A\r\nB"), "A  B");
     }
 
     #[test]
