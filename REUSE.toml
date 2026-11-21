@@ -69,6 +69,15 @@ precedence = "override"
 SPDX-FileCopyrightText = "Koordinierungsstelle für IT-Standards (KoSIT)"
 SPDX-License-Identifier = "Apache-2.0"
 
+# Postal codes and the places they belong to, from the postal code files
+# GeoNames publishes, changed from the original by keeping only the country,
+# the postal code and the place (tools/update-postcodes.sh).
+[[annotations]]
+path = "crates/doc2einvoice-extract/data/postcodes.tsv"
+precedence = "override"
+SPDX-FileCopyrightText = "GeoNames (https://www.geonames.org)"
+SPDX-License-Identifier = "CC-BY-4.0"
+
 # The XML Schema files of UBL 2.1, unchanged as published by OASIS. They may be
 # copied and distributed with their notice, but not modified.
 [[annotations]]

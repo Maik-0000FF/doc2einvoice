@@ -28,10 +28,13 @@
 use doc2einvoice_model::{Draft, Entry, Occurrence, Origin};
 use doc2einvoice_pdf::{PageLayout, Word};
 
+use crate::address::{self, Address};
 use crate::labels::{
-    self, AMOUNT_DUE, BUYER_NAME, BUYER_VAT_IDENTIFIER, CURRENCY, DELIVERY_DATE, DUE_DATE, Found,
-    INVOICE_NUMBER, ISSUE_DATE, Names, PAYMENT_ACCOUNT, PURCHASE_ORDER, Party, SELLER_NAME,
-    SELLER_VAT_IDENTIFIER, Scope, Section, TOTAL_WITH_VAT, TOTAL_WITHOUT_VAT, VAT_TOTAL, Weight,
+    self, AMOUNT_DUE, BUYER_ADDRESS_LINES, BUYER_CITY, BUYER_NAME, BUYER_POST_CODE,
+    BUYER_VAT_IDENTIFIER, CURRENCY, DELIVERY_DATE, DUE_DATE, Found, INVOICE_NUMBER, ISSUE_DATE,
+    Names, PAYMENT_ACCOUNT, PURCHASE_ORDER, Party, SELLER_ADDRESS_LINES, SELLER_CITY, SELLER_NAME,
+    SELLER_POST_CODE, SELLER_VAT_IDENTIFIER, Scope, Section, TOTAL_WITH_VAT, TOTAL_WITHOUT_VAT,
+    VAT_TOTAL, Weight,
 };
 use crate::page::{self, Line, Span};
 use crate::values::{self, Read};
@@ -198,6 +201,9 @@ struct Labelled<'a> {
     line: usize,
     found: Vec<Found>,
     words: Vec<&'a str>,
+    /// The section the line stands in: which one of the document, counted
+    /// from its heading, and whose.
+    section: Option<(usize, Party)>,
 }
 
 /// The values the rules find on `pages`.
@@ -219,8 +225,140 @@ pub fn draft(pages: &[PageLayout]) -> Draft {
             draft.entries.push(entry);
         }
     }
+    // Each party takes its address from the first place that has one: an
+    // address made of the parts of two is no address.
+    let mut addressed: Vec<Party> = Vec::new();
+    for (party, found) in addresses(&lines, &labelled) {
+        if !addressed.contains(&party) {
+            add_address(&mut draft, party, &found);
+            addressed.push(party);
+        }
+    }
     draft
 }
+
+/// The terms of the parts of the address of a party whose address is read:
+/// its name, its three address lines, its place and its postal code.
+///
+/// | Party  | Name  | Lines                 | Place | Postal code |
+/// |--------|-------|-----------------------|-------|-------------|
+/// | seller | BT-27 | BT-35, BT-36, BT-162  | BT-37 | BT-38       |
+/// | buyer  | BT-44 | BT-50, BT-51, BT-163  | BT-52 | BT-53       |
+struct AddressTerms {
+    name: u16,
+    lines: [u16; 3],
+    place: u16,
+    postcode: u16,
+}
+
+const SELLER_ADDRESS: AddressTerms = AddressTerms {
+    name: SELLER_NAME,
+    lines: SELLER_ADDRESS_LINES,
+    place: SELLER_CITY,
+    postcode: SELLER_POST_CODE,
+};
+
+const BUYER_ADDRESS: AddressTerms = AddressTerms {
+    name: BUYER_NAME,
+    lines: BUYER_ADDRESS_LINES,
+    place: BUYER_CITY,
+    postcode: BUYER_POST_CODE,
+};
+
+fn address_terms(party: Party) -> Option<&'static AddressTerms> {
+    match party {
+        Party::Seller => Some(&SELLER_ADDRESS),
+        Party::Buyer => Some(&BUYER_ADDRESS),
+        Party::DeliverTo | Party::Payee | Party::TaxRepresentative | Party::Debited => None,
+    }
+}
+
+/// The addresses printed without labels and whose they are: the first in
+/// the section of each party, the one in the address window as the
+/// buyer's, and the return address as the seller's.
+fn addresses<'a>(lines: &[Line<'a>], labelled: &[Labelled]) -> Vec<(Party, Address<'a>)> {
+    let mut found = Vec::new();
+    let mut sections: Vec<(usize, Party, Vec<usize>)> = Vec::new();
+    for line in labelled {
+        let Some((section, party)) = line.section else {
+            continue;
+        };
+        match sections.last_mut() {
+            Some((open, _, region)) if *open == section => region.push(line.line),
+            _ => sections.push((section, party, vec![line.line])),
+        }
+    }
+    for (_, party, region) in sections {
+        if let Some(address) = address::in_region(lines, &region, &address::WHOLE_PAGE) {
+            found.push((party, address));
+        }
+    }
+    let window = address::window(lines);
+    if let Some(address) = address::in_region(lines, &window, &address::window_across()) {
+        found.push((Party::Buyer, address));
+    }
+    if let Some(address) = address::return_address(lines) {
+        found.push((Party::Seller, address));
+    }
+    found
+}
+
+/// The parts of `found` as the entries of `party`, each where the draft has
+/// no value for its term yet.
+///
+/// Which of the lines above the postal code and place is the name and which
+/// are the lines of the address is told by their number. With more than two
+/// it is open: a name set over two lines, a contact person and a second line
+/// of the address all stand between a name and its street. Those lines are
+/// then left to the user; the place and postal code are read all the same.
+///
+/// | Lines above the place               | Read                                   |
+/// |-------------------------------------|----------------------------------------|
+/// | name, street                        | name; first line                       |
+/// | name                                | name                                   |
+/// | name, street, more                  | none of them                           |
+/// | street, more, with a labelled name  | first, second, third line              |
+fn add_address(draft: &mut Draft, party: Party, found: &Address) {
+    let Some(terms) = address_terms(party) else {
+        return;
+    };
+    let labelled_name = draft.values_of(terms.name).next().is_some();
+    let mut above: Vec<&Span> = found.name.iter().chain(&found.lines).collect();
+    let mut entries: Vec<(u16, &Span, String)> = Vec::new();
+    if !labelled_name {
+        if above.len() > UNAMBIGUOUS_LINES {
+            above.clear();
+        }
+        if let Some(name) = (!above.is_empty()).then(|| above.remove(0)) {
+            entries.push((terms.name, name, name.texts().join(" ")));
+        }
+    }
+    for (term, line) in terms.lines.iter().zip(above) {
+        entries.push((*term, line, line.texts().join(" ")));
+    }
+    entries.push((terms.place, &found.place, found.place.texts().join(" ")));
+    entries.push((
+        terms.postcode,
+        &found.postcode,
+        found.postcode_digits.clone(),
+    ));
+    for (term, span, text) in entries {
+        if draft.values_of(term).next().is_some() || span.words.is_empty() {
+            continue;
+        }
+        draft.entries.push(Entry {
+            term,
+            within: Vec::new(),
+            text,
+            origin: Origin::Rule,
+            location: span.location(0, span.words.len()),
+        });
+    }
+}
+
+/// How many lines above the postal code and place tell without doubt which
+/// is the name and which the street: two, the name above the street.
+const UNAMBIGUOUS_LINES: usize = 2;
 
 /// The labels of every line. A field of a party, as "Name", takes the term
 /// of the party whose section it stands in, or the term it has outside any
@@ -230,14 +368,19 @@ pub fn draft(pages: &[PageLayout]) -> Draft {
 /// the gap between two sections, or the end of its page.
 fn labelled<'a>(lines: &[Line<'a>]) -> Vec<Labelled<'a>> {
     let mut section: Option<OpenSection> = None;
+    let mut opened = 0;
     let mut labelled = Vec::with_capacity(lines.len());
     for (line, printed) in lines.iter().enumerate() {
         let words = printed.texts();
         section = section.filter(|open| open.holds(printed));
         match labels::heading(&words) {
-            Some(Section::Party(party)) => section = OpenSection::at(printed, party),
+            Some(Section::Party(party)) => {
+                opened += 1;
+                section = OpenSection::at(printed, party);
+            }
             Some(Section::Other) => section = None,
             None if labels::says_direct_debit(&words) => {
+                opened += 1;
                 section = OpenSection::at(printed, Party::Debited);
             }
             None => {}
@@ -258,7 +401,12 @@ fn labelled<'a>(lines: &[Line<'a>]) -> Vec<Labelled<'a>> {
                 }
             }
         }
-        labelled.push(Labelled { line, found, words });
+        labelled.push(Labelled {
+            line,
+            found,
+            words,
+            section: party.map(|party| (opened, party)),
+        });
     }
     labelled
 }
@@ -505,9 +653,10 @@ mod tests {
 
     use super::draft;
     use crate::labels::{
-        AMOUNT_DUE, BUYER_NAME, BUYER_VAT_IDENTIFIER, CURRENCY, DELIVERY_DATE, DUE_DATE,
-        INVOICE_NUMBER, ISSUE_DATE, PAYMENT_ACCOUNT, PURCHASE_ORDER, SELLER_NAME,
-        SELLER_VAT_IDENTIFIER, TOTAL_WITH_VAT, TOTAL_WITHOUT_VAT, VAT_TOTAL,
+        AMOUNT_DUE, BUYER_ADDRESS_LINES, BUYER_CITY, BUYER_NAME, BUYER_POST_CODE,
+        BUYER_VAT_IDENTIFIER, CURRENCY, DELIVERY_DATE, DUE_DATE, INVOICE_NUMBER, ISSUE_DATE,
+        PAYMENT_ACCOUNT, PURCHASE_ORDER, SELLER_ADDRESS_LINES, SELLER_CITY, SELLER_NAME,
+        SELLER_POST_CODE, SELLER_VAT_IDENTIFIER, TOTAL_WITH_VAT, TOTAL_WITHOUT_VAT, VAT_TOTAL,
     };
 
     /// The font size of every word, and the width of one character.
@@ -827,6 +976,321 @@ mod tests {
                 "{offer:?}"
             );
         }
+    }
+
+    /// Millimetres as points, for places on a page given as DIN 5008 gives
+    /// them.
+    fn mm(millimetres: f64) -> f64 {
+        millimetres * crate::address::POINTS_PER_MM
+    }
+
+    fn values(pages: &[PageLayout], terms: &[u16]) -> Vec<Option<String>> {
+        terms.iter().map(|term| value(pages, *term)).collect()
+    }
+
+    #[test]
+    fn an_address_in_the_section_of_a_party_is_read_without_its_labelled_lines() {
+        let pages = [page(vec![wrapped_block(
+            50.0,
+            100.0,
+            &[
+                &["Verkäufer:"],
+                &["Globale", "Nummer:", "4000001123452"],
+                &["Lieferant", "GmbH"],
+                &["Lieferantenstraße", "20"],
+                &["DE", "99199", "Musterhausen"],
+            ],
+        )])];
+        assert_eq!(
+            values(
+                &pages,
+                &[
+                    SELLER_NAME,
+                    SELLER_ADDRESS_LINES[0],
+                    SELLER_CITY,
+                    SELLER_POST_CODE
+                ]
+            ),
+            [
+                Some("Lieferant GmbH".to_owned()),
+                Some("Lieferantenstraße 20".to_owned()),
+                Some("Musterhausen".to_owned()),
+                Some("99199".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn more_than_two_lines_above_the_place_leave_name_and_lines_open() {
+        let pages = [page(vec![wrapped_block(
+            50.0,
+            100.0,
+            &[
+                &["Käufer:"],
+                &["Taxi-Gast", "AG"],
+                &["Hans", "Mustermann"],
+                &["Kundenstraße", "15"],
+                &["69876", "Frankfurt"],
+            ],
+        )])];
+        assert_eq!(
+            values(&pages, &[BUYER_NAME, BUYER_ADDRESS_LINES[0]]),
+            [None, None]
+        );
+        assert_eq!(value(&pages, BUYER_POST_CODE).as_deref(), Some("69876"));
+    }
+
+    #[test]
+    fn the_address_window_holds_the_buyer_and_the_return_address_the_seller() {
+        let window = |top: f64, rows: &[&[&str]]| wrapped_block(mm(25.0), mm(top), rows);
+        let pages = [page(vec![
+            block(
+                mm(25.0),
+                mm(55.0),
+                &[
+                    "Muster",
+                    "GmbH",
+                    "·",
+                    "Hauptstr.",
+                    "1",
+                    "·",
+                    "80333",
+                    "München",
+                ],
+            ),
+            window(
+                60.0,
+                &[
+                    &["Kunden", "AG"],
+                    &["Bahnstr.", "42"],
+                    &["88802", "Spielkreis"],
+                ],
+            ),
+        ])];
+        assert_eq!(
+            values(
+                &pages,
+                &[
+                    BUYER_NAME,
+                    BUYER_ADDRESS_LINES[0],
+                    BUYER_CITY,
+                    BUYER_POST_CODE
+                ]
+            ),
+            [
+                Some("Kunden AG".to_owned()),
+                Some("Bahnstr. 42".to_owned()),
+                Some("Spielkreis".to_owned()),
+                Some("88802".to_owned()),
+            ]
+        );
+        assert_eq!(
+            values(
+                &pages,
+                &[
+                    SELLER_NAME,
+                    SELLER_ADDRESS_LINES[0],
+                    SELLER_CITY,
+                    SELLER_POST_CODE
+                ]
+            ),
+            [
+                Some("Muster GmbH".to_owned()),
+                Some("Hauptstr. 1".to_owned()),
+                Some("München".to_owned()),
+                Some("80333".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_return_address_needs_a_place_geonames_knows() {
+        let pages = [page(vec![block(
+            mm(25.0),
+            mm(50.0),
+            &[
+                "Muster",
+                "GmbH",
+                "·",
+                "Ecke",
+                "12",
+                "·",
+                "12345",
+                "Stadthausen",
+            ],
+        )])];
+        assert_eq!(value(&pages, SELLER_NAME), None);
+    }
+
+    #[test]
+    fn a_labelled_name_makes_the_lines_above_the_place_lines_of_the_address() {
+        let pages = [page(vec![
+            block(50.0, 100.0, &["Verkäufer"]),
+            block(50.0, 100.0 + LINE_PITCH, &["Name:"]),
+            block(300.0, 100.0 + LINE_PITCH, &["MUSTERLIEFERANT", "GMBH"]),
+            block(50.0, 100.0 + 2.0 * LINE_PITCH, &["Anschrift:"]),
+            block(300.0, 100.0 + 2.0 * LINE_PITCH, &["BAHNHOFSTRASSE", "99"]),
+            block(300.0, 100.0 + 3.0 * LINE_PITCH, &["Hof", "3"]),
+            block(
+                300.0,
+                100.0 + 4.0 * LINE_PITCH,
+                &["DE", "99199", "MUSTERHAUSEN"],
+            ),
+        ])];
+        assert_eq!(
+            values(
+                &pages,
+                &[
+                    SELLER_NAME,
+                    SELLER_ADDRESS_LINES[0],
+                    SELLER_ADDRESS_LINES[1]
+                ]
+            ),
+            [
+                Some("MUSTERLIEFERANT GMBH".to_owned()),
+                Some("BAHNHOFSTRASSE 99".to_owned()),
+                Some("Hof 3".to_owned()),
+            ]
+        );
+    }
+
+    /// A window address of a letter: a name, a street and a place, from the
+    /// top at `top` millimetres.
+    fn window_address(top: f64) -> Block {
+        wrapped_block(
+            mm(25.0),
+            mm(top),
+            &[
+                &["Kunden", "AG"],
+                &["Bahnstr.", "42"],
+                &["88802", "Spielkreis"],
+            ],
+        )
+    }
+
+    #[test]
+    fn the_information_block_beside_the_window_leaves_its_address_whole() {
+        let pages = [page(vec![
+            window_address(60.0),
+            block(mm(130.0), mm(60.0), &["Kundennummer:", "4711"]),
+        ])];
+        assert_eq!(value(&pages, BUYER_NAME).as_deref(), Some("Kunden AG"));
+        assert_eq!(
+            value(&pages, BUYER_ADDRESS_LINES[0]).as_deref(),
+            Some("Bahnstr. 42")
+        );
+    }
+
+    #[test]
+    fn a_letterhead_above_the_address_zone_is_not_the_buyer() {
+        let letterhead = wrapped_block(
+            mm(25.0),
+            mm(20.0),
+            &[
+                &["Muster", "GmbH"],
+                &["Hauptstr.", "1"],
+                &["80333", "München"],
+            ],
+        );
+        let pages = [page(vec![letterhead, window_address(60.0)])];
+        assert_eq!(value(&pages, BUYER_NAME).as_deref(), Some("Kunden AG"));
+    }
+
+    #[test]
+    fn a_return_address_ends_where_the_window_ends() {
+        let pages = [page(vec![
+            block(
+                mm(25.0),
+                mm(55.0),
+                &["Muster", "GmbH", "·", "80333", "München"],
+            ),
+            block(mm(140.0), mm(55.0), &["Datum:", "21.11.2026"]),
+        ])];
+        assert_eq!(value(&pages, SELLER_CITY).as_deref(), Some("München"));
+    }
+
+    #[test]
+    fn separators_in_the_footer_are_no_return_address() {
+        let pages = [page(vec![block(
+            mm(25.0),
+            mm(280.0),
+            &[
+                "Muster",
+                "GmbH",
+                "·",
+                "Hauptstr.",
+                "1",
+                "·",
+                "80333",
+                "München",
+            ],
+        )])];
+        assert_eq!(value(&pages, SELLER_NAME), None);
+    }
+
+    #[test]
+    fn a_note_above_the_window_address_is_not_part_of_it() {
+        let pages = [page(vec![
+            block(mm(25.0), mm(58.0), &["Persönlich"]),
+            window_address(58.0 + LINE_PITCH / crate::address::POINTS_PER_MM),
+        ])];
+        assert_eq!(value(&pages, BUYER_NAME).as_deref(), Some("Kunden AG"));
+        assert_eq!(
+            value(&pages, BUYER_ADDRESS_LINES[0]).as_deref(),
+            Some("Bahnstr. 42")
+        );
+    }
+
+    #[test]
+    fn a_firm_whose_name_begins_like_a_note_is_the_name() {
+        let pages = [page(vec![wrapped_block(
+            mm(25.0),
+            mm(60.0),
+            &[
+                &["Personal", "Partner", "GmbH"],
+                &["Bahnstr.", "42"],
+                &["88802", "Spielkreis"],
+            ],
+        )])];
+        assert_eq!(
+            value(&pages, BUYER_NAME).as_deref(),
+            Some("Personal Partner GmbH")
+        );
+        assert_eq!(
+            value(&pages, BUYER_ADDRESS_LINES[0]).as_deref(),
+            Some("Bahnstr. 42")
+        );
+    }
+
+    #[test]
+    fn a_heading_without_a_colon_is_not_the_name() {
+        let pages = [page(vec![wrapped_block(
+            50.0,
+            100.0,
+            &[
+                &["Verkäufer"],
+                &["Lieferant", "GmbH"],
+                &["Hauptstr.", "1"],
+                &["80333", "München"],
+            ],
+        )])];
+        assert_eq!(
+            value(&pages, SELLER_NAME).as_deref(),
+            Some("Lieferant GmbH")
+        );
+    }
+
+    #[test]
+    fn a_party_takes_its_address_from_one_place_only() {
+        let section = wrapped_block(
+            50.0,
+            mm(150.0),
+            &[&["Käufer"], &["Kunden", "AG"], &["80333", "München"]],
+        );
+        let pages = [page(vec![window_address(60.0), section])];
+        assert_eq!(value(&pages, BUYER_NAME).as_deref(), Some("Kunden AG"));
+        assert_eq!(value(&pages, BUYER_CITY).as_deref(), Some("München"));
+        assert_eq!(value(&pages, BUYER_ADDRESS_LINES[0]), None);
     }
 
     #[test]
