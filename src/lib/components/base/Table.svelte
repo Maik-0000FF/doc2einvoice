@@ -21,6 +21,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 <table class="table">
   <thead>
     <tr>
+      <!-- The columns never change order; the key is the one the lint rule requires. -->
       {#each columns as column, index (index)}
         <th scope="col">{column.heading}</th>
       {/each}
@@ -29,6 +30,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
   <tbody>
     {#each rows as row, rowIndex (key(row, rowIndex))}
       <tr>
+        <!-- The columns never change order; the key is the one the lint rule requires. -->
         {#each columns as column, index (index)}
           {#if index === 0}
             <th
