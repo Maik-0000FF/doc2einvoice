@@ -11,6 +11,7 @@
 //! express without inventing a value about it is refused with a [`Gap`].
 //! Nothing is written empty.
 
+pub mod bindings;
 mod cii;
 mod error;
 mod format;

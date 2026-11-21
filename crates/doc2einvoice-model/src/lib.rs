@@ -18,15 +18,18 @@
 //! validation rules.
 
 mod delivery;
+mod draft;
 mod invoice;
 mod line;
 mod list;
 mod party;
 mod payment;
+mod terms;
 mod totals;
 mod values;
 
 pub use delivery::{DeliveryInformation, Period};
+pub use draft::{DATE_FORMAT, Draft, Entry, Location, Occurrence, Origin};
 pub use invoice::{
     Invoice, InvoiceNote, PrecedingInvoice, ProcessControl, SupportingDocument, VatPoint,
 };
@@ -36,6 +39,10 @@ pub use line::{
 pub use list::NonEmpty;
 pub use party::{Buyer, Contact, Payee, PostalAddress, Seller, TaxRepresentative};
 pub use payment::{CreditTransfer, DirectDebit, PaymentCard, PaymentInstructions};
+pub use terms::{
+    DataType, LAST_GROUP, LAST_TERM, TERMS, Term, UNASSIGNED_TERMS, group_id, group_number,
+    term_by_id, term_by_number,
+};
 pub use totals::{DocumentAdjustment, DocumentTotals, VatBreakdown};
 pub use values::{
     Amount, BinaryObject, Code, CountryCode, CurrencyCode, Date, DocumentReference, Identifier,

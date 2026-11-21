@@ -21,6 +21,7 @@ chrono = { version = "0.4", default-features = false, features = ["std"] }
 # The argument parser, without colours, suggestions and procedural macros: the
 # command line is small and its output goes to terminals and pipes alike.
 clap = { version = "4.6", default-features = false, features = ["std", "help", "usage", "error-context"] }
+doc2einvoice-extract = { path = "crates/doc2einvoice-extract" }
 doc2einvoice-model = { path = "crates/doc2einvoice-model" }
 doc2einvoice-pdf = { path = "crates/doc2einvoice-pdf" }
 doc2einvoice-schematron = { path = "crates/doc2einvoice-schematron" }
@@ -32,6 +33,8 @@ doc2einvoice-validation = { path = "crates/doc2einvoice-validation" }
 hayro-interpret = "=0.9.0"
 # Tells an IBAN from another account identifier, by its form and check digits.
 iban_validate = "5.0"
+# Reads the objects of a PDF: the files embedded in it.
+lopdf = { version = "0.47", default-features = false }
 # The XML Schema processor, pinned exactly like the XPath engine below.
 oxixml-schema = "=0.1.2"
 # Writes XML as a stream, escaping text and attribute values.

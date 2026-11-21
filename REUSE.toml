@@ -64,7 +64,7 @@ SPDX-License-Identifier = "Apache-2.0"
 # 2026-08-31) and joined into full paths; changed from the original by that
 # extraction.
 [[annotations]]
-path = "crates/doc2einvoice-syntax/tests/data/bindings.tsv"
+path = "crates/doc2einvoice-syntax/data/bindings.tsv"
 precedence = "override"
 SPDX-FileCopyrightText = "Koordinierungsstelle für IT-Standards (KoSIT)"
 SPDX-License-Identifier = "Apache-2.0"

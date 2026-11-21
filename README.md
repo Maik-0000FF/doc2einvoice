@@ -205,6 +205,7 @@ The Rust code is a workspace:
 
 | Path                             | Purpose                                                      |
 | -------------------------------- | ------------------------------------------------------------ |
+| `crates/doc2einvoice-extract`    | finds the business terms of an invoice on its pages          |
 | `crates/doc2einvoice-model`      | the invoice after the semantic data model of EN 16931        |
 | `crates/doc2einvoice-pdf`        | reads the text of a PDF with its place on the page           |
 | `crates/doc2einvoice-schematron` | Schematron interpreter, knows nothing about invoices         |
