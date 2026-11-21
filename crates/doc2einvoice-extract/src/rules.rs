@@ -25,13 +25,13 @@
 //! number is printed before any reference to it; a total takes the last, as
 //! the totals of an invoice close it.
 
-use doc2einvoice_model::{Draft, Entry, Origin};
-use doc2einvoice_pdf::PageLayout;
+use doc2einvoice_model::{Draft, Entry, Occurrence, Origin};
+use doc2einvoice_pdf::{PageLayout, Word};
 
 use crate::labels::{
-    self, AMOUNT_DUE, BUYER_NAME, CURRENCY, DELIVERY_DATE, DUE_DATE, Found, INVOICE_NUMBER,
-    ISSUE_DATE, Party, SELLER_NAME, Scope, Section, TOTAL_WITH_VAT, TOTAL_WITHOUT_VAT, VAT_TOTAL,
-    Weight,
+    self, AMOUNT_DUE, BUYER_NAME, BUYER_VAT_IDENTIFIER, CURRENCY, DELIVERY_DATE, DUE_DATE, Found,
+    INVOICE_NUMBER, ISSUE_DATE, Names, PAYMENT_ACCOUNT, PURCHASE_ORDER, Party, SELLER_NAME,
+    SELLER_VAT_IDENTIFIER, Scope, Section, TOTAL_WITH_VAT, TOTAL_WITHOUT_VAT, VAT_TOTAL, Weight,
 };
 use crate::page::{self, Line, Span};
 use crate::values::{self, Read};
@@ -102,17 +102,27 @@ struct Rule {
     term: u16,
     read: fn(&[&str]) -> Option<Read>,
     kind: Kind,
+    /// The repeated group the term stands in, read as its first occurrence:
+    /// the first credit transfer for its account.
+    group: Option<u16>,
 }
 
+/// The repeated group of a credit transfer (BG-17).
+const CREDIT_TRANSFER: u16 = 17;
+
 /// The terms read, the invoice number first: the issue date may follow it.
-const RULES: [Rule; 11] = [
+const RULES: [Rule; 15] = [
     header(INVOICE_NUMBER, values::identifier),
     header(ISSUE_DATE, values::date),
     header(CURRENCY, values::currency),
     header(DUE_DATE, values::date),
     header(DELIVERY_DATE, values::date),
+    header(PURCHASE_ORDER, values::identifier),
     name(SELLER_NAME),
     name(BUYER_NAME),
+    header(SELLER_VAT_IDENTIFIER, values::vat_identifier),
+    header(BUYER_VAT_IDENTIFIER, values::vat_identifier),
+    header_in(PAYMENT_ACCOUNT, values::iban, CREDIT_TRANSFER),
     total(TOTAL_WITHOUT_VAT),
     total(VAT_TOTAL),
     total(TOTAL_WITH_VAT),
@@ -124,6 +134,15 @@ const fn header(term: u16, read: fn(&[&str]) -> Option<Read>) -> Rule {
         term,
         read,
         kind: Kind::Header,
+        group: None,
+    }
+}
+
+/// A header term that stands in the repeated group `group`.
+const fn header_in(term: u16, read: fn(&[&str]) -> Option<Read>, group: u16) -> Rule {
+    Rule {
+        group: Some(group),
+        ..header(term, read)
     }
 }
 
@@ -133,6 +152,7 @@ const fn name(term: u16) -> Rule {
         term,
         read: values::text,
         kind: Kind::Name,
+        group: None,
     }
 }
 
@@ -141,6 +161,7 @@ const fn total(term: u16) -> Rule {
         term,
         read: values::monetary,
         kind: Kind::Total,
+        group: None,
     }
 }
 
@@ -201,33 +222,88 @@ pub fn draft(pages: &[PageLayout]) -> Draft {
     draft
 }
 
-/// The labels of every line. "Name" takes the term of the party whose
-/// section it stands in: the last heading before it on its page, unless the
-/// heading of another section stands between them.
+/// The labels of every line. A field of a party, as "Name", takes the term
+/// of the party whose section it stands in, or the term it has outside any
+/// section. A section opens with the heading of a party, or with a line that
+/// says the amount is taken by direct debit. It ends with the heading of
+/// another section, a line above its heading, a line further below it than
+/// the gap between two sections, or the end of its page.
 fn labelled<'a>(lines: &[Line<'a>]) -> Vec<Labelled<'a>> {
-    let mut section: Option<(usize, Party)> = None;
+    let mut section: Option<OpenSection> = None;
     let mut labelled = Vec::with_capacity(lines.len());
     for (line, printed) in lines.iter().enumerate() {
         let words = printed.texts();
+        section = section.filter(|open| open.holds(printed));
         match labels::heading(&words) {
-            Some(Section::Party(party)) => section = Some((printed.page, party)),
+            Some(Section::Party(party)) => section = OpenSection::at(printed, party),
             Some(Section::Other) => section = None,
+            None if labels::says_direct_debit(&words) => {
+                section = OpenSection::at(printed, Party::Debited);
+            }
             None => {}
         }
-        let party = section
-            .filter(|(page, _)| *page == printed.page)
-            .map(|(_, party)| party);
+        if let Some(open) = section.as_mut() {
+            open.extend(printed);
+        }
+        let party = section.as_ref().map(|open| open.party);
         let mut found = labels::find(&words);
         for label in &mut found {
-            if labels::is_party_name(label)
-                && let Some(party) = party
-            {
-                label.label = labels::party_name(party);
+            if let Names::PartyField(field) = label.names {
+                let term = party.map_or_else(
+                    || labels::unsectioned_term(field),
+                    |party| labels::party_term(field, party),
+                );
+                if let Some(term) = term {
+                    label.names = Names::Term(term);
+                }
             }
         }
         labelled.push(Labelled { line, found, words });
     }
     labelled
+}
+
+/// How far below the lowest line of a section the next line may start and
+/// still belong to it, as a multiple of its font size: the lines of a
+/// section follow at the distance of a line, sections stand further apart.
+const SECTION_GAP: f64 = 3.0;
+
+/// The section of a party as far as it has been read.
+struct OpenSection {
+    party: Party,
+    page: usize,
+    /// The first word of its heading.
+    heading: Word,
+    /// The lowest baseline of its lines so far.
+    bottom: f64,
+}
+
+impl OpenSection {
+    fn at(heading: &Line, party: Party) -> Option<Self> {
+        let head = heading.words.first()?;
+        Some(Self {
+            party,
+            page: heading.page,
+            heading: head.clone(),
+            bottom: head.baseline,
+        })
+    }
+
+    /// Whether `line` still belongs to the section: on its page, not above
+    /// its heading, and not further below it than a gap between sections.
+    fn holds(&self, line: &Line) -> bool {
+        line.words.first().is_some_and(|head| {
+            line.page == self.page
+                && !page::lies_below(&self.heading, head)
+                && head.baseline <= self.bottom + head.font_size * SECTION_GAP
+        })
+    }
+
+    fn extend(&mut self, line: &Line) {
+        if let Some(head) = line.words.first() {
+            self.bottom = self.bottom.max(head.baseline);
+        }
+    }
 }
 
 /// The value that counts for `rule`, if one is found. `number` is the line
@@ -246,7 +322,7 @@ fn chosen(
             .filter(|found| in_scope(found, line.line, number))
             .collect();
         for (index, found) in valid.iter().enumerate() {
-            if !found.label.names_term(rule.term) {
+            if found.names != Names::Term(rule.term) {
                 continue;
             }
             let end = valid
@@ -298,7 +374,7 @@ fn candidate(
     let after = page::after(printed, found.end, end);
     if let Some(read) = read_after_separators(rule, &after) {
         let end_in_line = found.end + read.skipped + read.used;
-        return entry(rule.term, &after, &read).map(|entry| Candidate {
+        return entry(rule, &after, &read).map(|entry| Candidate {
             standing: Standing::Elsewhere,
             nearness: Nearness::Beside,
             line,
@@ -338,7 +414,7 @@ fn candidate(
     places.into_iter().find_map(|(nearness, span)| {
         let span = span?;
         let read = read_after_separators(rule, &span)?;
-        entry(rule.term, &span, &read).map(|entry| Candidate {
+        entry(rule, &span, &read).map(|entry| Candidate {
             standing: Standing::Elsewhere,
             nearness,
             line,
@@ -361,10 +437,14 @@ fn read_after_separators(rule: &Rule, span: &Span) -> Option<Read> {
     Some(read)
 }
 
-fn entry(term: u16, span: &Span, read: &Read) -> Option<Entry> {
+fn entry(rule: &Rule, span: &Span, read: &Read) -> Option<Entry> {
     Some(Entry {
-        term,
-        within: Vec::new(),
+        term: rule.term,
+        within: rule
+            .group
+            .map(|group| Occurrence { group, index: 0 })
+            .into_iter()
+            .collect(),
         text: read.text.clone(),
         origin: Origin::Rule,
         location: Some(span.location(read.skipped, read.used)?),
@@ -425,8 +505,9 @@ mod tests {
 
     use super::draft;
     use crate::labels::{
-        AMOUNT_DUE, BUYER_NAME, CURRENCY, DELIVERY_DATE, DUE_DATE, INVOICE_NUMBER, ISSUE_DATE,
-        SELLER_NAME, TOTAL_WITH_VAT, TOTAL_WITHOUT_VAT, VAT_TOTAL,
+        AMOUNT_DUE, BUYER_NAME, BUYER_VAT_IDENTIFIER, CURRENCY, DELIVERY_DATE, DUE_DATE,
+        INVOICE_NUMBER, ISSUE_DATE, PAYMENT_ACCOUNT, PURCHASE_ORDER, SELLER_NAME,
+        SELLER_VAT_IDENTIFIER, TOTAL_WITH_VAT, TOTAL_WITHOUT_VAT, VAT_TOTAL,
     };
 
     /// The font size of every word, and the width of one character.
@@ -627,6 +708,125 @@ mod tests {
             values,
         ])];
         assert_eq!(value(&pages, SELLER_NAME).as_deref(), Some("Muster GmbH"));
+    }
+
+    #[test]
+    fn a_section_ends_at_a_gap_wider_than_between_its_lines() {
+        let pages = [page(vec![
+            block(50.0, 100.0, &["Käufer:"]),
+            block(50.0, 100.0 + LINE_PITCH, &["Kunden", "AG"]),
+            block(50.0, 200.0, &["USt-IdNr:", "DE136695976"]),
+        ])];
+        assert_eq!(value(&pages, BUYER_VAT_IDENTIFIER), None);
+        let close = [page(vec![
+            block(50.0, 100.0, &["Käufer:"]),
+            block(50.0, 100.0 + LINE_PITCH, &["USt-IdNr:", "DE136695976"]),
+        ])];
+        assert_eq!(
+            value(&close, BUYER_VAT_IDENTIFIER).as_deref(),
+            Some("DE136695976")
+        );
+    }
+
+    #[test]
+    fn references_and_the_account_are_read() {
+        let pages = [page(vec![
+            block(
+                50.0,
+                100.0,
+                &["Rechnung", "gemäß", "Bestellung", "Nr.", "2018-471331"],
+            ),
+            block(
+                50.0,
+                120.0,
+                &["IBAN", ":", "DE02", "1203", "0000", "0000", "2020", "51"],
+            ),
+            block(50.0, 140.0, &["N°", "TVA", "client", "FR19787878784"]),
+        ])];
+        assert_eq!(
+            value(&pages, PURCHASE_ORDER).as_deref(),
+            Some("2018-471331")
+        );
+        assert_eq!(
+            value(&pages, BUYER_VAT_IDENTIFIER).as_deref(),
+            Some("FR19787878784")
+        );
+        let found = draft(&pages);
+        let account = found.values_of(PAYMENT_ACCOUNT).next();
+        assert_eq!(
+            account.map(|entry| entry.text.as_str()),
+            Some("DE02120300000000202051")
+        );
+        let within = account.map(|entry| entry.within.clone());
+        assert_eq!(
+            within,
+            Some(vec![doc2einvoice_model::Occurrence {
+                group: 17,
+                index: 0
+            }])
+        );
+    }
+
+    #[test]
+    fn a_line_above_the_heading_ends_its_section() {
+        let pages = [page(vec![
+            block(50.0, 300.0, &["Verkäufer"]),
+            block(300.0, 100.0, &["USt-IdNr.:", "DE136695976"]),
+        ])];
+        assert_eq!(value(&pages, SELLER_VAT_IDENTIFIER), None);
+    }
+
+    #[test]
+    fn the_account_of_a_direct_debit_is_not_the_one_to_transfer_to() {
+        let debit = [page(vec![
+            block(50.0, 100.0, &["Der", "Betrag", "wird", "abgebucht", "von:"]),
+            block(
+                50.0,
+                100.0 + LINE_PITCH,
+                &["IBAN:", "DE02120300000000202051"],
+            ),
+        ])];
+        assert_eq!(value(&debit, PAYMENT_ACCOUNT), None);
+        let buyer = [page(vec![
+            block(50.0, 100.0, &["Käufer"]),
+            block(
+                50.0,
+                100.0 + LINE_PITCH,
+                &["IBAN:", "DE02120300000000202051"],
+            ),
+        ])];
+        assert_eq!(value(&buyer, PAYMENT_ACCOUNT), None);
+        let footer = [page(vec![block(
+            50.0,
+            100.0,
+            &["IBAN:", "DE02120300000000202051"],
+        )])];
+        assert_eq!(
+            value(&footer, PAYMENT_ACCOUNT).as_deref(),
+            Some("DE02120300000000202051")
+        );
+    }
+
+    #[test]
+    fn a_direct_debit_only_offered_leaves_the_account_to_transfer_to() {
+        for offer in [
+            &["Zahlbar", "per", "Überweisung", "oder", "SEPA-Lastschrift"][..],
+            &["Eine", "Lastschrift", "ist", "nicht", "möglich."],
+        ] {
+            let pages = [page(vec![
+                block(50.0, 100.0, offer),
+                block(
+                    50.0,
+                    100.0 + LINE_PITCH,
+                    &["IBAN:", "DE02120300000000202051"],
+                ),
+            ])];
+            assert_eq!(
+                value(&pages, PAYMENT_ACCOUNT).as_deref(),
+                Some("DE02120300000000202051"),
+                "{offer:?}"
+            );
+        }
     }
 
     #[test]

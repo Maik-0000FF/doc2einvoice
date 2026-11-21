@@ -9,6 +9,7 @@ use std::str::FromStr;
 
 use chrono::NaiveDate;
 use doc2einvoice_model::{DATE_FORMAT, DataType};
+use iban::{Iban, IbanLike};
 use rust_decimal::Decimal;
 
 /// A date as a Cross Industry Invoice writes it (format 102).
@@ -24,6 +25,8 @@ const CII_DATE: &str = "%Y%m%d";
 /// | amount    | `1234.50`      | `1234.5`       |
 /// | amount    | `-3.10`        | `-3.1`         |
 /// | text      | `Muster GmbH`  | `Muster GmbH`  |
+/// | identifier | `DE02 1203 0000 0000 2020 51` | `DE02120300000000202051` (an IBAN, in its electronic form) |
+/// | identifier | `210111 mit LV` | `210111 mit LV` |
 pub fn canonical(data_type: DataType, xml: &str) -> String {
     match data_type {
         DataType::Date => NaiveDate::parse_from_str(xml, CII_DATE).map_or_else(
@@ -35,11 +38,12 @@ pub fn canonical(data_type: DataType, xml: &str) -> String {
         | DataType::Quantity
         | DataType::Percentage => Decimal::from_str(xml)
             .map_or_else(|_| xml.to_owned(), |value| value.normalize().to_string()),
-        DataType::Code
-        | DataType::DocumentReference
-        | DataType::Identifier
-        | DataType::Text
-        | DataType::BinaryObject => xml.to_owned(),
+        DataType::Identifier => xml
+            .parse::<Iban>()
+            .map_or_else(|_| xml.to_owned(), |iban| iban.electronic_str().to_owned()),
+        DataType::Code | DataType::DocumentReference | DataType::Text | DataType::BinaryObject => {
+            xml.to_owned()
+        }
     }
 }
 
@@ -91,6 +95,14 @@ mod tests {
         assert_eq!(canonical(DataType::Amount, "1234.50"), "1234.5");
         assert_eq!(canonical(DataType::Amount, "-3.10"), "-3.1");
         assert_eq!(canonical(DataType::Text, "Muster GmbH"), "Muster GmbH");
+        assert_eq!(
+            canonical(DataType::Identifier, "DE02 1203 0000 0000 2020 51"),
+            "DE02120300000000202051"
+        );
+        assert_eq!(
+            canonical(DataType::Identifier, "210111 mit LV"),
+            "210111 mit LV"
+        );
     }
 
     #[test]
