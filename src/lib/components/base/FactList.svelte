@@ -11,7 +11,8 @@ SPDX-License-Identifier: GPL-3.0-or-later
 </script>
 
 <dl class="facts">
-  {#each facts as fact (fact.term)}
+  <!-- Terms are translated texts, and a translation may word two of them alike. -->
+  {#each facts as fact, index (index)}
     <dt>
       {#if fact.labelFor === undefined}
         {fact.term}
@@ -19,7 +20,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
         <label for={fact.labelFor}>{fact.term}</label>
       {/if}
     </dt>
-    <dd class:facts__value--long={fact.long} class:facts__value--selectable={fact.selectable}>
+    <dd class:long-words={fact.long} class:facts__value--selectable={fact.selectable}>
       {#if typeof fact.value === 'string'}
         {fact.value}
       {:else}
@@ -44,10 +45,6 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
   .facts dd {
     margin: 0;
-  }
-
-  .facts__value--long {
-    overflow-wrap: anywhere;
   }
 
   .facts__value--selectable {

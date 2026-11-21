@@ -31,11 +31,20 @@ SPDX-License-Identifier: GPL-3.0-or-later
       <tr>
         {#each columns as column, index (index)}
           {#if index === 0}
-            <th scope="row" class="table__cell--{column.wrap ?? 'normal'}">
+            <th
+              scope="row"
+              class:long-words={column.wrap === 'anywhere'}
+              class:table__cell--never={column.wrap === 'never'}
+            >
               {@render column.cell(row)}
             </th>
           {:else}
-            <td class="table__cell--{column.wrap ?? 'normal'}">{@render column.cell(row)}</td>
+            <td
+              class:long-words={column.wrap === 'anywhere'}
+              class:table__cell--never={column.wrap === 'never'}
+            >
+              {@render column.cell(row)}
+            </td>
           {/if}
         {/each}
       </tr>
@@ -61,10 +70,6 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
   .table thead th {
     color: var(--color-text-muted);
-  }
-
-  .table__cell--anywhere {
-    overflow-wrap: anywhere;
   }
 
   .table__cell--never {

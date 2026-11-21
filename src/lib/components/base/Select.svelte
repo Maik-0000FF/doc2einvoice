@@ -5,8 +5,9 @@ SPDX-License-Identifier: GPL-3.0-or-later
 <script lang="ts" generics="Value extends string">
   // The one choice list of the interface. It shows the value its owner holds:
   // a choice is reported, and it stays shown only if the owner takes it over.
-  // While the control is disabled the choice is being acted on; once it is
-  // enabled again, a choice the owner did not take over is withdrawn.
+  // An owner that disables the control instead is acting on the choice; once
+  // it enables the control again, a choice it did not take over is withdrawn.
+  import { tick } from 'svelte';
 
   const {
     id,
@@ -25,11 +26,21 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
   let control = $state<HTMLSelectElement>();
 
-  $effect(() => {
+  function showValue(): void {
     if (control !== undefined && !disabled) {
       control.value = value;
     }
-  });
+  }
+
+  // Waits until the owner has answered the choice, by taking it over or by
+  // disabling the control; one that did neither has refused it.
+  async function settle(chosen: Value): Promise<void> {
+    onchange(chosen);
+    await tick();
+    showValue();
+  }
+
+  $effect(showValue);
 </script>
 
 <select
@@ -40,7 +51,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
   onchange={(event) => {
     const chosen = options.find((option) => option.value === event.currentTarget.value);
     if (chosen !== undefined) {
-      onchange(chosen.value);
+      void settle(chosen.value);
     }
   }}
 >

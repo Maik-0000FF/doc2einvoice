@@ -8,6 +8,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
   import type { Snippet } from 'svelte';
 
   import Button from './Button.svelte';
+  import Note from './Note.svelte';
 
   let {
     open = $bindable(false),
@@ -61,7 +62,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
   <header class="dialog__header">
     <h2 id={titleId} class="dialog__title">{title}</h2>
     {#if subtitle !== undefined}
-      <p class="dialog__subtitle">{subtitle}</p>
+      <Note>{subtitle}</Note>
     {/if}
   </header>
 
@@ -95,11 +96,6 @@ SPDX-License-Identifier: GPL-3.0-or-later
   .dialog__title {
     font-size: var(--font-size-lg);
     font-weight: var(--font-weight-bold);
-  }
-
-  .dialog__subtitle {
-    color: var(--color-text-muted);
-    font-size: var(--font-size-sm);
   }
 
   .dialog__actions {

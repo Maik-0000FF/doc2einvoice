@@ -14,9 +14,10 @@ SPDX-License-Identifier: GPL-3.0-or-later
   import Dialog from './base/Dialog.svelte';
   import FactList from './base/FactList.svelte';
   import type { Fact } from './base/facts.ts';
+  import Note from './base/Note.svelte';
   import SectionHeading from './base/SectionHeading.svelte';
   import Table from './base/Table.svelte';
-  import type { RowKey, TableColumn } from './base/table.ts';
+  import { byPosition, type TableColumn } from './base/table.ts';
 
   let { info, open = $bindable(false) }: { info: AppInfo; open?: boolean } = $props();
 
@@ -29,8 +30,6 @@ SPDX-License-Identifier: GPL-3.0-or-later
   ];
 
   const publications = $derived([...info.ruleSets, ...info.xmlSchemas]);
-
-  const byTitle: RowKey<Publication> = (publication) => publication.title;
 
   const facts: readonly Fact[] = $derived([
     { term: i18n.t('about.license'), value: info.license },
@@ -60,14 +59,15 @@ SPDX-License-Identifier: GPL-3.0-or-later
   subtitle={i18n.t('about.version', { version: info.version })}
   closeLabel={i18n.t('about.close')}
 >
-  <p class="about__legal">{formatLegalNotice(info)}</p>
+  <Note>{formatLegalNotice(info)}</Note>
 
   <FactList {facts} />
 
   <section>
     <SectionHeading text={i18n.t('about.publications.heading')} />
     <p class="about__text">{i18n.t('about.publications.text')}</p>
-    <Table {columns} rows={publications} key={byTitle} />
+    <!-- A rule set and a schema may share a title. -->
+    <Table {columns} rows={publications} key={byPosition} />
   </section>
 
   <section>
@@ -80,11 +80,6 @@ SPDX-License-Identifier: GPL-3.0-or-later
 </Dialog>
 
 <style>
-  .about__legal {
-    color: var(--color-text-muted);
-    font-size: var(--font-size-sm);
-  }
-
   .about__text {
     margin-bottom: var(--space-sm);
     font-size: var(--font-size-sm);

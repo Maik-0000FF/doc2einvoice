@@ -6,6 +6,8 @@ SPDX-License-Identifier: GPL-3.0-or-later
   import { formatLegalNotice } from '#lib/app-info/legal-notice.ts';
   import AboutDialog from '#lib/components/AboutDialog.svelte';
   import Button from '#lib/components/base/Button.svelte';
+  import Note from '#lib/components/base/Note.svelte';
+  import PageTitle from '#lib/components/base/PageTitle.svelte';
   import InvoiceCheck from '#lib/components/InvoiceCheck.svelte';
   import { i18n } from '#lib/i18n/i18n.svelte.ts';
   import { fetchAppInfo } from '#lib/ipc/app-info.ts';
@@ -25,8 +27,8 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 {#await appInfo then info}
   <main class="shell">
-    <h1 class="shell__name">{info.name}</h1>
-    <p class="shell__version">{info.version}</p>
+    <PageTitle text={info.name} />
+    <Note>{info.version}</Note>
     <InvoiceCheck />
     <Button
       onclick={() => {
@@ -35,12 +37,14 @@ SPDX-License-Identifier: GPL-3.0-or-later
     >
       {i18n.t('about.open')}
     </Button>
-    <footer class="shell__legal">{formatLegalNotice(info)}</footer>
+    <footer class="shell__legal">
+      <Note>{formatLegalNotice(info)}</Note>
+    </footer>
   </main>
   <AboutDialog {info} bind:open={aboutOpen} />
 {:catch error}
   <main class="shell">
-    <p class="shell__error" role="alert">{String(error)}</p>
+    <Note tone="danger" size="body" role="alert">{String(error)}</Note>
   </main>
 {/await}
 
@@ -54,23 +58,8 @@ SPDX-License-Identifier: GPL-3.0-or-later
     padding: var(--space-lg);
   }
 
-  .shell__name {
-    font-size: var(--font-size-xl);
-    font-weight: var(--font-weight-bold);
-  }
-
-  .shell__version,
-  .shell__legal {
-    color: var(--color-text-muted);
-    font-size: var(--font-size-sm);
-  }
-
   .shell__legal {
     margin-top: var(--space-lg);
     text-align: center;
-  }
-
-  .shell__error {
-    color: var(--color-danger);
   }
 </style>

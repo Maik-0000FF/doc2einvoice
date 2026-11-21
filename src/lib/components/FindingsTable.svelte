@@ -10,6 +10,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
   import { i18n } from '#lib/i18n/i18n.svelte.ts';
   import type { RuleNote } from '#lib/ipc/bindings/RuleNote.ts';
 
+  import Note from './base/Note.svelte';
   import Table from './base/Table.svelte';
   import { byPosition, type TableColumn } from './base/table.ts';
 
@@ -40,18 +41,13 @@ SPDX-License-Identifier: GPL-3.0-or-later
 {/snippet}
 
 {#if findings.length === 0}
-  <p class="findings__none">{i18n.t('check.findings.none')}</p>
+  <Note>{i18n.t('check.findings.none')}</Note>
 {:else}
   <!-- A rule can be broken on several nodes, and on one node several times. -->
   <Table {columns} rows={findings} key={byPosition} />
 {/if}
 
 <style>
-  .findings__none {
-    color: var(--color-text-muted);
-    font-size: var(--font-size-sm);
-  }
-
   .findings__severity--fatal {
     color: var(--color-danger);
   }

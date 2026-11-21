@@ -13,8 +13,10 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
   import FactList from './base/FactList.svelte';
   import type { Fact } from './base/facts.ts';
+  import Note from './base/Note.svelte';
   import SectionHeading from './base/SectionHeading.svelte';
   import Select from './base/Select.svelte';
+  import SubHeading from './base/SubHeading.svelte';
   import Table from './base/Table.svelte';
   import { byPosition, type TableColumn } from './base/table.ts';
   import FindingsTable from './FindingsTable.svelte';
@@ -32,7 +34,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
   } = $props();
 
   // Identifies the control its label belongs to.
-  const PROFILE_ID = 'check-result-profile';
+  const profileId = $props.id();
 
   const counts = $derived(countBySeverity(check));
 
@@ -49,7 +51,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
   const facts: readonly Fact[] = $derived([
     { term: i18n.t('check.file'), value: check.fileName, long: true },
     { term: i18n.t('check.syntax'), value: i18n.t(SYNTAX_KEYS[check.syntax]) },
-    { term: i18n.t('check.profile'), value: profileControl, labelFor: PROFILE_ID },
+    { term: i18n.t('check.profile'), value: profileControl, labelFor: profileId },
   ]);
 </script>
 
@@ -62,7 +64,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
      no check is running. -->
 {#snippet profileControl()}
   <Select
-    id={PROFILE_ID}
+    id={profileId}
     value={check.profile}
     options={profiles}
     disabled={busy}
@@ -74,41 +76,41 @@ SPDX-License-Identifier: GPL-3.0-or-later
   <p class="result__verdict" class:result__verdict--fails={!check.conforms} role="status">
     {i18n.t(check.conforms ? 'check.verdict.conforms' : 'check.verdict.fails')}
   </p>
-  <p class="result__note">{i18n.t('check.verdict.scope')}</p>
+  <Note spaced>{i18n.t('check.verdict.scope')}</Note>
 
   <FactList {facts} />
 
-  <p class="result__note result__identifier">
+  <Note spaced long>
     {check.specificationIdentifier === null
       ? i18n.t('check.identifier.none')
       : i18n.t('check.identifier.stated', { identifier: check.specificationIdentifier })}
-  </p>
+  </Note>
   {#if check.ruleCoverage === 'notApplied'}
-    <p class="result__note result__note--warning">
+    <Note tone="warning" spaced>
       {i18n.t('check.identifier.notApplied', { profile: i18n.t(PROFILE_KEYS[check.profile]) })}
-    </p>
+    </Note>
   {/if}
 
   <SectionHeading text={i18n.t('check.schema.heading')} />
   {#if check.schemaFindings.length === 0}
-    <p class="result__note">{i18n.t('check.schema.valid')}</p>
+    <Note spaced>{i18n.t('check.schema.valid')}</Note>
   {:else}
-    <p class="result__note result__note--danger">{i18n.t('check.schema.invalid')}</p>
+    <Note tone="danger" spaced>{i18n.t('check.schema.invalid')}</Note>
     <Table columns={schemaColumns} rows={check.schemaFindings} key={byPosition} />
   {/if}
 
   <SectionHeading text={i18n.t('check.ruleSets.heading')} />
-  <p class="result__note">{i18n.t('check.counts', counts)}</p>
+  <Note spaced>{i18n.t('check.counts', counts)}</Note>
   {#each check.ruleSets as ruleSet (ruleSet.publication.title)}
     <article class="result__rule-set">
-      <h4 class="result__title">{ruleSet.publication.title}</h4>
+      <SubHeading text={ruleSet.publication.title} />
       {#if ruleSet.publication.version !== null}
-        <p class="result__note">
+        <Note spaced>
           {i18n.t('check.ruleSets.release', {
             version: ruleSet.publication.version,
             published: i18n.date(ruleSet.publication.published),
           })}
-        </p>
+        </Note>
       {/if}
       <FindingsTable findings={ruleSet.findings} />
     </article>
@@ -131,32 +133,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
     color: var(--color-danger);
   }
 
-  .result__note {
-    margin-bottom: var(--space-sm);
-    color: var(--color-text-muted);
-    font-size: var(--font-size-sm);
-  }
-
-  .result__note--danger {
-    color: var(--color-danger);
-  }
-
-  .result__note--warning {
-    color: var(--color-warning);
-  }
-
-  /* An identifier is one word that may be longer than the window is wide. */
-  .result__identifier {
-    overflow-wrap: anywhere;
-  }
-
   .result__rule-set {
     margin-top: var(--space-md);
-  }
-
-  .result__title {
-    margin: 0;
-    font-size: var(--font-size-sm);
-    font-weight: var(--font-weight-bold);
   }
 </style>
