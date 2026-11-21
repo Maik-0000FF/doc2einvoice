@@ -49,10 +49,13 @@ SPDX-License-Identifier: GPL-3.0-or-later
   {value}
   {disabled}
   onchange={(event) => {
+    // Only a script can put a value that is no option into the element.
     const chosen = options.find((option) => option.value === event.currentTarget.value);
-    if (chosen !== undefined) {
-      void settle(chosen.value);
+    if (chosen === undefined) {
+      showValue();
+      return;
     }
+    void settle(chosen.value);
   }}
 >
   {#each options as option (option.value)}
