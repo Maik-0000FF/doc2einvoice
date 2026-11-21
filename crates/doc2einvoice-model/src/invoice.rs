@@ -10,7 +10,10 @@ use crate::list::NonEmpty;
 use crate::party::{Buyer, Payee, Seller, TaxRepresentative};
 use crate::payment::PaymentInstructions;
 use crate::totals::{DocumentAdjustment, DocumentTotals, VatBreakdown};
-use crate::values::{BinaryObject, Code, CurrencyCode, Date, DocumentReference, Identifier, Text};
+use crate::values::{
+    BinaryObject, Code, CurrencyCode, Date, DocumentReference, Identifier,
+    OptionalSchemeIdentifier, Text,
+};
 
 /// An electronic invoice after the semantic data model of EN 16931.
 ///
@@ -52,7 +55,7 @@ pub struct Invoice {
     pub tender_or_lot_reference: Option<DocumentReference>,
     /// An object the invoice refers to, such as a meter or a subscription
     /// (BT-18).
-    pub invoiced_object: Option<Identifier>,
+    pub invoiced_object: Option<OptionalSchemeIdentifier>,
     /// Where the buyer books the invoice (BT-19).
     pub buyer_accounting_reference: Option<Text>,
     /// The terms of payment in words (BT-20).

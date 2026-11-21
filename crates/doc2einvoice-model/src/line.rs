@@ -5,8 +5,9 @@
 
 use crate::delivery::Period;
 use crate::values::{
-    Amount, Code, CountryCode, DocumentReference, Identifier, Percentage, Quantity,
-    SchemedIdentifier, Text, UnitPriceAmount, VatCategory,
+    Amount, Code, CountryCode, DocumentReference, Identifier, ItemClassification,
+    OptionalSchemeIdentifier, Percentage, Quantity, RequiredSchemeIdentifier, Text,
+    UnitPriceAmount, VatCategory,
 };
 
 /// A line of the invoice (BG-25).
@@ -17,7 +18,7 @@ pub struct InvoiceLine {
     /// A note on the line (BT-127).
     pub note: Option<Text>,
     /// An object the line refers to, such as a meter number (BT-128).
-    pub object_identifier: Option<Identifier>,
+    pub object_identifier: Option<OptionalSchemeIdentifier>,
     /// The quantity invoiced (BT-129).
     pub quantity: Quantity,
     /// The unit of measure of the quantity, UN/ECE Recommendation 20 or 21
@@ -97,9 +98,9 @@ pub struct ItemInformation {
     /// The identifier the buyer gives the item (BT-156).
     pub buyer_identifier: Option<Identifier>,
     /// An identifier after a registered scheme, such as a GTIN (BT-157).
-    pub standard_identifier: Option<SchemedIdentifier>,
+    pub standard_identifier: Option<RequiredSchemeIdentifier>,
     /// Classifications of the item, after UNTDID 7143 (BT-158).
-    pub classifications: Vec<SchemedIdentifier>,
+    pub classifications: Vec<ItemClassification>,
     /// The country the item comes from (BT-159).
     pub country_of_origin: Option<CountryCode>,
     /// Properties of the item, such as its colour (BG-32).

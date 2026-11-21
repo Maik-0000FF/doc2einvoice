@@ -5,7 +5,7 @@
 //! the period a document or a line covers.
 
 use crate::party::PostalAddress;
-use crate::values::{Date, Identifier, Text};
+use crate::values::{Date, OptionalSchemeIdentifier, Text};
 
 /// A period of days. The invoice (BG-14) and each line (BG-26) have one of
 /// this same form.
@@ -23,7 +23,7 @@ pub struct DeliveryInformation {
     /// The party delivered to, where it is not the buyer (BT-70).
     pub party_name: Option<Text>,
     /// An identifier of the place of delivery (BT-71).
-    pub location: Option<Identifier>,
+    pub location: Option<OptionalSchemeIdentifier>,
     /// The day the delivery actually took place (BT-72).
     pub actual_date: Option<Date>,
     /// The invoicing period (BG-14).

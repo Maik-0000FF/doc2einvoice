@@ -5,7 +5,9 @@
 //! the tax representative of the seller (BG-11), with the address and contact
 //! groups they share.
 
-use crate::values::{CountryCode, Identifier, SchemedIdentifier, Text};
+use crate::values::{
+    CountryCode, Identifier, OptionalSchemeIdentifier, RequiredSchemeIdentifier, Text,
+};
 
 /// A postal address. The standard gives the seller (BG-5), the buyer (BG-8),
 /// the tax representative (BG-12) and the place of delivery (BG-15) an address
@@ -51,9 +53,9 @@ pub struct Seller {
     /// Another name the seller is known by (BT-28).
     pub trading_name: Option<Text>,
     /// Identifiers of the seller, usually given by the buyer (BT-29).
-    pub identifiers: Vec<Identifier>,
+    pub identifiers: Vec<OptionalSchemeIdentifier>,
     /// The identifier from an official register (BT-30).
-    pub legal_registration: Option<Identifier>,
+    pub legal_registration: Option<OptionalSchemeIdentifier>,
     /// The VAT identifier, prefixed with the country code (BT-31).
     pub vat_identifier: Option<Identifier>,
     /// A local tax identifier or a reference to the tax status (BT-32).
@@ -61,7 +63,7 @@ pub struct Seller {
     /// Further legal information, such as the share capital (BT-33).
     pub additional_legal_information: Option<Text>,
     /// Where a response on the application level can be sent (BT-34).
-    pub electronic_address: Option<SchemedIdentifier>,
+    pub electronic_address: Option<RequiredSchemeIdentifier>,
     /// The postal address (BG-5).
     pub address: PostalAddress,
     /// The contact (BG-6).
@@ -76,13 +78,13 @@ pub struct Buyer {
     /// Another name the buyer is known by (BT-45).
     pub trading_name: Option<Text>,
     /// An identifier of the buyer, usually given by the seller (BT-46).
-    pub identifier: Option<Identifier>,
+    pub identifier: Option<OptionalSchemeIdentifier>,
     /// The identifier from an official register (BT-47).
-    pub legal_registration: Option<Identifier>,
+    pub legal_registration: Option<OptionalSchemeIdentifier>,
     /// The VAT identifier, prefixed with the country code (BT-48).
     pub vat_identifier: Option<Identifier>,
     /// Where the invoice should be sent (BT-49).
-    pub electronic_address: Option<SchemedIdentifier>,
+    pub electronic_address: Option<RequiredSchemeIdentifier>,
     /// The postal address (BG-8).
     pub address: PostalAddress,
     /// The contact (BG-9).
@@ -95,9 +97,9 @@ pub struct Payee {
     /// The name (BT-59).
     pub name: Text,
     /// An identifier (BT-60).
-    pub identifier: Option<Identifier>,
+    pub identifier: Option<OptionalSchemeIdentifier>,
     /// The identifier from an official register (BT-61).
-    pub legal_registration: Option<Identifier>,
+    pub legal_registration: Option<OptionalSchemeIdentifier>,
 }
 
 /// The tax representative of the seller (BG-11).

@@ -45,10 +45,10 @@ pub struct PaymentCard {
 
 /// A direct debit (BG-19).
 ///
-/// XRechnung requires all three business terms of this group. Whether EN
-/// 16931 requires them as well is open; until that is settled against the
-/// standard, the model takes them as optional and leaves the stricter
-/// demand to the validation rules.
+/// The three business terms of this group are optional in EN 16931: no rule
+/// of the standard demands them. XRechnung makes them mandatory with rules of
+/// its own (PEPPOL-EN16931-R061, BR-DE-30, BR-DE-31), which its validation
+/// rules check.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DirectDebit {
     /// The mandate reference (BT-89).

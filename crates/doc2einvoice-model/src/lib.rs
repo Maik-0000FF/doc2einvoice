@@ -39,5 +39,6 @@ pub use payment::{CreditTransfer, DirectDebit, PaymentCard, PaymentInstructions}
 pub use totals::{DocumentAdjustment, DocumentTotals, VatBreakdown};
 pub use values::{
     Amount, BinaryObject, Code, CountryCode, CurrencyCode, Date, DocumentReference, Identifier,
-    Percentage, Quantity, SchemedIdentifier, Text, UnitPriceAmount, ValueError, VatCategory,
+    ItemClassification, LetterCode, OptionalSchemeIdentifier, Percentage, Quantity,
+    RequiredSchemeIdentifier, Text, UnitPriceAmount, ValueError, VatCategory,
 };

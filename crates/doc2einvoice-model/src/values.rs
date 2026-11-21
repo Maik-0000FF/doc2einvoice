@@ -4,6 +4,11 @@
 //! The semantic data types of EN 16931: what a single value of a business term
 //! is. Text, dates and document references need no type of their own; amounts,
 //! codes and identifiers carry rules that their types keep.
+//!
+//! A type keeps a rule only where the rule is about the form of one value.
+//! Rules about content, such as a net price that must not be negative
+//! (BR-27), are left to the validation rules, which check them against the
+//! whole invoice; a type here would only check them a second time.
 
 use rust_decimal::Decimal;
 
@@ -18,6 +23,12 @@ pub type DocumentReference = String;
 
 /// Monetary amounts are stated with at most this many decimal places.
 const AMOUNT_DECIMAL_PLACES: u32 = 2;
+
+/// Number of letters of an ISO 4217 alphabetic currency code.
+const CURRENCY_CODE_LENGTH: usize = 3;
+
+/// Number of letters of an ISO 3166-1 alpha-2 country code.
+const COUNTRY_CODE_LENGTH: usize = 2;
 
 /// A value that does not have the form its data type demands.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -38,32 +49,38 @@ pub enum ValueError {
     UnknownVatCategory(String),
 }
 
-/// A monetary amount, in the currency the invoice names (BT-5), or in the VAT
-/// accounting currency for BT-111.
+/// A monetary amount, in the currency the invoice names, or in the VAT
+/// accounting currency for the VAT total in that currency.
 ///
-/// | Given          | Result                        |
-/// |----------------|-------------------------------|
-/// | 10.25          | 10.25                         |
-/// | 10             | 10                            |
-/// | -3.10          | -3.10 (negative amounts exist, e.g. BT-115) |
-/// | 10.250         | 10.250, worth 10.25: trailing zeros do not count |
-/// | 10.255         | error, three decimal places   |
-/// | 0.001          | error                         |
+/// The amount is kept without trailing zeros: the validation rules count the
+/// decimal places as written, so 10.250 must not reach the XML as written.
+///
+/// | Given   | Kept    | Why                                        |
+/// |---------|---------|--------------------------------------------|
+/// | 10.25   | 10.25   |                                            |
+/// | 10      | 10      |                                            |
+/// | -3.10   | -3.1    | negative amounts exist, such as an amount due after overpayment |
+/// | 10.250  | 10.25   | trailing zeros are dropped                 |
+/// | 10.00   | 10      | trailing zeros are dropped                 |
+/// | 10.255  | error   | three significant decimal places           |
+/// | 0.001   | error   |                                            |
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Amount(Decimal);
 
 impl Amount {
-    /// Takes an amount that has no more than two significant decimal places.
+    /// Takes an amount that has no more than two significant decimal places,
+    /// and keeps it without trailing zeros.
     ///
     /// # Errors
     ///
     /// [`ValueError::AmountPrecision`] if a third or further decimal place is
     /// not zero.
     pub fn new(value: Decimal) -> Result<Self, ValueError> {
-        if value.normalize().scale() > AMOUNT_DECIMAL_PLACES {
+        let normalized = value.normalize();
+        if normalized.scale() > AMOUNT_DECIMAL_PLACES {
             return Err(ValueError::AmountPrecision(value));
         }
-        Ok(Self(value))
+        Ok(Self(normalized))
     }
 
     /// The amount as a number.
@@ -74,57 +91,56 @@ impl Amount {
 }
 
 /// The price of one unit of an item, with as many decimal places as needed.
+/// Any number is a valid form; see the module documentation for the rules on
+/// content.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UnitPriceAmount(pub Decimal);
 
 /// A number of units, with as many decimal places as needed; its unit of
-/// measure is a business term of its own.
+/// measure is a business term of its own. Any number is a valid form, a
+/// negative one included, as on a line that is credited.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Quantity(pub Decimal);
 
-/// A percentage, as a part of a hundred: 34.78 is 34.78 %.
+/// A percentage, as a part of a hundred: 34.78 is 34.78 %. Any number is a
+/// valid form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Percentage(pub Decimal);
 
 /// Whether `code` consists of exactly `length` capital letters A to Z.
 ///
-/// | Given  | Length | Result |
-/// |--------|--------|--------|
-/// | EUR    | 3      | yes    |
-/// | eur    | 3      | no, small letters |
-/// | EU     | 3      | no, too short |
-/// | EURO   | 3      | no, too long |
-/// | EÜR    | 3      | no, a letter outside A to Z |
-/// | E1R    | 3      | no, a digit |
-/// | (empty)| 3      | no     |
+/// | Given   | Length | Result              |
+/// |---------|--------|---------------------|
+/// | EUR     | 3      | yes                 |
+/// | eur     | 3      | no, small letters   |
+/// | EU      | 3      | no, too short       |
+/// | EURO    | 3      | no, too long        |
+/// | EÜR     | 3      | no, a letter outside A to Z |
+/// | E1R     | 3      | no, a digit         |
+/// | (empty) | 3      | no                  |
 fn is_capital_letters(code: &str, length: usize) -> bool {
     code.len() == length && code.bytes().all(|byte| byte.is_ascii_uppercase())
 }
 
-/// Number of letters of an ISO 4217 alphabetic currency code.
-const CURRENCY_CODE_LENGTH: usize = 3;
-
-/// Number of letters of an ISO 3166-1 alpha-2 country code.
-const COUNTRY_CODE_LENGTH: usize = 2;
-
-/// A currency, as an alphabetic code of ISO 4217 (EUR, USD).
+/// A code of `N` capital letters A to Z, as the ISO lists of currencies and
+/// countries use them.
 ///
-/// Only the form is checked here. Whether the code is in the list is checked
+/// Only the form is checked here. Whether the code is in its list is checked
 /// by the validation rules, which carry the list itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CurrencyCode(String);
+pub struct LetterCode<const N: usize>(String);
 
-impl CurrencyCode {
-    /// Takes a code of three capital letters.
+impl<const N: usize> LetterCode<N> {
+    /// Takes a code of `N` capital letters.
     ///
     /// # Errors
     ///
     /// [`ValueError::CodeForm`] for anything else.
     pub fn new(code: &str) -> Result<Self, ValueError> {
-        if !is_capital_letters(code, CURRENCY_CODE_LENGTH) {
+        if !is_capital_letters(code, N) {
             return Err(ValueError::CodeForm {
                 code: code.to_owned(),
-                length: CURRENCY_CODE_LENGTH,
+                length: N,
             });
         }
         Ok(Self(code.to_owned()))
@@ -136,44 +152,22 @@ impl CurrencyCode {
         &self.0
     }
 }
+
+/// A currency, as an alphabetic code of ISO 4217 (EUR, USD).
+pub type CurrencyCode = LetterCode<CURRENCY_CODE_LENGTH>;
 
 /// A country, as an alpha-2 code of ISO 3166-1 (DE, FR).
-///
-/// Only the form is checked here, as for [`CurrencyCode`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CountryCode(String);
-
-impl CountryCode {
-    /// Takes a code of two capital letters.
-    ///
-    /// # Errors
-    ///
-    /// [`ValueError::CodeForm`] for anything else.
-    pub fn new(code: &str) -> Result<Self, ValueError> {
-        if !is_capital_letters(code, COUNTRY_CODE_LENGTH) {
-            return Err(ValueError::CodeForm {
-                code: code.to_owned(),
-                length: COUNTRY_CODE_LENGTH,
-            });
-        }
-        Ok(Self(code.to_owned()))
-    }
-
-    /// The code as written.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
+pub type CountryCode = LetterCode<COUNTRY_CODE_LENGTH>;
 
 /// A code from a code list the model names but does not hold, such as the
 /// invoice type (UNTDID 1001) or the unit of measure (UN/ECE Recommendation
-/// 20). The validation rules check it against its list.
+/// 20). Any text is a valid form; the validation rules check it against its
+/// list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Code(pub String);
 
 /// The VAT category of an amount, from the part of UNTDID 5305 that EN 16931
-/// allows.
+/// allows (BR-CL-18). XRechnung allows the same codes except B.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VatCategory {
     /// S: standard or reduced rate.
@@ -195,11 +189,13 @@ pub enum VatCategory {
     /// M: tax for production, services and importation in Ceuta and Melilla
     /// (IPSI).
     CeutaAndMelilla,
+    /// B: transferred VAT, the split payment of Italy.
+    TransferredVat,
 }
 
 impl VatCategory {
     /// Every category, in the order of the code list.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::StandardRate,
         Self::ZeroRated,
         Self::Exempt,
@@ -209,6 +205,7 @@ impl VatCategory {
         Self::NotSubjectToVat,
         Self::CanaryIslands,
         Self::CeutaAndMelilla,
+        Self::TransferredVat,
     ];
 
     /// The code of the category in UNTDID 5305.
@@ -224,6 +221,7 @@ impl VatCategory {
             Self::NotSubjectToVat => "O",
             Self::CanaryIslands => "L",
             Self::CeutaAndMelilla => "M",
+            Self::TransferredVat => "B",
         }
     }
 
@@ -232,7 +230,7 @@ impl VatCategory {
     ///
     /// # Errors
     ///
-    /// [`ValueError::UnknownVatCategory`] for a code that is none of the nine.
+    /// [`ValueError::UnknownVatCategory`] for a code that is none of the ten.
     pub fn from_code(code: &str) -> Result<Self, ValueError> {
         Self::ALL
             .into_iter()
@@ -241,27 +239,40 @@ impl VatCategory {
     }
 }
 
-/// An identifier, optionally formed after a named scheme.
+/// An identifier the standard gives no scheme, such as the invoice number or
+/// a VAT identifier.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Identifier {
+pub struct Identifier(pub String);
+
+/// An identifier that may name the scheme it is formed after, such as a
+/// register number with the code of its register.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OptionalSchemeIdentifier {
     /// The identifier itself.
     pub content: String,
-    /// The scheme it is formed after, where the business term allows one.
+    /// The scheme it is formed after.
     pub scheme: Option<String>,
-    /// The version of that scheme.
-    pub scheme_version: Option<String>,
 }
 
-/// An identifier whose scheme the standard requires: the electronic addresses
-/// (BT-34, BT-49), the item standard identifier (BT-157) and the item
-/// classification (BT-158).
+/// An identifier that must name the scheme it is formed after: the electronic
+/// addresses and the item standard identifier (BR-62, BR-63, BR-64).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SchemedIdentifier {
+pub struct RequiredSchemeIdentifier {
     /// The identifier itself.
     pub content: String,
     /// The scheme it is formed after.
     pub scheme: String,
-    /// The version of that scheme.
+}
+
+/// A classification of an item: a code, the scheme it is taken from, and
+/// optionally the version of that scheme (BR-65).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ItemClassification {
+    /// The code.
+    pub content: String,
+    /// The scheme, from UNTDID 7143.
+    pub scheme: String,
+    /// The version of the scheme.
     pub scheme_version: Option<String>,
 }
 
@@ -282,7 +293,10 @@ mod tests {
 
     use rust_decimal::Decimal;
 
-    use super::{Amount, CountryCode, CurrencyCode, ValueError, VatCategory, is_capital_letters};
+    use super::{
+        Amount, COUNTRY_CODE_LENGTH, CURRENCY_CODE_LENGTH, CountryCode, CurrencyCode, ValueError,
+        VatCategory, is_capital_letters,
+    };
 
     fn decimal(text: &str) -> Decimal {
         Decimal::from_str(text).unwrap_or_else(|error| unreachable!("{text}: {error}"))
@@ -290,24 +304,22 @@ mod tests {
 
     #[test]
     fn amounts_follow_their_table() {
-        for (given, accepted) in [
-            ("10.25", true),
-            ("10", true),
-            ("-3.10", true),
-            ("10.250", true),
-            ("10.255", false),
-            ("0.001", false),
+        for (given, kept) in [
+            ("10.25", Some("10.25")),
+            ("10", Some("10")),
+            ("-3.10", Some("-3.1")),
+            ("10.250", Some("10.25")),
+            ("10.00", Some("10")),
+            ("10.255", None),
+            ("0.001", None),
         ] {
-            assert_eq!(Amount::new(decimal(given)).is_ok(), accepted, "{given}");
+            let amount = Amount::new(decimal(given)).ok();
+            assert_eq!(
+                amount.map(|amount| amount.value().to_string()),
+                kept.map(str::to_owned),
+                "{given}"
+            );
         }
-    }
-
-    #[test]
-    fn an_amount_keeps_its_value() {
-        assert_eq!(
-            Amount::new(decimal("10.250")).map(Amount::value),
-            Ok(decimal("10.250"))
-        );
     }
 
     #[test]
@@ -321,7 +333,11 @@ mod tests {
             ("E1R", false),
             ("", false),
         ] {
-            assert_eq!(is_capital_letters(given, 3), accepted, "{given}");
+            assert_eq!(
+                is_capital_letters(given, CURRENCY_CODE_LENGTH),
+                accepted,
+                "{given}"
+            );
         }
     }
 
@@ -334,7 +350,7 @@ mod tests {
             CountryCode::new("DEU"),
             Err(ValueError::CodeForm {
                 code: "DEU".to_owned(),
-                length: 2
+                length: COUNTRY_CODE_LENGTH
             })
         );
     }
@@ -344,6 +360,15 @@ mod tests {
         for category in VatCategory::ALL {
             assert_eq!(VatCategory::from_code(category.code()), Ok(category));
         }
+    }
+
+    #[test]
+    fn the_vat_categories_are_those_of_the_code_list() {
+        let codes: Vec<&str> = VatCategory::ALL
+            .iter()
+            .map(|category| category.code())
+            .collect();
+        assert_eq!(codes, ["S", "Z", "E", "AE", "K", "G", "O", "L", "M", "B"]);
     }
 
     #[test]
