@@ -130,9 +130,24 @@ pub fn right_of<'a>(lines: &[Line<'a>], line: usize, last: &Word) -> Span<'a> {
     Span { page, words }
 }
 
-/// The cell right of the label ending with `last`: every line of the block
-/// whose line stands nearest right of the label on its baseline, from top
-/// to bottom, as a name set over two lines beside its label.
+/// The cell right of the label ending with `last`: the line that stands
+/// nearest right of the label on its baseline, and the lines of its block
+/// directly above it that nothing stands left of, from top to bottom.
+///
+/// A name set over two lines beside its label, which stands on the last of
+/// them, is read whole; the street and town below a name, and the lines
+/// beside other labels, are not.
+///
+/// | Left       | Right of it                  | Cell of "Name:"                  |
+/// |------------|------------------------------|----------------------------------|
+/// |            | `MVM Musterhafter`           |                                  |
+/// | `Name:`    | `Versicherungsverein a.G.`   | both lines                       |
+/// | `Name:`    | `Muster GmbH`                | `Muster GmbH`                    |
+/// | `Straße:`  | `Hauptstr. 1`                |                                  |
+/// | `Nummer:`  | `549910`                     |                                  |
+/// | `Name:`    | `Muster GmbH`                | `Muster GmbH` (a label left of the line above) |
+/// | `Name:`    | `Muster GmbH`                | `Muster GmbH` (the address below is left out) |
+/// |            | `Hauptstr. 1`                |                                  |
 pub fn cell_right_of<'a>(lines: &[Line<'a>], line: usize, last: &Word) -> Span<'a> {
     let page = lines[line].page;
     let tolerance = last.font_size * SAME_BASELINE;
@@ -140,22 +155,52 @@ pub fn cell_right_of<'a>(lines: &[Line<'a>], line: usize, last: &Word) -> Span<'
         .iter()
         .enumerate()
         .filter(|(index, other)| *index != line && other.page == page)
-        .filter_map(|(_, other)| {
+        .filter_map(|(index, other)| {
             let head = other.words.first()?;
             let beside =
                 (head.baseline - last.baseline).abs() <= tolerance && head.left >= last.right;
-            beside.then_some((other, head.left))
+            beside.then_some((index, head.left))
         })
         .min_by(|(_, a), (_, b)| a.total_cmp(b))
-        .map(|(other, _)| other.block);
-    let words = nearest.map_or_else(Vec::new, |block| {
-        lines
+        .map(|(index, _)| index);
+    let Some(start) = nearest else {
+        return Span {
+            page,
+            words: Vec::new(),
+        };
+    };
+    let block = lines[start].block;
+    let mut first = start;
+    while first > 0 {
+        let above = first - 1;
+        let same_block = lines[above].page == page && lines[above].block == block;
+        if !same_block || has_text_left(lines, above) {
+            break;
+        }
+        first = above;
+    }
+    Span {
+        page,
+        words: lines[first..=start]
             .iter()
-            .filter(|other| other.page == page && other.block == block)
-            .flat_map(|other| other.words.iter())
-            .collect()
-    });
-    Span { page, words }
+            .flat_map(|cell| cell.words.iter())
+            .collect(),
+    }
+}
+
+/// Whether anything is printed left of `line` on its baseline, as a label.
+fn has_text_left(lines: &[Line], line: usize) -> bool {
+    let Some(head) = lines[line].words.first() else {
+        return false;
+    };
+    let tolerance = head.font_size * SAME_BASELINE;
+    lines.iter().enumerate().any(|(index, other)| {
+        index != line
+            && other.page == lines[line].page
+            && other.words.iter().any(|word| {
+                (word.baseline - head.baseline).abs() <= tolerance && word.right <= head.left
+            })
+    })
 }
 
 /// Whether `word` stands on a baseline below that of `above`, beyond the
@@ -191,7 +236,7 @@ pub fn below<'a>(lines: &[Line<'a>], line: usize, first: &Word, last: &Word) -> 
 mod tests {
     use doc2einvoice_pdf::{Block, Line as Printed, PageLayout, Word};
 
-    use super::{lines, wrapped};
+    use super::{cell_right_of, lines, wrapped};
 
     /// The font size of every word, and the distance of two baselines.
     const FONT: f64 = 10.0;
@@ -235,5 +280,68 @@ mod tests {
             copied_glyphs: 0,
         }];
         assert_eq!(texts(&beside, 0), None);
+    }
+
+    /// One block of lines at `left`, each on its baseline.
+    fn column(left: f64, rows: &[(f64, &str)]) -> Block {
+        Block {
+            lines: rows
+                .iter()
+                .map(|(baseline, text)| line(left, *baseline, text))
+                .collect(),
+        }
+    }
+
+    fn cell_texts(pages: &[PageLayout], label_line: usize) -> Vec<String> {
+        let all = lines(pages);
+        let label = all[label_line].words.last().cloned();
+        label.map_or_else(Vec::new, |last| {
+            cell_right_of(&all, label_line, &last)
+                .texts()
+                .iter()
+                .map(|text| (*text).to_owned())
+                .collect()
+        })
+    }
+
+    fn layout(blocks: Vec<Block>) -> [PageLayout; 1] {
+        [PageLayout {
+            blocks,
+            off_axis_glyphs: 0,
+            copied_glyphs: 0,
+        }]
+    }
+
+    #[test]
+    fn cells_follow_their_table() {
+        let two_lines = layout(vec![
+            column(50.0, &[(100.0 + PITCH, "Name:")]),
+            column(300.0, &[(100.0, "MVM"), (100.0 + PITCH, "Verein")]),
+        ]);
+        assert_eq!(cell_texts(&two_lines, 0), ["MVM", "Verein"]);
+        let form = layout(vec![
+            column(
+                50.0,
+                &[
+                    (100.0, "Nummer:"),
+                    (100.0 + PITCH, "Name:"),
+                    (100.0 + 2.0 * PITCH, "Straße:"),
+                ],
+            ),
+            column(
+                300.0,
+                &[
+                    (100.0, "549910"),
+                    (100.0 + PITCH, "Muster"),
+                    (100.0 + 2.0 * PITCH, "Hauptstr."),
+                ],
+            ),
+        ]);
+        assert_eq!(cell_texts(&form, 1), ["Muster"]);
+        let address = layout(vec![
+            column(50.0, &[(100.0, "Name:")]),
+            column(300.0, &[(100.0, "Muster"), (100.0 + PITCH, "Hauptstr.")]),
+        ]);
+        assert_eq!(cell_texts(&address, 0), ["Muster"]);
     }
 }

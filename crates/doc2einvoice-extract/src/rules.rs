@@ -30,7 +30,8 @@ use doc2einvoice_pdf::PageLayout;
 
 use crate::labels::{
     self, AMOUNT_DUE, BUYER_NAME, CURRENCY, DELIVERY_DATE, DUE_DATE, Found, INVOICE_NUMBER,
-    ISSUE_DATE, Party, SELLER_NAME, Scope, TOTAL_WITH_VAT, TOTAL_WITHOUT_VAT, VAT_TOTAL, Weight,
+    ISSUE_DATE, Party, SELLER_NAME, Scope, Section, TOTAL_WITH_VAT, TOTAL_WITHOUT_VAT, VAT_TOTAL,
+    Weight,
 };
 use crate::page::{self, Line, Span};
 use crate::values::{self, Read};
@@ -201,14 +202,17 @@ pub fn draft(pages: &[PageLayout]) -> Draft {
 }
 
 /// The labels of every line. "Name" takes the term of the party whose
-/// section it stands in: the last heading before it on its page.
+/// section it stands in: the last heading before it on its page, unless the
+/// heading of another section stands between them.
 fn labelled<'a>(lines: &[Line<'a>]) -> Vec<Labelled<'a>> {
     let mut section: Option<(usize, Party)> = None;
     let mut labelled = Vec::with_capacity(lines.len());
     for (line, printed) in lines.iter().enumerate() {
         let words = printed.texts();
-        if let Some(party) = labels::heading(&words) {
-            section = Some((printed.page, party));
+        match labels::heading(&words) {
+            Some(Section::Party(party)) => section = Some((printed.page, party)),
+            Some(Section::Other) => section = None,
+            None => {}
         }
         let party = section
             .filter(|(page, _)| *page == printed.page)
@@ -242,7 +246,7 @@ fn chosen(
             .filter(|found| in_scope(found, line.line, number))
             .collect();
         for (index, found) in valid.iter().enumerate() {
-            if found.label.term != rule.term {
+            if !found.label.names_term(rule.term) {
                 continue;
             }
             let end = valid
@@ -593,6 +597,36 @@ mod tests {
             block(50.0, 140.0, &["Name:", "Lager", "Nord"]),
         ])];
         assert_eq!(value(&pages, BUYER_NAME), None);
+    }
+
+    #[test]
+    fn the_heading_of_another_section_ends_that_of_a_party() {
+        let pages = [page(vec![
+            block(50.0, 100.0, &["Verkäufer"]),
+            block(50.0, 120.0, &["Bankverbindung"]),
+            block(50.0, 140.0, &["Name:", "Sparkasse", "Musterstadt"]),
+        ])];
+        assert_eq!(value(&pages, SELLER_NAME), None);
+    }
+
+    #[test]
+    fn a_name_beside_its_label_leaves_out_the_address_beside_other_labels() {
+        let labels = wrapped_block(50.0, 120.0, &[&["Name:"], &["Straße:"], &["Ort:"]]);
+        let values = wrapped_block(
+            300.0,
+            120.0,
+            &[
+                &["Muster", "GmbH"],
+                &["Hauptstr.", "1"],
+                &["12345", "Stadt"],
+            ],
+        );
+        let pages = [page(vec![
+            block(50.0, 100.0, &["Verkäufer"]),
+            labels,
+            values,
+        ])];
+        assert_eq!(value(&pages, SELLER_NAME).as_deref(), Some("Muster GmbH"));
     }
 
     #[test]
