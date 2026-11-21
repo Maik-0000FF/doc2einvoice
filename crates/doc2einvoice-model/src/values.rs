@@ -167,7 +167,7 @@ pub type CountryCode = LetterCode<COUNTRY_CODE_LENGTH>;
 pub struct Code(pub String);
 
 /// The VAT category of an amount, from the part of UNTDID 5305 that EN 16931
-/// allows (BR-CL-18). XRechnung allows the same codes except B.
+/// allows (BR-CL-18).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VatCategory {
     /// S: standard or reduced rate.

@@ -912,6 +912,7 @@ name = "doc2einvoice-model"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "roxmltree",
  "rust_decimal",
  "thiserror 2.0.21",
 ]

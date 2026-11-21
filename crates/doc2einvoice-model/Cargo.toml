@@ -16,5 +16,8 @@ chrono.workspace = true
 rust_decimal.workspace = true
 thiserror.workspace = true
 
+[dev-dependencies]
+roxmltree.workspace = true
+
 [lints]
 workspace = true
