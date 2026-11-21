@@ -18,6 +18,8 @@
 //! | letter close                                        |                     |
 //! | a space drawn on the letter before it, the next     | two words (the gap) |
 //! | letter a word gap away                              |                     |
+//! | no advance stated: a narrow letter, a space after   | two words           |
+//! | it, two letters                                     |                     |
 //! | a ligature                                          | its letters, in one |
 //! |                                                     | word                |
 //! | a letter that is doubled in the word                | both letters        |
@@ -121,6 +123,21 @@ fn a_space_drawn_on_the_letter_before_it_parts_nothing() {
 
     assert_eq!(block_texts(&glyphs), ["47"]);
     assert_eq!(block_texts(&apart), ["4 7"]);
+}
+
+#[test]
+fn a_space_after_a_narrow_letter_parts_words_without_stated_widths() {
+    // The font states no widths, so half the font size is assumed for each
+    // letter: more than the "i" takes before the space.
+    let narrow = FONT_SIZE / 5.0;
+    let glyphs = [
+        glyph("i", 0.0, 0.0),
+        glyph(" ", narrow, 0.0),
+        glyph("a", 2.0 * narrow, 0.0),
+        glyph("m", 2.0 * narrow + LETTER_WIDTH, 0.0),
+    ];
+
+    assert_eq!(block_texts(&glyphs), ["i am"]);
 }
 
 #[test]
