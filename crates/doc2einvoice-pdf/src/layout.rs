@@ -8,7 +8,9 @@
 //! font size, so that it holds for small print and headlines alike.
 //!
 //! - A **word** ends where the distance to the next character is a word gap,
-//!   or where a space is drawn.
+//!   or where a space is drawn after a character. A space drawn on the
+//!   character before it, as some programs place it, parts nothing: whether
+//!   there is room there, the distance tells.
 //! - A **line** is a run of words on one baseline without a column gap. Two
 //!   table cells next to each other are two lines.
 //! - A **block** is made of lines that stand below each other: they overlap
@@ -54,6 +56,12 @@ const COPY_DISTANCE_EM: f64 = 0.1;
 /// the letter and however condensed the text. The bound by the font size
 /// alone would take such letters for copies in condensed text.
 const COPY_ADVANCE_SHARE: f64 = 1.0 / 3.0;
+
+/// A space that starts further than this inside the character before it,
+/// as a share of the font size, is drawn on that character and parts
+/// nothing. A space set right after a character starts at its end, give or
+/// take rounding.
+const SPACE_INSIDE_EM: f64 = 0.1;
 
 const WORD_SEPARATOR: char = ' ';
 const LINE_SEPARATOR: char = '\n';
@@ -154,6 +162,7 @@ impl PageLayout {
     /// | none, or white space only                           | no blocks                  |
     /// | one following the other on a baseline               | one word                   |
     /// | apart by more than the word gap, or a space between | two words of one line      |
+    /// | a space drawn on the character before it, no gap    | one word                   |
     /// | apart by more than the column gap                   | two lines                  |
     /// | lines below each other at line distance that        | one block                  |
     /// | overlap horizontally                                |                            |
@@ -289,10 +298,13 @@ fn lines(glyphs: Vec<&Glyph>) -> (Vec<Line>, usize) {
                 lines.extend(open.take().and_then(OpenLine::into_line));
             }
             // A space ends a word but neither starts a line nor widens one:
-            // a row of spaces would otherwise bridge any column gap.
+            // a row of spaces would otherwise bridge any column gap. Drawn on
+            // the character before it, it ends nothing.
             let visible: String = glyph.text.chars().filter(|c| !c.is_whitespace()).collect();
             if visible.is_empty() {
-                if let Some(line) = open.as_mut() {
+                if let Some(line) = open.as_mut()
+                    && glyph.x >= line.right - SPACE_INSIDE_EM * glyph.font_size
+                {
                     line.close_word();
                 }
                 continue;

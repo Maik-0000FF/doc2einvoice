@@ -13,6 +13,11 @@
 //! | no advance stated, one letter width apart           | one word            |
 //! | no advance stated, several letter widths apart      | two words           |
 //! | a row of spaces between two cells                   | two blocks          |
+//! | a space right after a letter, the next letter close | two words           |
+//! | a space drawn on the letter before it, the next     | one word            |
+//! | letter close                                        |                     |
+//! | a space drawn on the letter before it, the next     | two words (the gap) |
+//! | letter a word gap away                              |                     |
 //! | a ligature                                          | its letters, in one |
 //! |                                                     | word                |
 //! | a letter that is doubled in the word                | both letters        |
@@ -86,6 +91,36 @@ fn spaces_do_not_bridge_a_column_gap() {
     ));
 
     assert_eq!(block_texts(&glyphs), ["A", "B"]);
+}
+
+#[test]
+fn a_space_after_a_letter_parts_words() {
+    let glyphs = [
+        glyph("A", 0.0, LETTER_WIDTH),
+        glyph(" ", LETTER_WIDTH, 0.0),
+        glyph("B", LETTER_WIDTH, LETTER_WIDTH),
+    ];
+
+    assert_eq!(block_texts(&glyphs), ["A B"]);
+}
+
+#[test]
+fn a_space_drawn_on_the_letter_before_it_parts_nothing() {
+    // As one program draws "Nr. 471102": the space on the 4, not before it.
+    let on_letter = LETTER_WIDTH / 100.0;
+    let glyphs = [
+        glyph("4", 0.0, LETTER_WIDTH),
+        glyph(" ", on_letter, LETTER_WIDTH),
+        glyph("7", LETTER_WIDTH, LETTER_WIDTH),
+    ];
+    let apart = [
+        glyph("4", 0.0, LETTER_WIDTH),
+        glyph(" ", on_letter, LETTER_WIDTH),
+        glyph("7", 2.0 * LETTER_WIDTH, LETTER_WIDTH),
+    ];
+
+    assert_eq!(block_texts(&glyphs), ["47"]);
+    assert_eq!(block_texts(&apart), ["4 7"]);
 }
 
 #[test]
