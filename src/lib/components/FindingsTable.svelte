@@ -10,79 +10,54 @@ SPDX-License-Identifier: GPL-3.0-or-later
   import { i18n } from '#lib/i18n/i18n.svelte.ts';
   import type { RuleNote } from '#lib/ipc/bindings/RuleNote.ts';
 
+  import Table from './base/Table.svelte';
+  import { byPosition, type TableColumn } from './base/table.ts';
+
   const { findings }: { findings: readonly RuleNote[] } = $props();
+
+  const columns: readonly TableColumn<RuleNote>[] = $derived([
+    { heading: i18n.t('check.findings.rule'), cell: ruleCell, wrap: 'never' },
+    { heading: i18n.t('check.findings.severity'), cell: severityCell },
+    { heading: i18n.t('check.findings.location'), cell: locationCell, wrap: 'anywhere' },
+    { heading: i18n.t('check.findings.text'), cell: textCell },
+  ]);
 </script>
+
+{#snippet ruleCell(finding: RuleNote)}{finding.ruleId}{/snippet}
+{#snippet severityCell(finding: RuleNote)}
+  <span class="findings__severity--{finding.severity}">
+    {i18n.t(SEVERITY_KEYS[finding.severity])}
+  </span>
+{/snippet}
+{#snippet locationCell(finding: RuleNote)}{finding.location}{/snippet}
+{#snippet textCell(finding: RuleNote)}
+  {finding.message}
+  {#if finding.evaluationError !== null}
+    <span class="findings__error">
+      {i18n.t('check.findings.notEvaluated', { code: finding.evaluationError })}
+    </span>
+  {/if}
+{/snippet}
 
 {#if findings.length === 0}
   <p class="findings__none">{i18n.t('check.findings.none')}</p>
 {:else}
-  <table class="findings">
-    <thead>
-      <tr>
-        <th scope="col">{i18n.t('check.findings.rule')}</th>
-        <th scope="col">{i18n.t('check.findings.severity')}</th>
-        <th scope="col">{i18n.t('check.findings.location')}</th>
-        <th scope="col">{i18n.t('check.findings.text')}</th>
-      </tr>
-    </thead>
-    <tbody>
-      <!-- A rule can be broken on several nodes, and on one node several times. -->
-      {#each findings as finding, index (index)}
-        <tr class="findings__row findings__row--{finding.severity}">
-          <th scope="row" class="findings__rule">{finding.ruleId}</th>
-          <td class="findings__severity">{i18n.t(SEVERITY_KEYS[finding.severity])}</td>
-          <td class="findings__location">{finding.location}</td>
-          <td>
-            {finding.message}
-            {#if finding.evaluationError !== null}
-              <span class="findings__error">
-                {i18n.t('check.findings.notEvaluated', { code: finding.evaluationError })}
-              </span>
-            {/if}
-          </td>
-        </tr>
-      {/each}
-    </tbody>
-  </table>
+  <!-- A rule can be broken on several nodes, and on one node several times. -->
+  <Table {columns} rows={findings} key={byPosition} />
 {/if}
 
 <style>
-  .findings {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: var(--font-size-sm);
-    text-align: left;
-  }
-
-  .findings th,
-  .findings td {
-    padding: var(--space-xs) var(--space-sm) var(--space-xs) 0;
-    border-bottom: var(--border-width) solid var(--color-border);
-    font-weight: var(--font-weight-regular);
-    vertical-align: top;
-  }
-
-  .findings thead th,
   .findings__none {
     color: var(--color-text-muted);
     font-size: var(--font-size-sm);
   }
 
-  .findings__rule {
-    white-space: nowrap;
-  }
-
-  .findings__row--fatal .findings__severity {
+  .findings__severity--fatal {
     color: var(--color-danger);
   }
 
-  .findings__row--warning .findings__severity {
+  .findings__severity--warning {
     color: var(--color-warning);
-  }
-
-  /* A path is one word that may be longer than its column is wide. */
-  .findings__location {
-    overflow-wrap: anywhere;
   }
 
   .findings__error {

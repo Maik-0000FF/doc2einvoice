@@ -53,6 +53,38 @@ export default defineConfig(
     },
   },
   {
+    // Every control, table, list of facts and section heading is drawn by one
+    // building block under
+    // components/base/, which sets its look and its behaviour. A view that
+    // writes such an element itself fails the check.
+    files: ['src/**/*.svelte'],
+    ignores: ['src/lib/components/base/**'],
+    rules: {
+      'svelte/no-restricted-html-elements': [
+        'error',
+        {
+          elements: [
+            'button',
+            'dd',
+            'dialog',
+            'dl',
+            'dt',
+            'h3',
+            'input',
+            'option',
+            'select',
+            'table',
+            'td',
+            'textarea',
+            'th',
+            'tr',
+          ],
+          message: 'Use the building block under src/lib/components/base/ instead.',
+        },
+      ],
+    },
+  },
+  {
     // The root-level JavaScript configuration files and the scripts under
     // tools/ are outside the TypeScript project, so the rules that need type
     // information do not apply to them.

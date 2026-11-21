@@ -5,6 +5,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 <script lang="ts">
   import { formatLegalNotice } from '#lib/app-info/legal-notice.ts';
   import AboutDialog from '#lib/components/AboutDialog.svelte';
+  import Button from '#lib/components/base/Button.svelte';
   import InvoiceCheck from '#lib/components/InvoiceCheck.svelte';
   import { i18n } from '#lib/i18n/i18n.svelte.ts';
   import { fetchAppInfo } from '#lib/ipc/app-info.ts';
@@ -27,14 +28,13 @@ SPDX-License-Identifier: GPL-3.0-or-later
     <h1 class="shell__name">{info.name}</h1>
     <p class="shell__version">{info.version}</p>
     <InvoiceCheck />
-    <button
-      class="shell__about"
+    <Button
       onclick={() => {
         aboutOpen = true;
       }}
     >
       {i18n.t('about.open')}
-    </button>
+    </Button>
     <footer class="shell__legal">{formatLegalNotice(info)}</footer>
   </main>
   <AboutDialog {info} bind:open={aboutOpen} />
@@ -63,14 +63,6 @@ SPDX-License-Identifier: GPL-3.0-or-later
   .shell__legal {
     color: var(--color-text-muted);
     font-size: var(--font-size-sm);
-  }
-
-  .shell__about {
-    padding: var(--space-xs) var(--space-md);
-    border: var(--border-width) solid var(--color-border);
-    border-radius: var(--radius-md);
-    background: var(--color-surface);
-    cursor: pointer;
   }
 
   .shell__legal {
