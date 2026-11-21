@@ -587,7 +587,12 @@ const HEADINGS: &[(&[Word], Party)] = &[
 /// | `Name:`                            | none       |
 /// Whether the words of a line, as compared, are `pattern` and nothing else.
 fn is_whole_line(pattern: &[Word], normal: &[String]) -> bool {
-    pattern.len() == normal.len()
+    pattern.len() == normal.len() && starts_line(pattern, normal)
+}
+
+/// Whether the words of a line, as compared, start with `pattern`.
+fn starts_line(pattern: &[Word], normal: &[String]) -> bool {
+    pattern.len() <= normal.len()
         && pattern
             .iter()
             .zip(normal)
@@ -720,13 +725,9 @@ pub fn is_window_note(words: &[&str]) -> bool {
     let whole = WINDOW_NOTE_WORDS
         .iter()
         .any(|pattern| is_whole_line(pattern, &normal));
-    let starts = WINDOW_NOTE_STARTS.iter().any(|pattern| {
-        pattern.len() <= normal.len()
-            && pattern
-                .iter()
-                .zip(&normal)
-                .all(|(word, printed)| matches(*word, printed))
-    });
+    let starts = WINDOW_NOTE_STARTS
+        .iter()
+        .any(|pattern| starts_line(pattern, &normal));
     whole || starts
 }
 
