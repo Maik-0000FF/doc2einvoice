@@ -3,7 +3,8 @@
 
 //! The lines of an invoice in reading order, each with its page, and the
 //! places a value may stand at next to a label: after it in its line, to
-//! its right on the same baseline, or in the line below it.
+//! its right on the same baseline, at the start of the next line of its
+//! block where a sentence wraps, or in the line below it.
 
 use doc2einvoice_model::Location;
 use doc2einvoice_pdf::{PageLayout, Word};
@@ -23,6 +24,8 @@ const BELOW_SLACK: f64 = 1.0;
 /// One printed line of an invoice.
 pub struct Line<'a> {
     pub page: usize,
+    /// The block of the page the line stands in.
+    pub block: usize,
     pub words: &'a [Word],
 }
 
@@ -73,14 +76,29 @@ pub fn lines(pages: &[PageLayout]) -> Vec<Line<'_>> {
         .iter()
         .enumerate()
         .flat_map(|(page, layout)| {
-            layout.blocks.iter().flat_map(move |block| {
-                block.lines.iter().map(move |line| Line {
-                    page,
-                    words: &line.words,
+            layout
+                .blocks
+                .iter()
+                .enumerate()
+                .flat_map(move |(block, lines)| {
+                    lines.lines.iter().map(move |line| Line {
+                        page,
+                        block,
+                        words: &line.words,
+                    })
                 })
-            })
         })
         .collect()
+}
+
+/// The words of the line after `line` if it continues the same block: where
+/// a sentence that ends with a label wraps, its value starts that line.
+pub fn wrapped<'a>(lines: &[Line<'a>], line: usize) -> Option<Span<'a>> {
+    let (this, next) = (lines.get(line)?, lines.get(line + 1)?);
+    (next.page == this.page && next.block == this.block).then(|| Span {
+        page: next.page,
+        words: next.words.iter().collect(),
+    })
 }
 
 /// The words after a label in its line, up to `end`.

@@ -4,8 +4,9 @@
 //! The rules that read a business term next to its labels.
 //!
 //! A value is looked for after its label in the same line, then to its
-//! right on the same baseline, then, for the terms of the header, in the
-//! line below. A value beside its label counts more than one below it:
+//! right on the same baseline, then at the start of the next line of the
+//! block if the label closes a line with text before it, as a sentence that
+//! wraps, then, for the terms of the header, in the line below. A value beside its label counts more than one below it:
 //! below a label stand the values of a column too.
 //!
 //! A label that names its term counts more than a general one: "Datum" is
@@ -94,10 +95,12 @@ enum Standing {
     Elsewhere,
 }
 
-/// How near a value stands to its label: beside it, or below it.
+/// How near a value stands to its label: beside it, at the start of the
+/// next line where its sentence wraps, or below it.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Nearness {
     Beside,
+    Wrapped,
     Below,
 }
 
@@ -232,8 +235,17 @@ fn candidate(
     if !only_separators && !rule.past_words {
         return None;
     }
+    // Only a label that closes a line with text before it ends a sentence
+    // that may wrap: a label alone in its line heads a column.
+    let closes_sentence = found.first > 0 && end == printed.words.len();
     let places = [
         (Nearness::Beside, Some(page::right_of(lines, line, last))),
+        (
+            Nearness::Wrapped,
+            closes_sentence
+                .then(|| page::wrapped(lines, line))
+                .flatten(),
+        ),
         (
             Nearness::Below,
             rule.below.then(|| page::below(lines, line, first, last)),
@@ -338,6 +350,8 @@ mod tests {
     const CHARACTER: f64 = 5.0;
     /// The gap between two words of a line.
     const GAP: f64 = 3.0;
+    /// The distance of two baselines in a block.
+    const LINE_PITCH: f64 = 12.0;
 
     /// A line of `texts` from `left` on `baseline`, as one block.
     fn block(left: f64, baseline: f64, texts: &[&str]) -> Block {
@@ -402,6 +416,60 @@ mod tests {
         ])];
         assert_eq!(value(&pages, CURRENCY).as_deref(), Some("EUR"));
         assert_eq!(value(&pages, TOTAL_WITHOUT_VAT).as_deref(), Some("1234.5"));
+    }
+
+    /// Lines below each other as one block, each from `left`, the first on
+    /// `top`, the others a line pitch below the one before.
+    fn wrapped_block(left: f64, top: f64, rows: &[&[&str]]) -> Block {
+        let mut lines = Vec::new();
+        let mut baseline = top;
+        for texts in rows {
+            lines.extend(block(left, baseline, texts).lines);
+            baseline += LINE_PITCH;
+        }
+        Block { lines }
+    }
+
+    #[test]
+    fn a_value_after_a_label_that_closes_a_wrapped_line_is_read() {
+        let pages = [page(vec![wrapped_block(
+            50.0,
+            100.0,
+            &[
+                &[
+                    "Gutschrift",
+                    "(Selbst",
+                    "ausgestellte",
+                    "Rechnung)",
+                    "Nr.",
+                    "471102",
+                    "vom",
+                ],
+                &["05.03.2018"],
+            ],
+        )])];
+        assert_eq!(value(&pages, INVOICE_NUMBER).as_deref(), Some("471102"));
+        assert_eq!(value(&pages, ISSUE_DATE).as_deref(), Some("2018-03-05"));
+    }
+
+    #[test]
+    fn a_line_of_another_block_does_not_continue_a_sentence() {
+        let pages = [page(vec![
+            block(50.0, 100.0, &["Rechnung", "Nr.", "17", "vom"]),
+            block(50.0, 100.0 + LINE_PITCH, &["05.03.2018"]),
+        ])];
+        assert_eq!(value(&pages, INVOICE_NUMBER).as_deref(), Some("17"));
+        assert_eq!(value(&pages, ISSUE_DATE), None);
+    }
+
+    #[test]
+    fn a_label_alone_in_its_line_does_not_wrap() {
+        let pages = [page(vec![wrapped_block(
+            300.0,
+            100.0,
+            &[&["Gesamtbetrag"], &["160,00"]],
+        )])];
+        assert_eq!(value(&pages, TOTAL_WITH_VAT), None);
     }
 
     #[test]
