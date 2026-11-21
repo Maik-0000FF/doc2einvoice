@@ -131,9 +131,11 @@ The specifications and rule sets this project works against:
 
 - [EN 16931 validation artefacts](https://github.com/ConnectingEurope/eInvoicing-EN16931)
   (CEN/TC 434), licensed under EUPL 1.2
-- [XRechnung](https://xeinkauf.de/xrechnung/) and its
-  [Schematron rules](https://github.com/itplr-kosit/xrechnung-schematron)
-  (KoSIT), licensed under Apache-2.0
+- [XRechnung](https://xeinkauf.de/xrechnung/) (KoSIT): the
+  [specification 3.0.2](https://xeinkauf.de/app/uploads/2024/07/302-XRechnung-2024-06-20.pdf),
+  published under the licence agreement between the European Commission and CEN,
+  and its [Schematron rules](https://github.com/itplr-kosit/xrechnung-schematron),
+  licensed under Apache-2.0
 - [Peppol BIS Billing 3.0](https://docs.peppol.eu/poacc/billing/3.0/) (OpenPeppol)
 - [UBL 2.1](http://docs.oasis-open.org/ubl/os-UBL-2.1/) XML Schema (OASIS),
   distributed unmodified under the notice of the specification
@@ -203,6 +205,7 @@ The Rust code is a workspace:
 
 | Path                             | Purpose                                                      |
 | -------------------------------- | ------------------------------------------------------------ |
+| `crates/doc2einvoice-model`      | the invoice after the semantic data model of EN 16931        |
 | `crates/doc2einvoice-pdf`        | reads the text of a PDF with its place on the page           |
 | `crates/doc2einvoice-schematron` | Schematron interpreter, knows nothing about invoices         |
 | `crates/doc2einvoice-validation` | rule sets with version and date, profiles, validation report |
