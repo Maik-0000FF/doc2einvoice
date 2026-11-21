@@ -208,6 +208,7 @@ The Rust code is a workspace:
 | `crates/doc2einvoice-model`      | the invoice after the semantic data model of EN 16931        |
 | `crates/doc2einvoice-pdf`        | reads the text of a PDF with its place on the page           |
 | `crates/doc2einvoice-schematron` | Schematron interpreter, knows nothing about invoices         |
+| `crates/doc2einvoice-syntax`     | writes an invoice of the model as UBL 2.1 or CII D16B        |
 | `crates/doc2einvoice-validation` | rule sets with version and date, profiles, validation report |
 | `src-tauri`                      | the desktop application                                      |
 | `rulesets`                       | the published rule files, unchanged                          |

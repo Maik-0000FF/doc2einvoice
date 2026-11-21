@@ -59,6 +59,16 @@ precedence = "override"
 SPDX-FileCopyrightText = "Koordinierungsstelle für IT-Standards (KoSIT)"
 SPDX-License-Identifier = "Apache-2.0"
 
+# The path of each business term in UBL and CII, extracted from the mapping
+# stylesheets of the XRechnung visualisation published by KoSIT (version
+# 2026-08-31) and joined into full paths; changed from the original by that
+# extraction.
+[[annotations]]
+path = "crates/doc2einvoice-syntax/tests/data/bindings.tsv"
+precedence = "override"
+SPDX-FileCopyrightText = "Koordinierungsstelle für IT-Standards (KoSIT)"
+SPDX-License-Identifier = "Apache-2.0"
+
 # The XML Schema files of UBL 2.1, unchanged as published by OASIS. They may be
 # copied and distributed with their notice, but not modified.
 [[annotations]]

@@ -14,6 +14,8 @@ edition = "2024"
 publish = false
 
 [workspace.dependencies]
+# Attached documents are embedded in an invoice as Base64.
+base64 = "0.22"
 # Calendar dates of the invoice model, without time of day or time zone.
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 # The argument parser, without colours, suggestions and procedural macros: the
@@ -22,13 +24,18 @@ clap = { version = "4.6", default-features = false, features = ["std", "help", "
 doc2einvoice-model = { path = "crates/doc2einvoice-model" }
 doc2einvoice-pdf = { path = "crates/doc2einvoice-pdf" }
 doc2einvoice-schematron = { path = "crates/doc2einvoice-schematron" }
+doc2einvoice-syntax = { path = "crates/doc2einvoice-syntax" }
 doc2einvoice-validation = { path = "crates/doc2einvoice-validation" }
 # The PDF interpreter, pinned exactly: it is young, and where it places a
 # character decides what the reader finds on a page. A new version is taken
 # only together with a new run of the reading tests.
 hayro-interpret = "=0.9.0"
+# Tells an IBAN from another account identifier, by its form and check digits.
+iban_validate = "5.0"
 # The XML Schema processor, pinned exactly like the XPath engine below.
 oxixml-schema = "=0.1.2"
+# Writes XML as a stream, escaping text and attribute values.
+quick-xml = "0.42"
 roxmltree = "0.20"
 # Amounts, prices, quantities and percentages as exact decimal numbers.
 rust_decimal = { version = "1.43", default-features = false, features = ["std"] }
