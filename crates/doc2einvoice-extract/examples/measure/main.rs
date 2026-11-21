@@ -417,7 +417,14 @@ mod tests {
         let names: Vec<String> = found
             .iter()
             .filter_map(|path| path.strip_prefix(&scratch.0).ok())
-            .map(|path| path.display().to_string())
+            .map(|path| {
+                // Joined with one separator, whatever the system writes between folders.
+                let parts: Vec<String> = path
+                    .components()
+                    .map(|part| part.as_os_str().to_string_lossy().into_owned())
+                    .collect();
+                parts.join("/")
+            })
             .collect();
         let mut expected = vec!["B.PDF", "a.pdf", "sub/d.pdf"];
         if cfg!(unix) {
