@@ -12,8 +12,14 @@ const TERM_PREFIX: &str = "BT-";
 /// What the identifier of a business group starts with, as in `BG-25`.
 const GROUP_PREFIX: &str = "BG-";
 
+/// The highest number of a business term in EN 16931-1:2017.
+pub const LAST_TERM: u16 = 165;
+
+/// The numbers up to [`LAST_TERM`] the standard assigns no term: BT-4.
+pub const UNASSIGNED_TERMS: [u16; 1] = [4];
+
 /// The business groups are numbered from 1 to this.
-const LAST_GROUP: u16 = 32;
+pub const LAST_GROUP: u16 = 32;
 
 /// The semantic data type of a business term.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -688,18 +694,15 @@ fn number_after(id: &str, prefix: &str) -> Option<u16> {
 
 #[cfg(test)]
 mod tests {
-    use super::{TERMS, group_id, group_number, term_by_id, term_by_number};
-
-    /// The highest number of a business term.
-    const LAST_TERM: u16 = 165;
-    /// BT-4 is not assigned.
-    const UNASSIGNED: u16 = 4;
+    use super::{
+        LAST_TERM, TERMS, UNASSIGNED_TERMS, group_id, group_number, term_by_id, term_by_number,
+    };
 
     #[test]
     fn every_assigned_number_has_one_term_in_order() {
         let numbers: Vec<u16> = TERMS.iter().map(|term| term.number).collect();
         let expected: Vec<u16> = (1..=LAST_TERM)
-            .filter(|number| *number != UNASSIGNED)
+            .filter(|number| !UNASSIGNED_TERMS.contains(number))
             .collect();
         assert_eq!(numbers, expected);
     }
@@ -714,7 +717,9 @@ mod tests {
             term_by_number(27).map(super::Term::id),
             Some("BT-27".to_owned())
         );
-        assert!(term_by_number(UNASSIGNED).is_none());
+        for number in UNASSIGNED_TERMS {
+            assert!(term_by_number(number).is_none());
+        }
     }
 
     #[test]

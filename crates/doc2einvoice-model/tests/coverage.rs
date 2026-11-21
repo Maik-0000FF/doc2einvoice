@@ -10,6 +10,8 @@
 //! sentence outside parentheses or in the documentation of a module, does not
 //! give the term a place.
 
+use doc2einvoice_model::{LAST_GROUP, TERMS, Term, group_id};
+
 /// The sources of the model.
 const SOURCES: [&str; 6] = [
     include_str!("../src/delivery.rs"),
@@ -19,15 +21,6 @@ const SOURCES: [&str; 6] = [
     include_str!("../src/payment.rs"),
     include_str!("../src/totals.rs"),
 ];
-
-/// The highest number of a business term in EN 16931-1:2017.
-const LAST_TERM: u32 = 165;
-
-/// BT-4 is not assigned in the standard.
-const UNASSIGNED_TERMS: [u32; 1] = [4];
-
-/// The highest number of a business group.
-const LAST_GROUP: u32 = 32;
 
 const DOC_COMMENT: &str = "///";
 const ATTRIBUTE: &str = "#[";
@@ -79,12 +72,9 @@ fn all_named() -> Vec<String> {
         .collect()
 }
 
-fn missing(prefix: &str, numbers: impl Iterator<Item = u32>) -> Vec<String> {
+fn missing(ids: impl Iterator<Item = String>) -> Vec<String> {
     let named = all_named();
-    numbers
-        .map(|number| format!("{prefix}-{number}"))
-        .filter(|id| !named.contains(id))
-        .collect()
+    ids.filter(|id| !named.contains(id)).collect()
 }
 
 #[test]
@@ -112,13 +102,12 @@ fn only_documentation_directly_above_an_item_counts() {
 
 #[test]
 fn every_business_term_has_a_place() {
-    let terms = (1..=LAST_TERM).filter(|number| !UNASSIGNED_TERMS.contains(number));
-    let missing = missing("BT", terms);
+    let missing = missing(TERMS.iter().map(Term::id));
     assert!(missing.is_empty(), "not in the model: {missing:?}");
 }
 
 #[test]
 fn every_business_group_has_a_place() {
-    let missing = missing("BG", 1..=LAST_GROUP);
+    let missing = missing((1..=LAST_GROUP).map(group_id));
     assert!(missing.is_empty(), "not in the model: {missing:?}");
 }
