@@ -3,7 +3,8 @@
 
 //! The lines of an invoice in reading order, each with its page, and the
 //! places a value may stand at next to a label: after it in its line, to
-//! its right on the same baseline, or in the line below it.
+//! its right on the same baseline, at the start of the next line of its
+//! block where a sentence wraps, or in the line below it.
 
 use doc2einvoice_model::Location;
 use doc2einvoice_pdf::{PageLayout, Word};
@@ -23,6 +24,8 @@ const BELOW_SLACK: f64 = 1.0;
 /// One printed line of an invoice.
 pub struct Line<'a> {
     pub page: usize,
+    /// The block of the page the line stands in.
+    pub block: usize,
     pub words: &'a [Word],
 }
 
@@ -73,14 +76,32 @@ pub fn lines(pages: &[PageLayout]) -> Vec<Line<'_>> {
         .iter()
         .enumerate()
         .flat_map(|(page, layout)| {
-            layout.blocks.iter().flat_map(move |block| {
-                block.lines.iter().map(move |line| Line {
-                    page,
-                    words: &line.words,
+            layout
+                .blocks
+                .iter()
+                .enumerate()
+                .flat_map(move |(block, lines)| {
+                    lines.lines.iter().map(move |line| Line {
+                        page,
+                        block,
+                        words: &line.words,
+                    })
                 })
-            })
         })
         .collect()
+}
+
+/// The words of the line after `line` if it continues the same block below
+/// it: where a sentence that ends with a label wraps, its value starts that
+/// line. A line of the block on the same baseline is a cell beside it.
+pub fn wrapped<'a>(lines: &[Line<'a>], line: usize) -> Option<Span<'a>> {
+    let (this, next) = (lines.get(line)?, lines.get(line + 1)?);
+    let (label, start) = (this.words.first()?, next.words.first()?);
+    let continues = next.page == this.page && next.block == this.block && lies_below(start, label);
+    continues.then(|| Span {
+        page: next.page,
+        words: next.words.iter().collect(),
+    })
 }
 
 /// The words after a label in its line, up to `end`.
@@ -109,6 +130,12 @@ pub fn right_of<'a>(lines: &[Line<'a>], line: usize, last: &Word) -> Span<'a> {
     Span { page, words }
 }
 
+/// Whether `word` stands on a baseline below that of `above`, beyond the
+/// tolerance of one baseline.
+fn lies_below(word: &Word, above: &Word) -> bool {
+    word.baseline > above.baseline + above.font_size * SAME_BASELINE
+}
+
 /// The words of the nearest line below the label from `first` to `last`
 /// that starts under it.
 pub fn below<'a>(lines: &[Line<'a>], line: usize, first: &Word, last: &Word) -> Span<'a> {
@@ -120,7 +147,7 @@ pub fn below<'a>(lines: &[Line<'a>], line: usize, first: &Word, last: &Word) -> 
         .filter(|other| other.page == page)
         .filter_map(|other| other.words.first().map(|head| (other, head)))
         .filter(|(_, head)| {
-            head.baseline > first.baseline + first.font_size * SAME_BASELINE
+            lies_below(head, first)
                 && head.baseline <= reach
                 && head.left >= first.left - slack
                 && head.left <= last.right
@@ -129,5 +156,56 @@ pub fn below<'a>(lines: &[Line<'a>], line: usize, first: &Word, last: &Word) -> 
     Span {
         page,
         words: nearest.map_or_else(Vec::new, |(other, _)| other.words.iter().collect()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use doc2einvoice_pdf::{Block, Line as Printed, PageLayout, Word};
+
+    use super::{lines, wrapped};
+
+    /// The font size of every word, and the distance of two baselines.
+    const FONT: f64 = 10.0;
+    const PITCH: f64 = 12.0;
+
+    fn line(left: f64, baseline: f64, text: &str) -> Printed {
+        Printed {
+            words: vec![Word {
+                text: text.to_owned(),
+                left,
+                right: left + FONT,
+                baseline,
+                font_size: FONT,
+            }],
+        }
+    }
+
+    fn texts(pages: &[PageLayout], at: usize) -> Option<Vec<String>> {
+        let all = lines(pages);
+        wrapped(&all, at).map(|span| span.texts().iter().map(|text| (*text).to_owned()).collect())
+    }
+
+    #[test]
+    fn the_next_line_of_a_block_continues_a_sentence_only_below_it() {
+        let below = [PageLayout {
+            blocks: vec![Block {
+                lines: vec![
+                    line(50.0, 100.0, "vom"),
+                    line(50.0, 100.0 + PITCH, "05.03.2018"),
+                ],
+            }],
+            off_axis_glyphs: 0,
+            copied_glyphs: 0,
+        }];
+        assert_eq!(texts(&below, 0), Some(vec!["05.03.2018".to_owned()]));
+        let beside = [PageLayout {
+            blocks: vec![Block {
+                lines: vec![line(50.0, 100.0, "vom"), line(300.0, 100.0, "05.03.2018")],
+            }],
+            off_axis_glyphs: 0,
+            copied_glyphs: 0,
+        }];
+        assert_eq!(texts(&beside, 0), None);
     }
 }
