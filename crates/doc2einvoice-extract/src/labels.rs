@@ -682,13 +682,14 @@ pub fn says_direct_debit(words: &[&str]) -> bool {
 }
 
 /// Notes the zone for additions of a letter window prints above the
-/// address, each as the first words of its line.
-const WINDOW_NOTES: &[&[Word]] = &[
+/// address. A note of one word is the whole of its line: as the first word
+/// of a line, "Personal" may as well begin the name of a firm. A note of
+/// several words may start a line with more after it.
+const WINDOW_NOTE_WORDS: &[&[Word]] = &[
     &[Is("persönlich")],
     &[Is("vertraulich")],
     &[Is("einschreiben")],
     &[Is("eilzustellung")],
-    &[Is("bei"), Is("unzustellbarkeit")],
     &[Is("personal")],
     &[Is("confidential")],
     &[Is("registered")],
@@ -696,27 +697,37 @@ const WINDOW_NOTES: &[&[Word]] = &[
     &[Is("confidentiel")],
     &[Is("recommandé")],
 ];
+const WINDOW_NOTE_STARTS: &[&[Word]] = &[
+    &[Is("bei"), Is("unzustellbarkeit")],
+    &[Is("einschreiben"), Is("rückschein")],
+    &[Is("einschreiben"), Is("einwurf")],
+];
 
-/// Whether a line starts with a note of the zone for additions of a letter
-/// window, which is no line of the address below it.
+/// Whether a line is a note of the zone for additions of a letter window,
+/// which is no line of the address below it.
 ///
 /// | Words                                 | Note |
 /// |---------------------------------------|------|
 /// | `Persönlich`                          | yes  |
+/// | `PERSONAL`                            | yes  |
 /// | `Einschreiben` `Rückschein`           | yes  |
 /// | `Bei` `Unzustellbarkeit` `zurück`     | yes  |
-/// | `PERSONAL`                            | yes  |
-/// | `Kunden` `AG`                         | no   |
+/// | `Personal` `Partner` `GmbH`           | no (a note of one word is a line alone) |
 /// | `Persönliche` `Beratung` `GmbH`       | no   |
+/// | `Kunden` `AG`                         | no   |
 pub fn is_window_note(words: &[&str]) -> bool {
     let normal: Vec<String> = words.iter().map(|word| normalized(word)).collect();
-    WINDOW_NOTES.iter().any(|pattern| {
+    let whole = WINDOW_NOTE_WORDS
+        .iter()
+        .any(|pattern| is_whole_line(pattern, &normal));
+    let starts = WINDOW_NOTE_STARTS.iter().any(|pattern| {
         pattern.len() <= normal.len()
             && pattern
                 .iter()
                 .zip(&normal)
                 .all(|(word, printed)| matches(*word, printed))
-    })
+    });
+    whole || starts
 }
 
 /// Labels printed beside the lines of an address, which belong to it.
@@ -924,13 +935,14 @@ mod tests {
 
     #[test]
     fn window_notes_follow_their_table() {
-        let rows: [(&[&str], bool); 6] = [
+        let rows: [(&[&str], bool); 7] = [
             (&["Persönlich"], true),
+            (&["PERSONAL"], true),
             (&["Einschreiben", "Rückschein"], true),
             (&["Bei", "Unzustellbarkeit", "zurück"], true),
-            (&["PERSONAL"], true),
-            (&["Kunden", "AG"], false),
+            (&["Personal", "Partner", "GmbH"], false),
             (&["Persönliche", "Beratung", "GmbH"], false),
+            (&["Kunden", "AG"], false),
         ];
         for (words, expected) in rows {
             assert_eq!(is_window_note(words), expected, "{words:?}");

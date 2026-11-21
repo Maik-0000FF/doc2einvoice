@@ -1242,6 +1242,27 @@ mod tests {
     }
 
     #[test]
+    fn a_firm_whose_name_begins_like_a_note_is_the_name() {
+        let pages = [page(vec![wrapped_block(
+            mm(25.0),
+            mm(60.0),
+            &[
+                &["Personal", "Partner", "GmbH"],
+                &["Bahnstr.", "42"],
+                &["88802", "Spielkreis"],
+            ],
+        )])];
+        assert_eq!(
+            value(&pages, BUYER_NAME).as_deref(),
+            Some("Personal Partner GmbH")
+        );
+        assert_eq!(
+            value(&pages, BUYER_ADDRESS_LINES[0]).as_deref(),
+            Some("Bahnstr. 42")
+        );
+    }
+
+    #[test]
     fn a_heading_without_a_colon_is_not_the_name() {
         let pages = [page(vec![wrapped_block(
             50.0,
