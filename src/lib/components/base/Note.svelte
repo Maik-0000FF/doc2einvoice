@@ -28,12 +28,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
   } = $props();
 </script>
 
-<p
-  class="note note--{tone} note--{size}"
-  class:note--spaced={spaced}
-  class:long-words={long}
-  {role}
->
+<p class="note--{tone} note--{size}" class:note--spaced={spaced} class:long-words={long} {role}>
   {@render children()}
 </p>
 
