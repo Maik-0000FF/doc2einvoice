@@ -14,9 +14,12 @@ edition = "2024"
 publish = false
 
 [workspace.dependencies]
+# Calendar dates of the invoice model, without time of day or time zone.
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 # The argument parser, without colours, suggestions and procedural macros: the
 # command line is small and its output goes to terminals and pipes alike.
 clap = { version = "4.6", default-features = false, features = ["std", "help", "usage", "error-context"] }
+doc2einvoice-model = { path = "crates/doc2einvoice-model" }
 doc2einvoice-pdf = { path = "crates/doc2einvoice-pdf" }
 doc2einvoice-schematron = { path = "crates/doc2einvoice-schematron" }
 doc2einvoice-validation = { path = "crates/doc2einvoice-validation" }
@@ -27,6 +30,8 @@ hayro-interpret = "=0.9.0"
 # The XML Schema processor, pinned exactly like the XPath engine below.
 oxixml-schema = "=0.1.2"
 roxmltree = "0.20"
+# Amounts, prices, quantities and percentages as exact decimal numbers.
+rust_decimal = { version = "1.43", default-features = false, features = ["std"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.11"
