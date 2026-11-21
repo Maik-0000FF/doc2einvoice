@@ -37,6 +37,12 @@ textarea {
   color: inherit;
 }
 
+/* A path, an address or an identifier is one word that may be longer than the
+   space it is shown in. The building blocks take this rule from here. */
+.long-words {
+  overflow-wrap: anywhere;
+}
+
 h1,
 h2,
 h3,

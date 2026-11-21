@@ -13,6 +13,9 @@ const DEV_SERVER_PORT = 1420;
 const HMR_PORT = 1421;
 const LOOPBACK_HOST = '127.0.0.1';
 
+// Tests of the building blocks of the interface; they need a document.
+const COMPONENT_TESTS = 'src/lib/components/**/*.test.svelte.ts';
+
 // Set by the Tauri CLI only when developing against a mobile device.
 const remoteDevHost = process.env['TAURI_DEV_HOST'];
 
@@ -37,6 +40,25 @@ export default defineConfig({
   },
 
   test: {
-    include: ['src/**/*.test.ts'],
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: 'logic',
+          include: ['src/**/*.test.ts'],
+        },
+      },
+      {
+        // Components are mounted into a document as the window would, with
+        // the browser build of Svelte.
+        extends: true,
+        resolve: { conditions: ['browser'] },
+        test: {
+          name: 'components',
+          include: [COMPONENT_TESTS],
+          environment: 'jsdom',
+        },
+      },
+    ],
   },
 });
