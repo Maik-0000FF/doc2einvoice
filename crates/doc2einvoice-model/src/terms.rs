@@ -9,6 +9,12 @@
 /// What the identifier of a business term starts with, as in `BT-27`.
 const TERM_PREFIX: &str = "BT-";
 
+/// What the identifier of a business group starts with, as in `BG-25`.
+const GROUP_PREFIX: &str = "BG-";
+
+/// The business groups are numbered from 1 to this.
+const LAST_GROUP: u16 = 32;
+
 /// The semantic data type of a business term.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DataType {
@@ -644,19 +650,45 @@ pub fn term_by_number(number: u16) -> Option<&'static Term> {
 /// | `BT-027`, `BT-+27`, `bt-27`, `BT-`, `27`, `BT-27 ` | none |
 #[must_use]
 pub fn term_by_id(id: &str) -> Option<&'static Term> {
-    let digits = id.strip_prefix(TERM_PREFIX)?;
+    term_by_number(number_after(id, TERM_PREFIX)?)
+}
+
+/// The identifier of the business group `number`, as in `BG-25`.
+#[must_use]
+pub fn group_id(number: u16) -> String {
+    format!("{GROUP_PREFIX}{number}")
+}
+
+/// The number of the business group an identifier such as `BG-25` names.
+///
+/// | Identifier | Number |
+/// |------------|--------|
+/// | `BG-25`    | 25     |
+/// | `BG-32`    | 32     |
+/// | `BG-0`, `BG-33` | none (no such group) |
+/// | `BT-25`    | none (a term, not a group) |
+/// | `BG-025`, `BG-+25`, `bg-25`, `BG-`, `BG-25 ` | none |
+#[must_use]
+pub fn group_number(id: &str) -> Option<u16> {
+    number_after(id, GROUP_PREFIX).filter(|number| (1..=LAST_GROUP).contains(number))
+}
+
+/// The number written after `prefix` in `id`, in plain digits without a
+/// leading zero.
+fn number_after(id: &str, prefix: &str) -> Option<u16> {
+    let digits = id.strip_prefix(prefix)?;
     let canonical = !digits.is_empty()
         && !digits.starts_with('0')
         && digits.bytes().all(|byte| byte.is_ascii_digit());
     if !canonical {
         return None;
     }
-    term_by_number(digits.parse().ok()?)
+    digits.parse().ok()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{TERMS, term_by_id, term_by_number};
+    use super::{TERMS, group_id, group_number, term_by_id, term_by_number};
 
     /// The highest number of a business term.
     const LAST_TERM: u16 = 165;
@@ -683,6 +715,18 @@ mod tests {
             Some("BT-27".to_owned())
         );
         assert!(term_by_number(UNASSIGNED).is_none());
+    }
+
+    #[test]
+    fn a_group_is_named_by_its_identifier_only() {
+        assert_eq!(group_id(25), "BG-25");
+        assert_eq!(group_number("BG-25"), Some(25));
+        assert_eq!(group_number("BG-32"), Some(32));
+        for id in [
+            "BG-0", "BG-33", "BT-25", "BG-025", "BG-+25", "bg-25", "BG-", "BG-25 ",
+        ] {
+            assert!(group_number(id).is_none(), "{id}");
+        }
     }
 
     #[test]

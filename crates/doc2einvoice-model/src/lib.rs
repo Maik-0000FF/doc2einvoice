@@ -39,7 +39,7 @@ pub use line::{
 pub use list::NonEmpty;
 pub use party::{Buyer, Contact, Payee, PostalAddress, Seller, TaxRepresentative};
 pub use payment::{CreditTransfer, DirectDebit, PaymentCard, PaymentInstructions};
-pub use terms::{DataType, TERMS, Term, term_by_id, term_by_number};
+pub use terms::{DataType, TERMS, Term, group_id, group_number, term_by_id, term_by_number};
 pub use totals::{DocumentAdjustment, DocumentTotals, VatBreakdown};
 pub use values::{
     Amount, BinaryObject, Code, CountryCode, CurrencyCode, Date, DocumentReference, Identifier,

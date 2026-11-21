@@ -11,7 +11,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use doc2einvoice_model::{Occurrence, term_by_id};
+use doc2einvoice_model::{Occurrence, group_id, group_number, term_by_id};
 use doc2einvoice_syntax::bindings::{PREFIXES, bindings};
 use xee_xpath::context::StaticContextBuilder;
 use xee_xpath::query::SequenceQuery;
@@ -35,9 +35,6 @@ const WITHIN_LINE: std::ops::RangeInclusive<u16> = 26..=32;
 /// credit transfer (BG-17) is a payment means element (BG-16) with an
 /// account, and its BIC (BT-86) stands beside the account, not in it.
 const HELD_BY: [(u16, u16); 1] = [(17, 16)];
-
-/// The prefix of the identifier of a business group, as in `BG-25`.
-const GROUP_PREFIX: &str = "BG-";
 
 /// What separates the alternatives of a path.
 const ALTERNATIVE: &str = " | ";
@@ -130,10 +127,7 @@ impl Expected {
         let table = bindings();
         let cii_of_group: HashMap<u16, &str> = table
             .iter()
-            .filter_map(|binding| {
-                let number = binding.id.strip_prefix(GROUP_PREFIX)?.parse().ok()?;
-                Some((number, binding.cii))
-            })
+            .filter_map(|binding| Some((group_number(binding.id)?, binding.cii)))
             .collect();
         // For each repeated group: the path its terms are relative to, and
         // the path of its occurrences.
@@ -146,8 +140,9 @@ impl Expected {
                     None => (own, own.to_owned()),
                     Some((_, holder)) => {
                         let base = cii_of_group[holder];
-                        let step = relative(own, base)
-                            .unwrap_or_else(|| unreachable!("BG-{number} is not below {base}"));
+                        let step = relative(own, base).unwrap_or_else(|| {
+                            unreachable!("{} is not below {base}", group_id(*number))
+                        });
                         (base, format!("{base}[{step}]"))
                     }
                 };
