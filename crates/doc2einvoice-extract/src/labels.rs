@@ -574,17 +574,6 @@ const HEADINGS: &[(&[Word], Party)] = &[
     (&[Is("tax"), Is("representative")], Party::TaxRepresentative),
 ];
 
-/// The section a line heads, if the line is nothing but the heading of it.
-///
-/// | Words                              | Section    |
-/// |------------------------------------|------------|
-/// | `Verkäufer`                        | seller     |
-/// | `Käufer/Leistungsempfänger:`       | buyer      |
-/// | `Abweichender` `Warenempfänger`    | deliver to |
-/// | `Bankverbindung`                   | other      |
-/// | `Bank` `details:`                  | other      |
-/// | `Verkäufer` `Muster` `GmbH`        | none (more than a heading) |
-/// | `Name:`                            | none       |
 /// Whether the words of a line, as compared, are `pattern` and nothing else.
 fn is_whole_line(pattern: &[Word], normal: &[String]) -> bool {
     pattern.len() == normal.len() && starts_line(pattern, normal)
@@ -599,6 +588,17 @@ fn starts_line(pattern: &[Word], normal: &[String]) -> bool {
             .all(|(word, printed)| matches(*word, printed))
 }
 
+/// The section a line heads, if the line is nothing but the heading of it.
+///
+/// | Words                              | Section    |
+/// |------------------------------------|------------|
+/// | `Verkäufer`                        | seller     |
+/// | `Käufer/Leistungsempfänger:`       | buyer      |
+/// | `Abweichender` `Warenempfänger`    | deliver to |
+/// | `Bankverbindung`                   | other      |
+/// | `Bank` `details:`                  | other      |
+/// | `Verkäufer` `Muster` `GmbH`        | none (more than a heading) |
+/// | `Name:`                            | none       |
 pub fn heading(words: &[&str]) -> Option<Section> {
     let normal: Vec<String> = words.iter().map(|word| normalized(word)).collect();
     let is = |pattern: &[Word]| is_whole_line(pattern, &normal);
