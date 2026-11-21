@@ -5,13 +5,18 @@
 //! names: UBL 2.1 and UN/CEFACT Cross Industry Invoice D16B.
 //!
 //! Each business term is written at the element of the syntax that holds it,
-//! in the order the XML Schema of the syntax prescribes. An invoice the
-//! syntax cannot express without inventing a value is refused with a
-//! [`Gap`].
+//! in the order the XML Schema of the syntax prescribes. A fixed code word
+//! the syntax requires and no business term holds is written as the
+//! published examples of the standard write it; an invoice the syntax cannot
+//! express without inventing a value about it is refused with a [`Gap`].
+//! Nothing is written empty.
 
 mod cii;
 mod error;
 mod format;
+mod names;
+pub mod namespaces;
+mod shared;
 mod ubl;
 mod xml;
 

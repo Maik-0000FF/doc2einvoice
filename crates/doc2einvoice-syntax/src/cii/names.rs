@@ -4,13 +4,14 @@
 //! The names UN/CEFACT Cross Industry Invoice D16B gives its namespaces,
 //! elements, attributes and fixed values, each written once.
 
-pub(super) const RSM_NAMESPACE: &str =
-    "urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100";
-pub(super) const RAM_NAMESPACE: &str =
-    "urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100";
-pub(super) const UDT_NAMESPACE: &str =
-    "urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100";
-pub(super) const QDT_NAMESPACE: &str = "urn:un:unece:uncefact:data:standard:QualifiedDataType:100";
+pub(super) use crate::names::{
+    CURRENCY_ID, FALSE, FILENAME, INVOICED_OBJECT_TYPE, LIST_ID, LIST_VERSION_ID, MIME_CODE,
+    SCHEME_ID, TRUE, UNIT_CODE, VAT as VAT_TYPE,
+};
+pub(super) use crate::namespaces::{
+    CII_AGGREGATE as RAM_NAMESPACE, CII_INVOICE as RSM_NAMESPACE, CII_QUALIFIED as QDT_NAMESPACE,
+    CII_UNQUALIFIED as UDT_NAMESPACE,
+};
 
 pub(super) const XMLNS_RSM: &str = "xmlns:rsm";
 pub(super) const XMLNS_RAM: &str = "xmlns:ram";
@@ -24,14 +25,7 @@ pub(super) const EXCHANGED_DOCUMENT: &str = "rsm:ExchangedDocument";
 pub(super) const SUPPLY_CHAIN_TRADE_TRANSACTION: &str = "rsm:SupplyChainTradeTransaction";
 
 // Attributes.
-pub(super) const CURRENCY_ID: &str = "currencyID";
-pub(super) const SCHEME_ID: &str = "schemeID";
-pub(super) const UNIT_CODE: &str = "unitCode";
-pub(super) const LIST_ID: &str = "listID";
-pub(super) const LIST_VERSION_ID: &str = "listVersionID";
 pub(super) const FORMAT: &str = "format";
-pub(super) const MIME_CODE: &str = "mimeCode";
-pub(super) const FILENAME: &str = "filename";
 
 // Data types.
 pub(super) const DATE_TIME_STRING: &str = "udt:DateTimeString";
@@ -175,8 +169,6 @@ pub(super) const URI_UNIVERSAL_COMMUNICATION: &str = "ram:URIUniversalCommunicat
 pub(super) const VALUE: &str = "ram:Value";
 
 // Fixed values.
-/// The tax type of value added tax (UNTDID 5153).
-pub(super) const VAT_TYPE: &str = "VAT";
 /// The scheme of a VAT identifier in a tax registration.
 pub(super) const VAT_REGISTRATION: &str = "VA";
 /// The scheme of a local tax registration (BT-32).
@@ -185,14 +177,8 @@ pub(super) const LOCAL_TAX_REGISTRATION: &str = "FC";
 /// documents: a tender or lot (BT-17), an invoiced object (BT-18) and a
 /// supporting document (BG-24).
 pub(super) const TENDER_TYPE: &str = "50";
-pub(super) const INVOICED_OBJECT_TYPE: &str = "130";
 pub(super) const SUPPORTING_DOCUMENT_TYPE: &str = "916";
 /// The name CII requires beside the identifier of a project (BT-11), which
 /// no business term holds; written as the published examples of EN 16931 and
 /// XRechnung write it.
 pub(super) const PROJECT_NAME: &str = "Project reference";
-/// The payment means (UNTDID 4461) of the SEPA area, whose accounts are
-/// IBANs: credit transfer and direct debit.
-pub(super) const SEPA_PAYMENT_MEANS: [&str; 2] = ["58", "59"];
-pub(super) const TRUE: &str = "true";
-pub(super) const FALSE: &str = "false";

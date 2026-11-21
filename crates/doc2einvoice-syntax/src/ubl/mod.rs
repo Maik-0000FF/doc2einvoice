@@ -20,7 +20,8 @@ use doc2einvoice_model::{
 use self::names as n;
 use crate::error::{Gap, Syntax, WriteError};
 use crate::format;
-use crate::xml::{Attribute, Xml};
+use crate::shared;
+use crate::xml::{Attribute, Xml, optional_attribute};
 
 /// Which UBL document an invoice is written as. UBL has a document of its own
 /// for a credit note; the caller chooses it, from the invoice type (BT-3).
@@ -73,7 +74,7 @@ pub fn write(invoice: &Invoice, document: UblDocument) -> Result<Vec<u8>, WriteE
         document,
         currency: invoice.currency.as_str(),
     };
-    xml.element(root, &attributes, |xml| writer.document(xml))?;
+    xml.required_element(root, &attributes, |xml| writer.document(xml))?;
     Ok(xml.finish())
 }
 
@@ -112,15 +113,19 @@ fn gap(invoice: &Invoice, document: UblDocument) -> Option<Gap> {
     {
         return Some(Gap::DueDateWithoutPaymentInstructions);
     }
+    if invoice
+        .notes
+        .iter()
+        .any(|note| note.subject_code.is_none() && note.text.starts_with(n::NOTE_SUBJECT_DELIMITER))
+    {
+        return Some(Gap::NoteTextLikeSubject);
+    }
     None
 }
 
 /// The attribute that names the scheme of an identifier, if it has one.
 fn scheme(scheme: Option<&str>) -> Vec<Attribute<'_>> {
-    scheme
-        .map(|scheme| (n::SCHEME_ID, scheme))
-        .into_iter()
-        .collect()
+    optional_attribute(n::SCHEME_ID, scheme)
 }
 
 struct UblWriter<'a> {
@@ -467,20 +472,8 @@ impl UblWriter<'_> {
     /// The payment instructions (BG-16): one `PaymentMeans` for each account
     /// to transfer to, or a single one if there is none.
     fn payment_means(&self, xml: &mut Xml, payment: &PaymentInstructions) -> io::Result<()> {
-        let accounts: Vec<Option<&doc2einvoice_model::CreditTransfer>> =
-            if payment.credit_transfers.is_empty() {
-                vec![None]
-            } else {
-                payment.credit_transfers.iter().map(Some).collect()
-            };
-        for (index, account) in accounts.into_iter().enumerate() {
-            let first = index == 0;
-            let code_attributes: Vec<Attribute<'_>> = payment
-                .means_text
-                .as_deref()
-                .map(|text| (n::NAME, text))
-                .into_iter()
-                .collect();
+        let code_attributes = optional_attribute(n::NAME, payment.means_text.as_deref());
+        for shared::PaymentMeans { account, first } in shared::payment_means(payment) {
             xml.element(n::PAYMENT_MEANS, &[], |xml| {
                 xml.text(
                     n::PAYMENT_MEANS_CODE,
@@ -565,27 +558,24 @@ impl UblWriter<'_> {
         })
     }
 
+    /// The VAT totals, one `TaxTotal` each. The first is the total in the
+    /// invoice currency, which UBL requires and the check for gaps ensures; it
+    /// holds the breakdown.
     fn tax_totals(&self, xml: &mut Xml) -> io::Result<()> {
-        let totals = &self.invoice.totals;
-        if let Some(total) = totals.vat_total {
+        for (index, (total, currency)) in shared::vat_totals(self.invoice).into_iter().enumerate() {
             xml.element(n::TAX_TOTAL, &[], |xml| {
-                self.amount(xml, n::TAX_AMOUNT, total)?;
+                xml.text(
+                    n::TAX_AMOUNT,
+                    &[(n::CURRENCY_ID, currency)],
+                    &format::number(total.value()),
+                )?;
+                if index > 0 {
+                    return Ok(());
+                }
                 for breakdown in self.invoice.vat_breakdown.iter() {
                     self.vat_breakdown(xml, breakdown)?;
                 }
                 Ok(())
-            })?;
-        }
-        if let (Some(total), Some(currency)) = (
-            totals.vat_total_in_accounting_currency,
-            &self.invoice.vat_accounting_currency,
-        ) {
-            xml.element(n::TAX_TOTAL, &[], |xml| {
-                xml.text(
-                    n::TAX_AMOUNT,
-                    &[(n::CURRENCY_ID, currency.as_str())],
-                    &format::number(total.value()),
-                )
             })?;
         }
         Ok(())
@@ -692,12 +682,13 @@ impl UblWriter<'_> {
                 &format::number(price.net_price.0),
             )?;
             if let Some(base) = price.base_quantity {
-                let unit: Vec<Attribute<'_>> = price
-                    .base_quantity_unit
-                    .as_ref()
-                    .map(|unit| (n::UNIT_CODE, unit.0.as_str()))
-                    .into_iter()
-                    .collect();
+                let unit = optional_attribute(
+                    n::UNIT_CODE,
+                    price
+                        .base_quantity_unit
+                        .as_ref()
+                        .map(|unit| unit.0.as_str()),
+                );
                 xml.text(n::BASE_QUANTITY, &unit, &format::number(base.0))?;
             }
             if let Some(discount) = price.discount {

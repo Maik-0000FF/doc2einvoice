@@ -4,17 +4,14 @@
 //! The names UBL 2.1 gives its namespaces, elements, attributes and fixed
 //! values, each written once.
 
-/// The namespace of an invoice document.
-pub(super) const INVOICE_NAMESPACE: &str = "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2";
-/// The namespace of a credit note document.
-pub(super) const CREDIT_NOTE_NAMESPACE: &str =
-    "urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2";
-/// The namespace of the aggregate components.
-pub(super) const CAC_NAMESPACE: &str =
-    "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2";
-/// The namespace of the basic components.
-pub(super) const CBC_NAMESPACE: &str =
-    "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2";
+pub(super) use crate::names::{
+    CURRENCY_ID, FALSE, FILENAME, INVOICED_OBJECT_TYPE, LIST_ID, LIST_VERSION_ID, MIME_CODE,
+    SCHEME_ID, TRUE, UNIT_CODE, VAT as VAT_SCHEME,
+};
+pub(super) use crate::namespaces::{
+    UBL_AGGREGATE as CAC_NAMESPACE, UBL_BASIC as CBC_NAMESPACE,
+    UBL_CREDIT_NOTE as CREDIT_NOTE_NAMESPACE, UBL_INVOICE as INVOICE_NAMESPACE,
+};
 
 pub(super) const XMLNS: &str = "xmlns";
 pub(super) const XMLNS_CAC: &str = "xmlns:cac";
@@ -25,14 +22,7 @@ pub(super) const INVOICE: &str = "Invoice";
 pub(super) const CREDIT_NOTE: &str = "CreditNote";
 
 // Attributes.
-pub(super) const CURRENCY_ID: &str = "currencyID";
-pub(super) const SCHEME_ID: &str = "schemeID";
-pub(super) const UNIT_CODE: &str = "unitCode";
-pub(super) const LIST_ID: &str = "listID";
-pub(super) const LIST_VERSION_ID: &str = "listVersionID";
 pub(super) const NAME: &str = "name";
-pub(super) const MIME_CODE: &str = "mimeCode";
-pub(super) const FILENAME: &str = "filename";
 
 // Basic components.
 pub(super) const ACCOUNTING_COST: &str = "cbc:AccountingCost";
@@ -159,21 +149,14 @@ pub(super) const TAX_SUBTOTAL: &str = "cac:TaxSubtotal";
 pub(super) const TAX_TOTAL: &str = "cac:TaxTotal";
 
 // Fixed values.
-/// The tax scheme of value added tax.
-pub(super) const VAT_SCHEME: &str = "VAT";
 /// The tax scheme of a local tax registration (BT-32), as the published
 /// examples of EN 16931 and XRechnung write it.
 pub(super) const LOCAL_TAX_SCHEME: &str = "FC";
 /// The identification scheme of the SEPA creditor identifier (BT-90).
 pub(super) const SEPA_SCHEME: &str = "SEPA";
-/// The document type code (UNTDID 1001) of an invoiced object (BT-18,
-/// BT-128).
-pub(super) const INVOICED_OBJECT_TYPE: &str = "130";
 /// The document type code (UNTDID 1001) of a project reference in a credit
 /// note (BT-11), which has no project reference element.
 pub(super) const PROJECT_TYPE: &str = "50";
-pub(super) const TRUE: &str = "true";
-pub(super) const FALSE: &str = "false";
 /// Separates the subject code of a note (BT-21) from its text, as in
 /// `#AAI#Text`.
 pub(super) const NOTE_SUBJECT_DELIMITER: &str = "#";

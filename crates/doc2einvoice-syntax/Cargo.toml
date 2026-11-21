@@ -15,6 +15,7 @@ publish.workspace = true
 base64.workspace = true
 chrono.workspace = true
 doc2einvoice-model.workspace = true
+iban_validate.workspace = true
 quick-xml.workspace = true
 rust_decimal.workspace = true
 thiserror.workspace = true

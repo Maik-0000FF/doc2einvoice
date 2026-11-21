@@ -15,6 +15,11 @@ pub enum Syntax {
 /// What an invoice lacks that the syntax needs to write it. The model allows
 /// it, the syntax has no way to express it without a value nobody gave; the
 /// writer refuses rather than invent one.
+///
+/// Not a gap: a fixed code word the syntax requires and no business term
+/// holds, such as the tax scheme of a local tax registration or the name of
+/// a project in CII. It says nothing about the invoice and is written as the
+/// published examples of the standard write it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Gap {
     /// The sales order (BT-14) is given without the purchase order (BT-13),
@@ -43,6 +48,10 @@ pub enum Gap {
     /// The price discount (BT-147) is given without the gross price
     /// (BT-148), inside which CII writes it.
     DiscountWithoutGrossPrice,
+    /// A note without a subject (BT-21) has a text (BT-22) that begins like
+    /// the subject UBL writes in front of a note, `#`; a receiver would read
+    /// a subject nobody gave.
+    NoteTextLikeSubject,
 }
 
 /// An invoice that could not be written.

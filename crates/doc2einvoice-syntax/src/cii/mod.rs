@@ -10,6 +10,8 @@ mod names;
 
 use std::io;
 
+use iban::{Iban, IbanLike};
+
 use doc2einvoice_model::{
     Amount, Buyer, Contact, CreditTransfer, Date, DocumentAdjustment, Invoice, InvoiceLine,
     ItemInformation, LineAdjustment, OptionalSchemeIdentifier, Payee, PaymentInstructions,
@@ -20,7 +22,8 @@ use doc2einvoice_model::{
 use self::names as n;
 use crate::error::{Gap, Syntax, WriteError};
 use crate::format;
-use crate::xml::{Attribute, Xml};
+use crate::shared;
+use crate::xml::{Attribute, Xml, optional_attribute};
 
 /// Writes `invoice` as a Cross Industry Invoice.
 ///
@@ -43,7 +46,7 @@ pub fn write(invoice: &Invoice) -> Result<Vec<u8>, WriteError> {
         (n::XMLNS_QDT, n::QDT_NAMESPACE),
     ];
     let writer = CiiWriter { invoice };
-    xml.element(n::CROSS_INDUSTRY_INVOICE, &attributes, |xml| {
+    xml.required_element(n::CROSS_INDUSTRY_INVOICE, &attributes, |xml| {
         writer.document(xml)
     })?;
     Ok(xml.finish())
@@ -154,7 +157,7 @@ impl CiiWriter<'_> {
             xml.element(n::APPLICABLE_HEADER_TRADE_AGREEMENT, &[], |xml| {
                 self.agreement(xml)
             })?;
-            xml.element(n::APPLICABLE_HEADER_TRADE_DELIVERY, &[], |xml| {
+            xml.required_element(n::APPLICABLE_HEADER_TRADE_DELIVERY, &[], |xml| {
                 self.delivery(xml)
             })?;
             xml.element(n::APPLICABLE_HEADER_TRADE_SETTLEMENT, &[], |xml| {
@@ -368,20 +371,10 @@ impl CiiWriter<'_> {
                 optional_amount(xml, n::CHARGE_TOTAL_AMOUNT, totals.charge_total)?;
                 optional_amount(xml, n::ALLOWANCE_TOTAL_AMOUNT, totals.allowance_total)?;
                 amount(xml, n::TAX_BASIS_TOTAL_AMOUNT, totals.total_without_vat)?;
-                if let Some(total) = totals.vat_total {
+                for (total, currency) in shared::vat_totals(invoice) {
                     xml.text(
                         n::TAX_TOTAL_AMOUNT,
-                        &[(n::CURRENCY_ID, invoice.currency.as_str())],
-                        &format::number(total.value()),
-                    )?;
-                }
-                if let (Some(total), Some(currency)) = (
-                    totals.vat_total_in_accounting_currency,
-                    &invoice.vat_accounting_currency,
-                ) {
-                    xml.text(
-                        n::TAX_TOTAL_AMOUNT,
-                        &[(n::CURRENCY_ID, currency.as_str())],
+                        &[(n::CURRENCY_ID, currency)],
                         &format::number(total.value()),
                     )?;
                 }
@@ -471,12 +464,7 @@ fn legal_organization(
     }
     xml.element(n::SPECIFIED_LEGAL_ORGANIZATION, &[], |xml| {
         if let Some(registration) = registration {
-            let scheme: Vec<Attribute<'_>> = registration
-                .scheme
-                .as_deref()
-                .map(|scheme| (n::SCHEME_ID, scheme))
-                .into_iter()
-                .collect();
+            let scheme = optional_attribute(n::SCHEME_ID, registration.scheme.as_deref());
             xml.text(n::ID, &scheme, &registration.content)?;
         }
         xml.optional_text(n::TRADING_BUSINESS_NAME, trading_name)
@@ -617,14 +605,11 @@ fn payee_party(xml: &mut Xml, payee: &Payee) -> io::Result<()> {
 /// transfer to, or a single one if there is none. The card and the debited
 /// account are written with the first.
 fn payment_means(xml: &mut Xml, payment: &PaymentInstructions) -> io::Result<()> {
-    let accounts: Vec<Option<&CreditTransfer>> = if payment.credit_transfers.is_empty() {
-        vec![None]
-    } else {
-        payment.credit_transfers.iter().map(Some).collect()
-    };
-    let iban = n::SEPA_PAYMENT_MEANS.contains(&payment.means_code.0.as_str());
-    for (index, account) in accounts.into_iter().enumerate() {
-        let first = index == 0;
+    let debited = payment
+        .direct_debit
+        .as_ref()
+        .and_then(|debit| debit.debited_account.as_ref());
+    for shared::PaymentMeans { account, first } in shared::payment_means(payment) {
         xml.element(n::SPECIFIED_TRADE_SETTLEMENT_PAYMENT_MEANS, &[], |xml| {
             xml.text(n::TYPE_CODE, &[], &payment.means_code.0)?;
             xml.optional_text(n::INFORMATION, payment.means_text.as_deref())?;
@@ -634,10 +619,6 @@ fn payment_means(xml: &mut Xml, payment: &PaymentInstructions) -> io::Result<()>
                     xml.optional_text(n::CARDHOLDER_NAME, card.holder_name.as_deref())
                 })?;
             }
-            let debited = payment
-                .direct_debit
-                .as_ref()
-                .and_then(|debit| debit.debited_account.as_ref());
             if let (Some(debited), true) = (debited, first) {
                 xml.element(n::PAYER_PARTY_DEBTOR_FINANCIAL_ACCOUNT, &[], |xml| {
                     xml.text(n::IBAN_ID, &[], &debited.0)
@@ -646,16 +627,7 @@ fn payment_means(xml: &mut Xml, payment: &PaymentInstructions) -> io::Result<()>
             let Some(account) = account else {
                 return Ok(());
             };
-            xml.element(n::PAYEE_PARTY_CREDITOR_FINANCIAL_ACCOUNT, &[], |xml| {
-                if iban {
-                    xml.text(n::IBAN_ID, &[], &account.account.0)?;
-                }
-                xml.optional_text(n::ACCOUNT_NAME, account.account_name.as_deref())?;
-                if iban {
-                    return Ok(());
-                }
-                xml.text(n::PROPRIETARY_ID, &[], &account.account.0)
-            })?;
+            creditor_account(xml, account)?;
             match &account.service_provider {
                 Some(provider) => xml.element(
                     n::PAYEE_SPECIFIED_CREDITOR_FINANCIAL_INSTITUTION,
@@ -667,6 +639,29 @@ fn payment_means(xml: &mut Xml, payment: &PaymentInstructions) -> io::Result<()>
         })?;
     }
     Ok(())
+}
+
+/// The account to transfer to (BT-84): an IBAN as `IBANID`, in its
+/// electronic form, anything else as `ProprietaryID`, as given.
+///
+/// | Account                         | Written                                 |
+/// |---------------------------------|-----------------------------------------|
+/// | `DE75512108001245126199`        | `IBANID` DE75512108001245126199         |
+/// | `DE75 5121 0800 1245 1261 99`   | `IBANID` DE75512108001245126199         |
+/// | `DE75512108001245126198`        | `ProprietaryID`, the check digits fail  |
+/// | `0123456789`                    | `ProprietaryID`                         |
+fn creditor_account(xml: &mut Xml, account: &CreditTransfer) -> io::Result<()> {
+    let iban = account.account.0.parse::<Iban>().ok();
+    xml.element(n::PAYEE_PARTY_CREDITOR_FINANCIAL_ACCOUNT, &[], |xml| {
+        if let Some(iban) = &iban {
+            xml.text(n::IBAN_ID, &[], iban.electronic_str())?;
+        }
+        xml.optional_text(n::ACCOUNT_NAME, account.account_name.as_deref())?;
+        if iban.is_some() {
+            return Ok(());
+        }
+        xml.text(n::PROPRIETARY_ID, &[], &account.account.0)
+    })
 }
 
 fn period_dates(xml: &mut Xml, period: &Period) -> io::Result<()> {
@@ -843,12 +838,13 @@ fn product(xml: &mut Xml, item: &ItemInformation) -> io::Result<()> {
 /// The gross price with its discount (BT-148, BT-147) and the net price
 /// (BT-146), each with the base quantity (BT-149, BT-150).
 fn prices(xml: &mut Xml, price: &PriceDetails) -> io::Result<()> {
-    let unit: Vec<Attribute<'_>> = price
-        .base_quantity_unit
-        .as_ref()
-        .map(|unit| (n::UNIT_CODE, unit.0.as_str()))
-        .into_iter()
-        .collect();
+    let unit = optional_attribute(
+        n::UNIT_CODE,
+        price
+            .base_quantity_unit
+            .as_ref()
+            .map(|unit| unit.0.as_str()),
+    );
     let base_quantity = |xml: &mut Xml| match price.base_quantity {
         Some(base) => xml.text(n::BASIS_QUANTITY, &unit, &format::number(base.0)),
         None => Ok(()),
@@ -870,4 +866,51 @@ fn prices(xml: &mut Xml, price: &PriceDetails) -> io::Result<()> {
         number(xml, n::CHARGE_AMOUNT, price.net_price.0)?;
         base_quantity(xml)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use doc2einvoice_model::{CreditTransfer, Identifier};
+
+    use super::creditor_account;
+    use crate::xml::Xml;
+
+    fn written(account: &str) -> String {
+        let transfer = CreditTransfer {
+            account: Identifier(account.to_owned()),
+            account_name: None,
+            service_provider: None,
+        };
+        let mut xml = Xml::new().unwrap_or_else(|error| unreachable!("{error}"));
+        creditor_account(&mut xml, &transfer).unwrap_or_else(|error| unreachable!("{error}"));
+        String::from_utf8(xml.finish()).unwrap_or_else(|error| unreachable!("{error}"))
+    }
+
+    #[test]
+    fn accounts_follow_their_table() {
+        for (account, element, value) in [
+            (
+                "DE75512108001245126199",
+                "ram:IBANID",
+                "DE75512108001245126199",
+            ),
+            (
+                "DE75 5121 0800 1245 1261 99",
+                "ram:IBANID",
+                "DE75512108001245126199",
+            ),
+            (
+                "DE75512108001245126198",
+                "ram:ProprietaryID",
+                "DE75512108001245126198",
+            ),
+            ("0123456789", "ram:ProprietaryID", "0123456789"),
+        ] {
+            let document = written(account);
+            assert!(
+                document.contains(&format!("<{element}>{value}</{element}>")),
+                "{account}: {document}"
+            );
+        }
+    }
 }

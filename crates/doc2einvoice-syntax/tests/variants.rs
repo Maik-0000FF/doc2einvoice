@@ -7,7 +7,7 @@
 
 mod support;
 
-use doc2einvoice_model::{Code, NonEmpty, PrecedingInvoice, UnitPriceAmount};
+use doc2einvoice_model::{Code, InvoiceNote, NonEmpty, PrecedingInvoice, UnitPriceAmount};
 use doc2einvoice_syntax::{Gap, Syntax, UblDocument, WriteError, write_cii, write_ubl};
 use doc2einvoice_validation::Profile;
 use support::{
@@ -70,6 +70,23 @@ fn a_payment_by_card_conforms_in_cii() {
 fn an_invoice_exempt_from_vat_conforms() {
     assert_clean(&ubl(&exempt(), UblDocument::Invoice), Profile::En16931);
     assert_clean(&cii(&exempt()), Profile::En16931);
+}
+
+#[test]
+fn a_blank_optional_value_is_left_out() {
+    let mut invoice = minimal();
+    invoice.seller.trading_name = Some("  ".to_owned());
+    invoice.buyer_reference = Some(String::new());
+    for document in [ubl(&invoice, UblDocument::Invoice), cii(&invoice)] {
+        assert_clean(&document, Profile::En16931);
+        let text = String::from_utf8_lossy(&document);
+        assert!(
+            !text.contains("BuyerReference")
+                && !text.contains("PartyName")
+                && !text.contains("TradingBusinessName"),
+            "{text}"
+        );
+    }
 }
 
 #[test]
@@ -144,6 +161,16 @@ fn ubl_refuses_what_it_cannot_express() {
     assert_eq!(
         ubl(&paid_by_card(EN16931), UblDocument::Invoice),
         refused(Gap::CardNetworkMissing)
+    );
+
+    let mut invoice = minimal();
+    invoice.notes.push(InvoiceNote {
+        subject_code: None,
+        text: "#AAI#Text".to_owned(),
+    });
+    assert_eq!(
+        ubl(&invoice, UblDocument::Invoice),
+        refused(Gap::NoteTextLikeSubject)
     );
 
     let mut invoice = credit_note(EN16931);

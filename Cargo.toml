@@ -30,6 +30,8 @@ doc2einvoice-validation = { path = "crates/doc2einvoice-validation" }
 # character decides what the reader finds on a page. A new version is taken
 # only together with a new run of the reading tests.
 hayro-interpret = "=0.9.0"
+# Tells an IBAN from another account identifier, by its form and check digits.
+iban_validate = "5.0"
 # The XML Schema processor, pinned exactly like the XPath engine below.
 oxixml-schema = "=0.1.2"
 # Writes XML as a stream, escaping text and attribute values.
