@@ -638,29 +638,31 @@ pub fn unsectioned_term(field: PartyField) -> Option<u16> {
     }
 }
 
-/// Words that say an amount is taken from an account by direct debit.
+/// Words that say the amount is taken from an account: the taking itself,
+/// or the mandate it is taken under. The mere name of the means, as
+/// "Lastschrift", is not among them: "Zahlbar per Überweisung oder
+/// SEPA-Lastschrift" offers it, and the IBAN after it is the seller's.
 const DIRECT_DEBIT_WORDS: &[Word] = &[
-    EndsWith("lastschrift"),
     Is("abgebucht"),
     Is("abbuchen"),
     Is("eingezogen"),
-    Is("mandat"),
     Is("mandatsreferenz"),
-    Is("debit"),
     Is("debited"),
-    Is("prélèvement"),
     Is("prélevé"),
 ];
 
 /// Whether a line says that the amount is taken by direct debit, which
 /// opens a section of the account debited.
 ///
-/// | Words                                          | Direct debit |
-/// |------------------------------------------------|--------------|
-/// | `Der` `Betrag` `wird` `abgebucht` `von:`      | yes          |
-/// | `…` `mit` `der` `SEPA-Lastschrift` `…`        | yes          |
-/// | `Payment` `by` `direct` `debit`               | yes          |
-/// | `Bitte` `überweisen` `Sie`                    | no           |
+/// | Words                                               | Direct debit |
+/// |-----------------------------------------------------|--------------|
+/// | `Der` `Betrag` `wird` `abgebucht` `von:`           | yes          |
+/// | `Mandatsreferenz:` `M-17`                          | yes          |
+/// | `The` `amount` `will` `be` `debited`               | yes          |
+/// | `Zahlbar` `per` `Überweisung` `oder` `SEPA-Lastschrift` | no (offered, not taken) |
+/// | `Eine` `Lastschrift` `ist` `nicht` `möglich.`      | no           |
+/// | `Payment` `by` `direct` `debit`                    | no (the means only) |
+/// | `Bitte` `überweisen` `Sie`                         | no           |
 pub fn says_direct_debit(words: &[&str]) -> bool {
     words.iter().any(|word| {
         let normal = normalized(word);
@@ -833,20 +835,20 @@ mod tests {
 
     #[test]
     fn direct_debit_is_said_after_its_table() {
-        assert!(says_direct_debit(&[
-            "Der",
-            "Betrag",
-            "wird",
-            "abgebucht",
-            "von:"
-        ]));
-        assert!(says_direct_debit(&[
-            "mit",
-            "der",
-            "SEPA-Lastschrift",
-            "von"
-        ]));
-        assert!(says_direct_debit(&["Payment", "by", "direct", "debit"]));
-        assert!(!says_direct_debit(&["Bitte", "überweisen", "Sie"]));
+        let rows: [(&[&str], bool); 7] = [
+            (&["Der", "Betrag", "wird", "abgebucht", "von:"], true),
+            (&["Mandatsreferenz:", "M-17"], true),
+            (&["The", "amount", "will", "be", "debited"], true),
+            (
+                &["Zahlbar", "per", "Überweisung", "oder", "SEPA-Lastschrift"],
+                false,
+            ),
+            (&["Eine", "Lastschrift", "ist", "nicht", "möglich."], false),
+            (&["Payment", "by", "direct", "debit"], false),
+            (&["Bitte", "überweisen", "Sie"], false),
+        ];
+        for (words, expected) in rows {
+            assert_eq!(says_direct_debit(words), expected, "{words:?}");
+        }
     }
 }

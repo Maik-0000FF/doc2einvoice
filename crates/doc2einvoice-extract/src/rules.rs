@@ -808,6 +808,28 @@ mod tests {
     }
 
     #[test]
+    fn a_direct_debit_only_offered_leaves_the_account_to_transfer_to() {
+        for offer in [
+            &["Zahlbar", "per", "Überweisung", "oder", "SEPA-Lastschrift"][..],
+            &["Eine", "Lastschrift", "ist", "nicht", "möglich."],
+        ] {
+            let pages = [page(vec![
+                block(50.0, 100.0, offer),
+                block(
+                    50.0,
+                    100.0 + LINE_PITCH,
+                    &["IBAN:", "DE02120300000000202051"],
+                ),
+            ])];
+            assert_eq!(
+                value(&pages, PAYMENT_ACCOUNT).as_deref(),
+                Some("DE02120300000000202051"),
+                "{offer:?}"
+            );
+        }
+    }
+
+    #[test]
     fn a_section_ends_with_its_page() {
         let pages = [
             page(vec![block(50.0, 100.0, &["Verkäufer"])]),
