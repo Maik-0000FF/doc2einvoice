@@ -3,4 +3,4 @@
 
 # Proper names of standards and tools that appear in documentation. Without
 # this list the documentation lint takes them for code that lacks backticks.
-doc-valid-idents = ["XPath", "XRechnung", "SchXslt", "ZUGFeRD", "OpenPeppol", ".."]
+doc-valid-idents = ["XPath", "XRechnung", "SchXslt", "ZUGFeRD", "OpenPeppol", "KoSIT", ".."]

@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: Maik-0000FF
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "doc2einvoice-syntax"
+description = "Writing an invoice of the EN 16931 model as UBL 2.1 or as UN/CEFACT Cross Industry Invoice D16B."
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+base64.workspace = true
+chrono.workspace = true
+doc2einvoice-model.workspace = true
+quick-xml.workspace = true
+rust_decimal.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+doc2einvoice-validation.workspace = true
+
+[lints]
+workspace = true
