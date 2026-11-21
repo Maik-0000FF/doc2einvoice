@@ -11,12 +11,16 @@
 //! How well the extraction finds the values is measured against invoices
 //! that carry their data as XML (`examples/measure`).
 
+mod labels;
+mod page;
+mod rules;
+mod values;
+
 use doc2einvoice_model::Draft;
 use doc2einvoice_pdf::PageLayout;
 
 /// Finds the business terms of an invoice on its pages.
 #[must_use]
 pub fn extract(pages: &[PageLayout]) -> Draft {
-    let _ = pages;
-    Draft::default()
+    rules::draft(pages)
 }
