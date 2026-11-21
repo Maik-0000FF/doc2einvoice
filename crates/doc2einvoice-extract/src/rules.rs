@@ -26,7 +26,7 @@
 //! the totals of an invoice close it.
 
 use doc2einvoice_model::{Draft, Entry, Occurrence, Origin};
-use doc2einvoice_pdf::PageLayout;
+use doc2einvoice_pdf::{PageLayout, Word};
 
 use crate::labels::{
     self, AMOUNT_DUE, BUYER_NAME, BUYER_VAT_IDENTIFIER, CURRENCY, DELIVERY_DATE, DUE_DATE, Found,
@@ -222,10 +222,12 @@ pub fn draft(pages: &[PageLayout]) -> Draft {
     draft
 }
 
-/// The labels of every line. A field of a party, as "Name", takes the term of the party whose
-/// section it stands in: the last heading before it on its page, unless the
-/// heading of another section stands between them, and it does not end
-/// at a gap wider than that between two sections.
+/// The labels of every line. A field of a party, as "Name", takes the term
+/// of the party whose section it stands in, or the term it has outside any
+/// section. A section opens with the heading of a party, or with a line that
+/// says the amount is taken by direct debit. It ends with the heading of
+/// another section, a line above its heading, a line further below it than
+/// the gap between two sections, or the end of its page.
 fn labelled<'a>(lines: &[Line<'a>]) -> Vec<Labelled<'a>> {
     let mut section: Option<OpenSection> = None;
     let mut labelled = Vec::with_capacity(lines.len());
@@ -235,6 +237,9 @@ fn labelled<'a>(lines: &[Line<'a>]) -> Vec<Labelled<'a>> {
         match labels::heading(&words) {
             Some(Section::Party(party)) => section = OpenSection::at(printed, party),
             Some(Section::Other) => section = None,
+            None if labels::says_direct_debit(&words) => {
+                section = OpenSection::at(printed, Party::Debited);
+            }
             None => {}
         }
         if let Some(open) = section.as_mut() {
@@ -243,10 +248,14 @@ fn labelled<'a>(lines: &[Line<'a>]) -> Vec<Labelled<'a>> {
         let party = section.as_ref().map(|open| open.party);
         let mut found = labels::find(&words);
         for label in &mut found {
-            if let Names::PartyField(field) = label.names
-                && let Some(term) = party.and_then(|party| labels::party_term(field, party))
-            {
-                label.names = Names::Term(term);
+            if let Names::PartyField(field) = label.names {
+                let term = party.map_or_else(
+                    || labels::unsectioned_term(field),
+                    |party| labels::party_term(field, party),
+                );
+                if let Some(term) = term {
+                    label.names = Names::Term(term);
+                }
             }
         }
         labelled.push(Labelled { line, found, words });
@@ -263,6 +272,8 @@ const SECTION_GAP: f64 = 3.0;
 struct OpenSection {
     party: Party,
     page: usize,
+    /// The first word of its heading.
+    heading: Word,
     /// The lowest baseline of its lines so far.
     bottom: f64,
 }
@@ -273,15 +284,18 @@ impl OpenSection {
         Some(Self {
             party,
             page: heading.page,
+            heading: head.clone(),
             bottom: head.baseline,
         })
     }
 
-    /// Whether `line` still belongs to the section: on its page, and not
-    /// further below it than a gap between sections.
+    /// Whether `line` still belongs to the section: on its page, not above
+    /// its heading, and not further below it than a gap between sections.
     fn holds(&self, line: &Line) -> bool {
         line.words.first().is_some_and(|head| {
-            line.page == self.page && head.baseline <= self.bottom + head.font_size * SECTION_GAP
+            line.page == self.page
+                && !page::lies_below(&self.heading, head)
+                && head.baseline <= self.bottom + head.font_size * SECTION_GAP
         })
     }
 
@@ -492,8 +506,8 @@ mod tests {
     use super::draft;
     use crate::labels::{
         AMOUNT_DUE, BUYER_NAME, BUYER_VAT_IDENTIFIER, CURRENCY, DELIVERY_DATE, DUE_DATE,
-        INVOICE_NUMBER, ISSUE_DATE, PAYMENT_ACCOUNT, PURCHASE_ORDER, SELLER_NAME, TOTAL_WITH_VAT,
-        TOTAL_WITHOUT_VAT, VAT_TOTAL,
+        INVOICE_NUMBER, ISSUE_DATE, PAYMENT_ACCOUNT, PURCHASE_ORDER, SELLER_NAME,
+        SELLER_VAT_IDENTIFIER, TOTAL_WITH_VAT, TOTAL_WITHOUT_VAT, VAT_TOTAL,
     };
 
     /// The font size of every word, and the width of one character.
@@ -750,6 +764,46 @@ mod tests {
                 group: 17,
                 index: 0
             }])
+        );
+    }
+
+    #[test]
+    fn a_line_above_the_heading_ends_its_section() {
+        let pages = [page(vec![
+            block(50.0, 300.0, &["Verkäufer"]),
+            block(300.0, 100.0, &["USt-IdNr.:", "DE136695976"]),
+        ])];
+        assert_eq!(value(&pages, SELLER_VAT_IDENTIFIER), None);
+    }
+
+    #[test]
+    fn the_account_of_a_direct_debit_is_not_the_one_to_transfer_to() {
+        let debit = [page(vec![
+            block(50.0, 100.0, &["Der", "Betrag", "wird", "abgebucht", "von:"]),
+            block(
+                50.0,
+                100.0 + LINE_PITCH,
+                &["IBAN:", "DE02120300000000202051"],
+            ),
+        ])];
+        assert_eq!(value(&debit, PAYMENT_ACCOUNT), None);
+        let buyer = [page(vec![
+            block(50.0, 100.0, &["Käufer"]),
+            block(
+                50.0,
+                100.0 + LINE_PITCH,
+                &["IBAN:", "DE02120300000000202051"],
+            ),
+        ])];
+        assert_eq!(value(&buyer, PAYMENT_ACCOUNT), None);
+        let footer = [page(vec![block(
+            50.0,
+            100.0,
+            &["IBAN:", "DE02120300000000202051"],
+        )])];
+        assert_eq!(
+            value(&footer, PAYMENT_ACCOUNT).as_deref(),
+            Some("DE02120300000000202051")
         );
     }
 

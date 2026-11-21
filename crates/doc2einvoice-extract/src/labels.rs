@@ -68,6 +68,9 @@ pub enum Names {
 pub enum PartyField {
     Name,
     VatIdentifier,
+    /// The account of the party: the one to transfer to, or the one a
+    /// direct debit takes from.
+    Account,
 }
 
 /// A label: its words, what it names, where it counts and how much it says.
@@ -339,7 +342,6 @@ pub const LABELS: &[Label] = &[
         DELIVERY_DATE,
         Anywhere,
     ),
-    // Terms not read yet, which keep their words from shorter labels.
     // The purchase order reference (BT-13).
     label(&[Is("bestellung"), Is("nr")], PURCHASE_ORDER, Anywhere),
     label(
@@ -358,12 +360,14 @@ pub const LABELS: &[Label] = &[
         PURCHASE_ORDER,
         Anywhere,
     ),
-    // The account to transfer to (BT-84).
-    label(&[Is("iban")], PAYMENT_ACCOUNT, Anywhere),
-    label(&[Is("verkäufer-iban")], PAYMENT_ACCOUNT, Anywhere),
-    label(&[Is("käufer-iban")], DEBITED_ACCOUNT, Anywhere),
     label(&[Is("bestellnummer")], PURCHASE_ORDER, Anywhere),
     label(&[Is("your"), Is("order")], PURCHASE_ORDER, Anywhere),
+    // The account to transfer to (BT-84), or the account a direct debit
+    // takes from (BT-91), by the section the label stands in.
+    party(&[Is("iban")], PartyField::Account),
+    label(&[Is("verkäufer-iban")], PAYMENT_ACCOUNT, Anywhere),
+    label(&[Is("käufer-iban")], DEBITED_ACCOUNT, Anywhere),
+    // Terms not read yet, which keep their words from shorter labels.
     label(&[Is("facture"), Is("liée")], PRECEDING_INVOICE, Anywhere),
     label(&[Is("positionssumme")], LINE_TOTAL, Anywhere),
     label(&[Is("summe"), Is("positionen")], LINE_TOTAL, Anywhere),
@@ -478,6 +482,9 @@ pub enum Party {
     Payee,
     /// The tax representative of the seller (BG-11).
     TaxRepresentative,
+    /// Whoever pays by direct debit (BG-19): a section that says the amount
+    /// is taken from an account.
+    Debited,
 }
 
 /// The business terms of the fields of the parties.
@@ -596,10 +603,11 @@ pub fn heading(words: &[&str]) -> Option<Section> {
 /// The business term `field` is in the section of `party`, if the standard
 /// has one: the party delivered to has a name but no VAT identifier.
 ///
-/// | Field          | Seller | Buyer | Deliver to | Payee | Tax representative |
-/// |----------------|--------|-------|------------|-------|--------------------|
-/// | name           | BT-27  | BT-44 | BT-70      | BT-59 | BT-62              |
-/// | VAT identifier | BT-31  | BT-48 | none       | none  | BT-63              |
+/// | Field          | Seller | Buyer | Deliver to | Payee | Tax representative | Debited |
+/// |----------------|--------|-------|------------|-------|--------------------|---------|
+/// | name           | BT-27  | BT-44 | BT-70      | BT-59 | BT-62              | none    |
+/// | VAT identifier | BT-31  | BT-48 | none       | none  | BT-63              | none    |
+/// | account        | BT-84  | BT-91 | none       | BT-84 | none               | BT-91   |
 pub fn party_term(field: PartyField, party: Party) -> Option<u16> {
     match (field, party) {
         (PartyField::Name, Party::Seller) => Some(SELLER_NAME),
@@ -612,8 +620,54 @@ pub fn party_term(field: PartyField, party: Party) -> Option<u16> {
         (PartyField::VatIdentifier, Party::TaxRepresentative) => {
             Some(TAX_REPRESENTATIVE_VAT_IDENTIFIER)
         }
-        (PartyField::VatIdentifier, Party::DeliverTo | Party::Payee) => None,
+        (PartyField::Account, Party::Seller | Party::Payee) => Some(PAYMENT_ACCOUNT),
+        (PartyField::Account, Party::Buyer | Party::Debited) => Some(DEBITED_ACCOUNT),
+        (PartyField::Name | PartyField::VatIdentifier, Party::Debited)
+        | (PartyField::VatIdentifier, Party::DeliverTo | Party::Payee)
+        | (PartyField::Account, Party::DeliverTo | Party::TaxRepresentative) => None,
     }
+}
+
+/// The business term a field of a party stands for outside any section,
+/// if any: an account is the one to transfer to; a name or a VAT identifier
+/// could be anyone's.
+pub fn unsectioned_term(field: PartyField) -> Option<u16> {
+    match field {
+        PartyField::Account => Some(PAYMENT_ACCOUNT),
+        PartyField::Name | PartyField::VatIdentifier => None,
+    }
+}
+
+/// Words that say an amount is taken from an account by direct debit.
+const DIRECT_DEBIT_WORDS: &[Word] = &[
+    EndsWith("lastschrift"),
+    Is("abgebucht"),
+    Is("abbuchen"),
+    Is("eingezogen"),
+    Is("mandat"),
+    Is("mandatsreferenz"),
+    Is("debit"),
+    Is("debited"),
+    Is("prélèvement"),
+    Is("prélevé"),
+];
+
+/// Whether a line says that the amount is taken by direct debit, which
+/// opens a section of the account debited.
+///
+/// | Words                                          | Direct debit |
+/// |------------------------------------------------|--------------|
+/// | `Der` `Betrag` `wird` `abgebucht` `von:`      | yes          |
+/// | `…` `mit` `der` `SEPA-Lastschrift` `…`        | yes          |
+/// | `Payment` `by` `direct` `debit`               | yes          |
+/// | `Bitte` `überweisen` `Sie`                    | no           |
+pub fn says_direct_debit(words: &[&str]) -> bool {
+    words.iter().any(|word| {
+        let normal = normalized(word);
+        DIRECT_DEBIT_WORDS
+            .iter()
+            .any(|pattern| matches(*pattern, &normal))
+    })
 }
 
 /// Characters a printed word may end in that do not belong to the word of
@@ -716,6 +770,7 @@ fn covered(label: &Label, words: &[&str], normal: &[String], at: usize) -> Optio
 mod tests {
     use super::{
         CHARGES, INVOICE_NUMBER, ISSUE_DATE, Names, Party, Section, TOTAL_WITH_VAT, find, heading,
+        says_direct_debit,
     };
 
     fn found(words: &[&str]) -> Vec<(u16, usize, usize)> {
@@ -774,5 +829,24 @@ mod tests {
         for (words, expected) in rows {
             assert_eq!(heading(words), expected, "{words:?}");
         }
+    }
+
+    #[test]
+    fn direct_debit_is_said_after_its_table() {
+        assert!(says_direct_debit(&[
+            "Der",
+            "Betrag",
+            "wird",
+            "abgebucht",
+            "von:"
+        ]));
+        assert!(says_direct_debit(&[
+            "mit",
+            "der",
+            "SEPA-Lastschrift",
+            "von"
+        ]));
+        assert!(says_direct_debit(&["Payment", "by", "direct", "debit"]));
+        assert!(!says_direct_debit(&["Bitte", "überweisen", "Sie"]));
     }
 }

@@ -975,6 +975,7 @@ dependencies = [
  "lopdf",
  "roxmltree",
  "rust_decimal",
+ "vat_id_validator",
  "xee-xpath",
 ]
 
@@ -5874,6 +5875,16 @@ name = "v_jsonescape"
 version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be8219cc464ba10c48c3231a6871f11d26d831c5c45a47467eea387ea7bb10e8"
+
+[[package]]
+name = "vat_id_validator"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62b78a6fb7f8b45549827a4e24fe5424316cb07a8ecbd52144f45e1a480b6319"
+dependencies = [
+ "once_cell",
+ "regex",
+]
 
 [[package]]
 name = "version-compare"

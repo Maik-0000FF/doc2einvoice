@@ -205,7 +205,7 @@ fn has_text_left(lines: &[Line], line: usize) -> bool {
 
 /// Whether `word` stands on a baseline below that of `above`, beyond the
 /// tolerance of one baseline.
-fn lies_below(word: &Word, above: &Word) -> bool {
+pub fn lies_below(word: &Word, above: &Word) -> bool {
     word.baseline > above.baseline + above.font_size * SAME_BASELINE
 }
 

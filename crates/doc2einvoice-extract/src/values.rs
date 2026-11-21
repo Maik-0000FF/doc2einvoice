@@ -96,13 +96,9 @@ const CURRENCY_SYMBOLS: [(&str, &str); 2] = [("€", "EUR"), ("£", "GBP")];
 /// The letters of the country a VAT identifier starts with.
 const VAT_COUNTRY_LETTERS: usize = 2;
 
-/// The longest VAT identifier of a member state, its country letters
-/// included.
-const VAT_IDENTIFIER_MOST: usize = 14;
-
-/// Characters a VAT identifier holds after its country letters, besides
-/// digits and capital letters.
-const VAT_IDENTIFIER_MARKS: [char; 2] = ['+', '*'];
+/// How many words a VAT identifier printed in groups spans at most, as
+/// `DE 123 456 789`.
+const VAT_WORDS_MOST: usize = 5;
 
 /// How many words an IBAN printed in groups of four spans at most: 34
 /// characters.
@@ -442,37 +438,44 @@ pub fn joined_symbol(word: &str) -> Option<String> {
     has_decimals(word).then(|| (*code).to_owned())
 }
 
-/// The VAT identifier the first word stands for: two capital letters of a
-/// country, then digits and capital letters, a digit among them.
+/// The VAT identifier the first words stand for, whether printed in one or
+/// in groups: the fewest words from the first on that start with the two
+/// letters of a country and have the form of a VAT identifier of that
+/// country, as the library for VAT identifiers checks it. Only the form is
+/// checked, not the check digit: an identifier that is printed wrong is
+/// better questioned in the form than left out.
 ///
-/// | Words           | Read            |
-/// |-----------------|-----------------|
-/// | `DE123456789`   | `DE123456789`   |
-/// | `ATU12345678`   | `ATU12345678`   |
-/// | `FR11999999998` | `FR11999999998` |
-/// | `DE123456789,`  | `DE123456789`   |
-/// | `DE`            | none            |
-/// | `123456789`     | none (no country) |
-/// | `DEUTSCHLAND`   | none (no digit) |
-/// | `de123456789`   | none            |
-/// | `DE123456789012345` | none (too long) |
-/// | `CHE-123.456.789` | none (not the form of a member state) |
+/// | Words                         | Read            |
+/// |-------------------------------|-----------------|
+/// | `DE123456789`                 | `DE123456789`   |
+/// | `DE` `123` `456` `789`        | `DE123456789`, four words |
+/// | `ATU12345678`                 | `ATU12345678`   |
+/// | `FR11999999998`               | `FR11999999998` |
+/// | `DE123456789,`                | `DE123456789`   |
+/// | `DE012345678`                 | none (no German identifier starts with 0) |
+/// | `DE12345678`                  | none (eight digits) |
+/// | `DE`                          | none            |
+/// | `123456789`                   | none (no country) |
+/// | `DEUTSCHLAND`                 | none            |
+/// | `de123456789`                 | none            |
 pub fn vat_identifier(words: &[&str]) -> Option<Read> {
-    let word = words.first()?.trim_end_matches(TRAILING);
-    let (country, rest) = (
-        word.get(..VAT_COUNTRY_LETTERS)?,
-        word.get(VAT_COUNTRY_LETTERS..)?,
-    );
-    let well_formed = country.chars().all(|c| c.is_ascii_uppercase())
-        && word.len() <= VAT_IDENTIFIER_MOST
-        && rest.chars().any(|c| c.is_ascii_digit())
-        && rest.chars().all(|c| {
-            c.is_ascii_digit() || c.is_ascii_uppercase() || VAT_IDENTIFIER_MARKS.contains(&c)
-        });
-    well_formed.then(|| Read {
-        text: word.to_owned(),
-        skipped: 0,
-        used: 1,
+    let first = words.first()?;
+    let country = first.get(..VAT_COUNTRY_LETTERS)?;
+    if !country.chars().all(|c| c.is_ascii_uppercase()) {
+        return None;
+    }
+    (1..=VAT_WORDS_MOST.min(words.len())).find_map(|used| {
+        let joined: String = words[..used]
+            .iter()
+            .map(|word| word.trim_end_matches(TRAILING))
+            .collect();
+        let checked = vat_id_validator::check_vat(&joined);
+        let text = checked.value.filter(|_| checked.is_valid_format)?;
+        text.starts_with(country).then_some(Read {
+            text,
+            skipped: 0,
+            used,
+        })
     })
 }
 
@@ -675,20 +678,23 @@ mod tests {
 
     #[test]
     fn vat_identifiers_follow_their_table() {
-        let rows = [
-            ("DE123456789", Some("DE123456789")),
-            ("ATU12345678", Some("ATU12345678")),
-            ("FR11999999998", Some("FR11999999998")),
-            ("DE123456789,", Some("DE123456789")),
-            ("DE", None),
-            ("123456789", None),
-            ("DEUTSCHLAND", None),
-            ("de123456789", None),
-            ("DE123456789012345", None),
-            ("CHE-123.456.789", None),
+        let rows: [Row; 11] = [
+            (&["DE123456789"], Some(("DE123456789", 1))),
+            (&["DE", "123", "456", "789"], Some(("DE123456789", 4))),
+            (&["ATU12345678"], Some(("ATU12345678", 1))),
+            (&["FR11999999998"], Some(("FR11999999998", 1))),
+            (&["DE123456789,"], Some(("DE123456789", 1))),
+            (&["DE012345678"], None),
+            (&["DE12345678"], None),
+            (&["DE"], None),
+            (&["123456789"], None),
+            (&["DEUTSCHLAND"], None),
+            (&["de123456789"], None),
         ];
-        for (word, expected) in rows {
-            assert_eq!(text(vat_identifier(&[word])).as_deref(), expected, "{word}");
+        for (words, expected) in rows {
+            let read = vat_identifier(words).map(|read| (read.text, read.used));
+            let expected = expected.map(|(text, used)| (text.to_owned(), used));
+            assert_eq!(read, expected, "{words:?}");
         }
     }
 
