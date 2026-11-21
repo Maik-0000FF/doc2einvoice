@@ -258,3 +258,82 @@ fn an_iban_given_with_spaces_is_written_in_its_electronic_form() {
         assert!(String::from_utf8_lossy(&document).contains("DE75512108001245126199"));
     }
 }
+
+/// The blank required values of the table of `blank_required_value`, each in
+/// the complete invoice: the gap each syntax reports.
+#[test]
+fn blank_required_values_follow_their_table() {
+    type Change = fn(&mut doc2einvoice_model::Invoice);
+    let cases: [(&str, Change); 7] = [
+        ("BT-27", |invoice| invoice.seller.name = " ".to_owned()),
+        ("BT-34", |invoice| {
+            if let Some(address) = &mut invoice.seller.electronic_address {
+                address.scheme = String::new();
+            }
+        }),
+        ("BT-49", |invoice| {
+            if let Some(address) = &mut invoice.buyer.electronic_address {
+                address.content = "  ".to_owned();
+            }
+        }),
+        ("BT-125", |invoice| {
+            for document in &mut invoice.supporting_documents {
+                if let Some(file) = &mut document.attachment {
+                    file.content.clear();
+                }
+            }
+        }),
+        ("BT-125", |invoice| {
+            for document in &mut invoice.supporting_documents {
+                if let Some(file) = &mut document.attachment {
+                    file.filename = String::new();
+                }
+            }
+        }),
+        ("BT-157", |invoice| {
+            change_line(invoice, |line| {
+                if let Some(standard) = &mut line.item.standard_identifier {
+                    standard.scheme = " ".to_owned();
+                }
+            });
+        }),
+        ("BT-158", |invoice| {
+            change_line(invoice, |line| {
+                for classification in &mut line.item.classifications {
+                    classification.content = String::new();
+                }
+            });
+        }),
+    ];
+    for (term, change) in cases {
+        let mut invoice = complete(Payment::CreditTransfer, EN16931);
+        change(&mut invoice);
+        let expected = Gap::BlankRequiredValue(term);
+        assert_eq!(
+            gap_of(write_ubl(&invoice, UblDocument::Invoice)),
+            Some((Syntax::Ubl, expected)),
+            "{term}"
+        );
+        assert_eq!(
+            gap_of(write_cii(&invoice)),
+            Some((Syntax::Cii, expected)),
+            "{term}"
+        );
+    }
+}
+
+#[test]
+fn a_blank_optional_scheme_is_left_out() {
+    let mut invoice = complete(Payment::CreditTransfer, EN16931);
+    for identifier in &mut invoice.seller.identifiers {
+        identifier.scheme = Some("  ".to_owned());
+    }
+    for document in [ubl(&invoice, UblDocument::Invoice), cii(&invoice)] {
+        assert_clean(&document, Profile::En16931);
+        let text = String::from_utf8_lossy(&document);
+        assert!(
+            !text.contains("schemeID=\"  \"") && !text.contains("schemeID=\"\""),
+            "{text}"
+        );
+    }
+}

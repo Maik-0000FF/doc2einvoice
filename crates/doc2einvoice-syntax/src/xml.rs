@@ -14,9 +14,26 @@ const XML_ENCODING: &str = "UTF-8";
 /// An attribute: its name and its value.
 pub(crate) type Attribute<'a> = (&'a str, &'a str);
 
-/// The attribute `name` with `value`, if there is a value.
+/// The attribute `name` with `value`, if there is a value that is not
+/// blank; a blank attribute is left out, as a blank text is.
+///
+/// | Value              | Attribute    |
+/// |--------------------|--------------|
+/// | `0088`             | `a="0088"`   |
+/// | none               | none         |
+/// | empty              | none         |
+/// | only spaces        | none         |
 pub(crate) fn optional_attribute<'a>(name: &'a str, value: Option<&'a str>) -> Vec<Attribute<'a>> {
-    value.map(|value| (name, value)).into_iter().collect()
+    given(value)
+        .map(|value| (name, value))
+        .into_iter()
+        .collect()
+}
+
+/// `value`, unless it is blank: a value that is empty or only white space is
+/// a value that is not there.
+pub(crate) fn given(value: Option<&str>) -> Option<&str> {
+    value.filter(|value| !value.trim().is_empty())
 }
 
 /// A document being written.
@@ -105,7 +122,7 @@ impl Xml {
         attributes: &[Attribute<'_>],
         text: &str,
     ) -> std::io::Result<()> {
-        if text.trim().is_empty() {
+        if given(Some(text)).is_none() {
             return Ok(());
         }
         self.element(name, attributes, |xml| {
@@ -176,9 +193,17 @@ mod tests {
     }
 
     #[test]
-    fn an_optional_attribute_is_there_only_with_a_value() {
-        assert_eq!(super::optional_attribute("a", Some("b")), [("a", "b")]);
-        assert!(super::optional_attribute("a", None).is_empty());
+    fn optional_attributes_follow_their_table() {
+        assert_eq!(
+            super::optional_attribute("a", Some("0088")),
+            [("a", "0088")]
+        );
+        for value in [None, Some(""), Some("  ")] {
+            assert!(
+                super::optional_attribute("a", value).is_empty(),
+                "{value:?}"
+            );
+        }
     }
 
     #[test]

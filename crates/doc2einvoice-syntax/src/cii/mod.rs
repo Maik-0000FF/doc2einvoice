@@ -21,7 +21,7 @@ use self::names as n;
 use crate::error::{Gap, Syntax, WriteError};
 use crate::format;
 use crate::shared;
-use crate::xml::{Attribute, Xml, optional_attribute};
+use crate::xml::{Attribute, Xml, given, optional_attribute};
 
 /// Writes `invoice` as a Cross Industry Invoice.
 ///
@@ -431,7 +431,7 @@ fn supporting_document(xml: &mut Xml, document: &SupportingDocument) -> io::Resu
 /// An identifier of a party: as its global identifier if it names a scheme,
 /// otherwise as its own identifier.
 fn party_identifier(xml: &mut Xml, identifier: &OptionalSchemeIdentifier) -> io::Result<()> {
-    match &identifier.scheme {
+    match given(identifier.scheme.as_deref()) {
         Some(scheme) => xml.text(n::GLOBAL_ID, &[(n::SCHEME_ID, scheme)], &identifier.content),
         None => xml.text(n::ID, &[], &identifier.content),
     }
@@ -442,13 +442,13 @@ fn party_identifier(xml: &mut Xml, identifier: &OptionalSchemeIdentifier) -> io:
 fn party_identifiers(xml: &mut Xml, identifiers: &[&OptionalSchemeIdentifier]) -> io::Result<()> {
     for identifier in identifiers
         .iter()
-        .filter(|identifier| identifier.scheme.is_none())
+        .filter(|identifier| given(identifier.scheme.as_deref()).is_none())
     {
         party_identifier(xml, identifier)?;
     }
     for identifier in identifiers
         .iter()
-        .filter(|identifier| identifier.scheme.is_some())
+        .filter(|identifier| given(identifier.scheme.as_deref()).is_some())
     {
         party_identifier(xml, identifier)?;
     }
