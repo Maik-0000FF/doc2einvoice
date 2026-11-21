@@ -214,12 +214,12 @@ fn has_text_left(lines: &[Line], line: usize) -> bool {
     on_its_baseline(lines, line).any(|word| word.right <= head.left)
 }
 
-/// The texts printed beside `line` on its baseline, left or right, from
+/// The words printed beside `line` on its baseline, left or right, from
 /// left to right.
-pub fn text_beside<'a>(lines: &[Line<'a>], line: usize) -> Vec<&'a str> {
+pub fn words_beside<'a>(lines: &[Line<'a>], line: usize) -> Vec<&'a Word> {
     let mut words: Vec<&Word> = on_its_baseline(lines, line).collect();
     words.sort_by(|a, b| a.left.total_cmp(&b.left));
-    words.iter().map(|word| word.text.as_str()).collect()
+    words
 }
 
 /// Whether two baselines are one: no further apart than the tolerance of

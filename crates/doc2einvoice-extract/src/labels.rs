@@ -490,8 +490,14 @@ pub enum Party {
 /// The business terms of the fields of the parties.
 pub const SELLER_NAME: u16 = 27;
 pub const SELLER_VAT_IDENTIFIER: u16 = 31;
+pub const SELLER_ADDRESS_LINES: [u16; 3] = [35, 36, 162];
+pub const SELLER_CITY: u16 = 37;
+pub const SELLER_POST_CODE: u16 = 38;
 pub const BUYER_NAME: u16 = 44;
 pub const BUYER_VAT_IDENTIFIER: u16 = 48;
+pub const BUYER_ADDRESS_LINES: [u16; 3] = [50, 51, 163];
+pub const BUYER_CITY: u16 = 52;
+pub const BUYER_POST_CODE: u16 = 53;
 const PAYEE_NAME: u16 = 59;
 const TAX_REPRESENTATIVE_NAME: u16 = 62;
 const TAX_REPRESENTATIVE_VAT_IDENTIFIER: u16 = 63;
@@ -579,15 +585,18 @@ const HEADINGS: &[(&[Word], Party)] = &[
 /// | `Bank` `details:`                  | other      |
 /// | `Verkäufer` `Muster` `GmbH`        | none (more than a heading) |
 /// | `Name:`                            | none       |
+/// Whether the words of a line, as compared, are `pattern` and nothing else.
+fn is_whole_line(pattern: &[Word], normal: &[String]) -> bool {
+    pattern.len() == normal.len()
+        && pattern
+            .iter()
+            .zip(normal)
+            .all(|(word, printed)| matches(*word, printed))
+}
+
 pub fn heading(words: &[&str]) -> Option<Section> {
     let normal: Vec<String> = words.iter().map(|word| normalized(word)).collect();
-    let is = |pattern: &[Word]| {
-        pattern.len() == normal.len()
-            && pattern
-                .iter()
-                .zip(&normal)
-                .all(|(word, printed)| matches(*word, printed))
-    };
+    let is = |pattern: &[Word]| is_whole_line(pattern, &normal);
     let party = HEADINGS
         .iter()
         .find(|(pattern, _)| is(pattern))
@@ -690,13 +699,9 @@ const ADDRESS_LABELS: &[&[Word]] = &[
 /// | `:` `549910`   | no      |
 pub fn names_address(words: &[&str]) -> bool {
     let normal: Vec<String> = words.iter().map(|word| normalized(word)).collect();
-    ADDRESS_LABELS.iter().any(|pattern| {
-        pattern.len() == normal.len()
-            && pattern
-                .iter()
-                .zip(&normal)
-                .all(|(word, printed)| matches(*word, printed))
-    })
+    ADDRESS_LABELS
+        .iter()
+        .any(|pattern| is_whole_line(pattern, &normal))
 }
 
 /// Characters a printed word may end in that do not belong to the word of
