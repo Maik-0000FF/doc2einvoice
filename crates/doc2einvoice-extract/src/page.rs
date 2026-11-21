@@ -188,19 +188,44 @@ pub fn cell_right_of<'a>(lines: &[Line<'a>], line: usize, last: &Word) -> Span<'
     }
 }
 
+/// The words of other lines of the page of `line` that stand on its
+/// baseline.
+fn on_its_baseline<'l, 'a>(
+    lines: &'l [Line<'a>],
+    line: usize,
+) -> impl Iterator<Item = &'a Word> + 'l {
+    let head = lines[line].words.first();
+    let page = lines[line].page;
+    lines
+        .iter()
+        .enumerate()
+        .filter(move |(index, other)| *index != line && other.page == page)
+        .flat_map(|(_, other)| other.words.iter())
+        .filter(move |word| {
+            head.is_some_and(|head| same_baseline(word.baseline, head.baseline, head.font_size))
+        })
+}
+
 /// Whether anything is printed left of `line` on its baseline, as a label.
 fn has_text_left(lines: &[Line], line: usize) -> bool {
     let Some(head) = lines[line].words.first() else {
         return false;
     };
-    let tolerance = head.font_size * SAME_BASELINE;
-    lines.iter().enumerate().any(|(index, other)| {
-        index != line
-            && other.page == lines[line].page
-            && other.words.iter().any(|word| {
-                (word.baseline - head.baseline).abs() <= tolerance && word.right <= head.left
-            })
-    })
+    on_its_baseline(lines, line).any(|word| word.right <= head.left)
+}
+
+/// The texts printed beside `line` on its baseline, left or right, from
+/// left to right.
+pub fn text_beside<'a>(lines: &[Line<'a>], line: usize) -> Vec<&'a str> {
+    let mut words: Vec<&Word> = on_its_baseline(lines, line).collect();
+    words.sort_by(|a, b| a.left.total_cmp(&b.left));
+    words.iter().map(|word| word.text.as_str()).collect()
+}
+
+/// Whether two baselines are one: no further apart than the tolerance of
+/// one baseline at `font_size`.
+pub fn same_baseline(a: f64, b: f64, font_size: f64) -> bool {
+    (a - b).abs() <= font_size * SAME_BASELINE
 }
 
 /// Whether `word` stands on a baseline below that of `above`, beyond the

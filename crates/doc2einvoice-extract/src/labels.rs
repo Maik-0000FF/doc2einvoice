@@ -672,6 +672,33 @@ pub fn says_direct_debit(words: &[&str]) -> bool {
     })
 }
 
+/// Labels printed beside the lines of an address, which belong to it.
+const ADDRESS_LABELS: &[&[Word]] = &[
+    &[Is("anschrift")],
+    &[Is("adresse")],
+    &[Is("address")],
+    &[Is("postanschrift")],
+];
+
+/// Whether `words` are a label of an address, as "Anschrift:".
+///
+/// | Words          | Address |
+/// |----------------|---------|
+/// | `Anschrift:`   | yes     |
+/// | `Address`      | yes     |
+/// | `Nummer`       | no      |
+/// | `:` `549910`   | no      |
+pub fn names_address(words: &[&str]) -> bool {
+    let normal: Vec<String> = words.iter().map(|word| normalized(word)).collect();
+    ADDRESS_LABELS.iter().any(|pattern| {
+        pattern.len() == normal.len()
+            && pattern
+                .iter()
+                .zip(&normal)
+                .all(|(word, printed)| matches(*word, printed))
+    })
+}
+
 /// Characters a printed word may end in that do not belong to the word of
 /// a label.
 const LABEL_ENDINGS: [char; 2] = [':', '.'];

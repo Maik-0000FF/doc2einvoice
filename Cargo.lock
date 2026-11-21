@@ -975,6 +975,7 @@ dependencies = [
  "lopdf",
  "roxmltree",
  "rust_decimal",
+ "unicode-normalization",
  "vat_id_validator",
  "xee-xpath",
 ]

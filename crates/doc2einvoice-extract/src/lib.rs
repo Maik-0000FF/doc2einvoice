@@ -11,8 +11,10 @@
 //! How well the extraction finds the values is measured against invoices
 //! that carry their data as XML (`examples/measure`).
 
+mod address;
 mod labels;
 mod page;
+mod postcodes;
 mod rules;
 mod values;
 

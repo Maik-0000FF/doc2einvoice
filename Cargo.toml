@@ -33,6 +33,8 @@ doc2einvoice-validation = { path = "crates/doc2einvoice-validation" }
 hayro-interpret = "=0.9.0"
 # Tells an IBAN from another account identifier, by its form and check digits.
 iban_validate = "5.0"
+# Compares place names without their accents.
+unicode-normalization = "0.1"
 # Checks the form of a VAT identifier for its country, offline.
 vat_id_validator = { version = "0.2", default-features = false }
 # Reads the objects of a PDF: the files embedded in it.

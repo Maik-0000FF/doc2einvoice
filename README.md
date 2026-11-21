@@ -249,4 +249,7 @@ versions.
 The files of other publishers keep their own terms, stated in
 [REUSE.toml](REUSE.toml) and in full under [LICENSES](LICENSES). That includes
 the typeface of the interface, [Inter](https://rsms.me/inter/), licensed under
-the SIL Open Font License 1.1.
+the SIL Open Font License 1.1, and the postal codes and places the extraction
+confirms addresses with, from [GeoNames](https://www.geonames.org/), licensed
+under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) and reduced to
+the country, the postal code and the place.

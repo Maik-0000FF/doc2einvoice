@@ -17,6 +17,7 @@ doc2einvoice-model.workspace = true
 doc2einvoice-pdf.workspace = true
 iban_validate.workspace = true
 rust_decimal.workspace = true
+unicode-normalization.workspace = true
 vat_id_validator.workspace = true
 
 [dev-dependencies]
