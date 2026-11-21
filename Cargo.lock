@@ -947,6 +947,7 @@ dependencies = [
  "quick-xml",
  "rust_decimal",
  "thiserror 2.0.21",
+ "xee-xpath",
 ]
 
 [[package]]

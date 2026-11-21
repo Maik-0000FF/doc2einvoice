@@ -518,3 +518,41 @@ pub fn minimal() -> Invoice {
         lines: NonEmpty::one(line),
     }
 }
+
+/// A code of UNTDID 2005 for the VAT point date (BT-8): the invoice date.
+const VAT_POINT_CODE: &str = "3";
+
+/// The complete invoice with the VAT point given as a code (BT-8) instead of a
+/// date (BT-7); the two exclude each other.
+pub fn with_vat_point_code(specification: &str) -> Invoice {
+    let mut invoice = complete(Payment::CreditTransfer, specification);
+    invoice.vat_point = Some(VatPoint::Code(Code(VAT_POINT_CODE.to_owned())));
+    invoice
+}
+
+/// The exemption from VAT for activities in the public interest (VATEX).
+const EXEMPTION_CODE: &str = "VATEX-EU-132";
+
+/// The minimal invoice, exempt from VAT with a reason in words and as a code
+/// (BT-120, BT-121): 100.00 without VAT, 0.00 VAT.
+pub fn exempt() -> Invoice {
+    let mut invoice = minimal();
+    let mut line = invoice.lines.first().clone();
+    line.vat = LineVat {
+        category: VatCategory::Exempt,
+        rate: Some(percent("0")),
+    };
+    invoice.lines = NonEmpty::one(line);
+    invoice.vat_breakdown = NonEmpty::one(VatBreakdown {
+        taxable_amount: amount("100"),
+        tax_amount: amount("0"),
+        category: VatCategory::Exempt,
+        rate: Some(percent("0")),
+        exemption_reason: Some("Steuerfrei nach Artikel 132 der Richtlinie 2006/112/EG".to_owned()),
+        exemption_reason_code: Some(Code(EXEMPTION_CODE.to_owned())),
+    });
+    invoice.totals.vat_total = Some(amount("0"));
+    invoice.totals.total_with_vat = amount("100");
+    invoice.totals.due_for_payment = amount("100");
+    invoice
+}

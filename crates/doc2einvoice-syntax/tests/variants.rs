@@ -11,7 +11,7 @@ use doc2einvoice_model::{Code, NonEmpty, PrecedingInvoice, UnitPriceAmount};
 use doc2einvoice_syntax::{Gap, Syntax, UblDocument, WriteError, write_cii, write_ubl};
 use doc2einvoice_validation::Profile;
 use support::{
-    EN16931, Payment, XRECHNUNG, complete, date, decimal, findings, minimal, paid_by_card,
+    EN16931, Payment, XRECHNUNG, complete, date, decimal, exempt, findings, minimal, paid_by_card,
 };
 
 /// A credit note (UNTDID 1001).
@@ -64,6 +64,12 @@ fn a_credit_note_conforms_in_cii() {
 fn a_payment_by_card_conforms_in_cii() {
     assert_clean(&cii(&paid_by_card(EN16931)), Profile::En16931);
     assert_clean(&cii(&paid_by_card(XRECHNUNG)), Profile::XRechnung);
+}
+
+#[test]
+fn an_invoice_exempt_from_vat_conforms() {
+    assert_clean(&ubl(&exempt(), UblDocument::Invoice), Profile::En16931);
+    assert_clean(&cii(&exempt()), Profile::En16931);
 }
 
 #[test]

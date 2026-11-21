@@ -21,6 +21,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 doc2einvoice-validation.workspace = true
+xee-xpath.workspace = true
 
 [lints]
 workspace = true
