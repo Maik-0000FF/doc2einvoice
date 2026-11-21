@@ -29,8 +29,8 @@ pub struct Line<'a> {
     pub words: &'a [Word],
 }
 
-impl Line<'_> {
-    pub fn texts(&self) -> Vec<&str> {
+impl<'a> Line<'a> {
+    pub fn texts(&self) -> Vec<&'a str> {
         texts(self.words)
     }
 }
@@ -127,6 +127,34 @@ pub fn right_of<'a>(lines: &[Line<'a>], line: usize, last: &Word) -> Span<'a> {
         })
         .collect();
     words.sort_by(|a, b| a.left.total_cmp(&b.left));
+    Span { page, words }
+}
+
+/// The cell right of the label ending with `last`: every line of the block
+/// whose line stands nearest right of the label on its baseline, from top
+/// to bottom, as a name set over two lines beside its label.
+pub fn cell_right_of<'a>(lines: &[Line<'a>], line: usize, last: &Word) -> Span<'a> {
+    let page = lines[line].page;
+    let tolerance = last.font_size * SAME_BASELINE;
+    let nearest = lines
+        .iter()
+        .enumerate()
+        .filter(|(index, other)| *index != line && other.page == page)
+        .filter_map(|(_, other)| {
+            let head = other.words.first()?;
+            let beside =
+                (head.baseline - last.baseline).abs() <= tolerance && head.left >= last.right;
+            beside.then_some((other, head.left))
+        })
+        .min_by(|(_, a), (_, b)| a.total_cmp(b))
+        .map(|(other, _)| other.block);
+    let words = nearest.map_or_else(Vec::new, |block| {
+        lines
+            .iter()
+            .filter(|other| other.page == page && other.block == block)
+            .flat_map(|other| other.words.iter())
+            .collect()
+    });
     Span { page, words }
 }
 

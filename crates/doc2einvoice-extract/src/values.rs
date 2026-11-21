@@ -426,6 +426,26 @@ pub fn joined_symbol(word: &str) -> Option<String> {
     has_decimals(word).then(|| (*code).to_owned())
 }
 
+/// A text as printed: all the words, one space between each, if one of
+/// them holds a letter.
+///
+/// | Words                       | Read                    |
+/// |-----------------------------|-------------------------|
+/// | `MUSTERLIEFERANT` `GMBH`    | `MUSTERLIEFERANT GMBH`  |
+/// | `Kunden` `AG` `Mitte`       | `Kunden AG Mitte`       |
+/// | `4711`                      | none (no letter)        |
+/// | nothing                     | none                    |
+pub fn text(words: &[&str]) -> Option<Read> {
+    let has_letter = words
+        .iter()
+        .any(|word| word.chars().any(char::is_alphabetic));
+    has_letter.then(|| Read {
+        text: words.join(" "),
+        skipped: 0,
+        used: words.len(),
+    })
+}
+
 /// The currency the first word names.
 ///
 /// | Words  | Read  |
@@ -446,6 +466,7 @@ pub fn currency(words: &[&str]) -> Option<Read> {
 mod tests {
     use super::{
         amount, currency, currency_mark, date, has_decimals, identifier, joined_symbol, monetary,
+        text as text_of,
     };
 
     fn text(read: Option<super::Read>) -> Option<String> {
@@ -574,6 +595,20 @@ mod tests {
             let expected = expected.map(|(text, skipped)| (text.to_owned(), skipped));
             assert_eq!(read, expected, "{words:?}");
         }
+    }
+
+    #[test]
+    fn texts_follow_their_table() {
+        assert_eq!(
+            text(text_of(&["MUSTERLIEFERANT", "GMBH"])).as_deref(),
+            Some("MUSTERLIEFERANT GMBH")
+        );
+        assert_eq!(
+            text(text_of(&["Kunden", "AG", "Mitte"])).as_deref(),
+            Some("Kunden AG Mitte")
+        );
+        assert_eq!(text_of(&["4711"]), None);
+        assert_eq!(text_of(&[]), None);
     }
 
     #[test]
