@@ -6,6 +6,9 @@
 //! belongs to. Labels for a form and the comparison of values read from a
 //! page take them from here.
 
+/// What the identifier of a business term starts with, as in `BT-27`.
+const TERM_PREFIX: &str = "BT-";
+
 /// The semantic data type of a business term.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DataType {
@@ -49,7 +52,7 @@ impl Term {
     /// The identifier as the standard writes it, such as `BT-27`.
     #[must_use]
     pub fn id(&self) -> String {
-        format!("BT-{}", self.number)
+        format!("{TERM_PREFIX}{}", self.number)
     }
 }
 
@@ -631,9 +634,29 @@ pub fn term_by_number(number: u16) -> Option<&'static Term> {
     TERMS.iter().find(|term| term.number == number)
 }
 
+/// The business term an identifier such as `BT-27` names, if there is one.
+///
+/// | Identifier | Term   |
+/// |------------|--------|
+/// | `BT-27`    | BT-27  |
+/// | `BT-4`     | none (the number is not assigned) |
+/// | `BG-25`    | none (a group, not a term) |
+/// | `BT-027`, `BT-+27`, `bt-27`, `BT-`, `27`, `BT-27 ` | none |
+#[must_use]
+pub fn term_by_id(id: &str) -> Option<&'static Term> {
+    let digits = id.strip_prefix(TERM_PREFIX)?;
+    let canonical = !digits.is_empty()
+        && !digits.starts_with('0')
+        && digits.bytes().all(|byte| byte.is_ascii_digit());
+    if !canonical {
+        return None;
+    }
+    term_by_number(digits.parse().ok()?)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{TERMS, term_by_number};
+    use super::{TERMS, term_by_id, term_by_number};
 
     /// The highest number of a business term.
     const LAST_TERM: u16 = 165;
@@ -660,5 +683,15 @@ mod tests {
             Some("BT-27".to_owned())
         );
         assert!(term_by_number(UNASSIGNED).is_none());
+    }
+
+    #[test]
+    fn a_term_is_found_by_its_identifier_only() {
+        assert_eq!(term_by_id("BT-27").map(|term| term.number), Some(27));
+        for id in [
+            "BT-4", "BG-25", "BT-027", "BT-+27", "bt-27", "BT-", "27", "BT-27 ",
+        ] {
+            assert!(term_by_id(id).is_none(), "{id}");
+        }
     }
 }

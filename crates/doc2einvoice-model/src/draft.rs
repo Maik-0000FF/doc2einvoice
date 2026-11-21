@@ -16,8 +16,13 @@
 //! | amount, unit price, quantity, percentage   | `1234.5`      | 1.234,50 €     |
 //! | code, identifier, reference, text          | as printed    |                |
 //!
+//! The form of a date is [`DATE_FORMAT`].
+//!
 //! Nothing in a draft is required; what an invoice requires is checked when
 //! it is made from the draft.
+
+/// The form a draft writes a date in, as a `chrono` format: `2026-11-21`.
+pub const DATE_FORMAT: &str = "%Y-%m-%d";
 
 /// Where a value came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

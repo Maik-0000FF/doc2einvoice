@@ -12,27 +12,11 @@
 mod support;
 
 use doc2einvoice_model::{Code, Invoice};
-use doc2einvoice_syntax::bindings::{Binding, bindings};
-use doc2einvoice_syntax::namespaces::{
-    CII_AGGREGATE, CII_INVOICE, CII_QUALIFIED, CII_UNQUALIFIED, UBL_AGGREGATE, UBL_BASIC,
-    UBL_CREDIT_NOTE, UBL_INVOICE,
-};
+use doc2einvoice_syntax::bindings::{Binding, PREFIXES, bindings};
 use doc2einvoice_syntax::{Gap, Syntax, UblDocument, WriteError, write_cii, write_ubl};
 use support::{CREDIT_NOTE, EN16931, Payment, complete, exempt, paid_by_card, with_vat_point_code};
 use xee_xpath::context::StaticContextBuilder;
 use xee_xpath::{Documents, Item, Queries, Query};
-
-/// The prefixes the paths use.
-const NAMESPACES: [(&str, &str); 8] = [
-    ("Invoice", UBL_INVOICE),
-    ("CreditNote", UBL_CREDIT_NOTE),
-    ("cac", UBL_AGGREGATE),
-    ("cbc", UBL_BASIC),
-    ("rsm", CII_INVOICE),
-    ("ram", CII_AGGREGATE),
-    ("udt", CII_UNQUALIFIED),
-    ("qdt", CII_QUALIFIED),
-];
 
 /// What UBL cannot write: a payment card, whose network UBL requires and no
 /// business term holds.
@@ -111,7 +95,7 @@ impl Parsed {
     /// The identifiers whose path, as `path` picks it, selects nothing.
     fn unplaced(&mut self, path: fn(&Binding) -> &str, skipped: &[&str]) -> Vec<String> {
         let mut context = StaticContextBuilder::default();
-        context.namespaces(NAMESPACES);
+        context.namespaces(PREFIXES);
         let queries = Queries::new(context);
         let mut unplaced = Vec::new();
         for binding in bindings() {

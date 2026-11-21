@@ -4,9 +4,25 @@
 //! Where each business term and group of EN 16931 stands in the documents
 //! this crate writes: an XPath for a UBL invoice, a Cross Industry Invoice and
 //! a UBL credit note. Several places a reader may meet are joined with `|`.
-//! The prefixes are those of [`crate::namespaces`]: `Invoice` and
-//! `CreditNote` for the UBL documents, `cac`, `cbc`, `rsm`, `ram`, `udt` and
-//! `qdt`.
+//! The prefixes the paths use are [`PREFIXES`].
+
+use crate::namespaces::{
+    CII_AGGREGATE, CII_INVOICE, CII_QUALIFIED, CII_UNQUALIFIED, UBL_AGGREGATE, UBL_BASIC,
+    UBL_CREDIT_NOTE, UBL_INVOICE,
+};
+
+/// The prefix of each namespace the paths use, for the static context of an
+/// XPath engine.
+pub const PREFIXES: [(&str, &str); 8] = [
+    ("Invoice", UBL_INVOICE),
+    ("CreditNote", UBL_CREDIT_NOTE),
+    ("cac", UBL_AGGREGATE),
+    ("cbc", UBL_BASIC),
+    ("rsm", CII_INVOICE),
+    ("ram", CII_AGGREGATE),
+    ("udt", CII_UNQUALIFIED),
+    ("qdt", CII_QUALIFIED),
+];
 
 /// The table, a header line and one line per business term or group, the
 /// fields separated by tabs.
