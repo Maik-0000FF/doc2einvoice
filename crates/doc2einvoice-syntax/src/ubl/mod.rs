@@ -80,6 +80,9 @@ pub fn write(invoice: &Invoice, document: UblDocument) -> Result<Vec<u8>, WriteE
 
 /// The first thing UBL needs that `invoice` does not have, if any.
 fn gap(invoice: &Invoice, document: UblDocument) -> Option<Gap> {
+    if let Some(term) = shared::blank_required_value(invoice) {
+        return Some(Gap::BlankRequiredValue(term));
+    }
     let lines = || invoice.lines.iter();
     if invoice.sales_order_reference.is_some() && invoice.purchase_order_reference.is_none() {
         return Some(Gap::SalesOrderWithoutPurchaseOrder);
@@ -116,11 +119,28 @@ fn gap(invoice: &Invoice, document: UblDocument) -> Option<Gap> {
     if invoice
         .notes
         .iter()
-        .any(|note| note.subject_code.is_none() && note.text.starts_with(n::NOTE_SUBJECT_DELIMITER))
+        .any(|note| note.subject_code.is_none() && reads_like_subject(&note.text))
     {
         return Some(Gap::NoteTextLikeSubject);
     }
     None
+}
+
+/// Whether `text` begins as a note with a subject is written, `#Subject#`:
+/// a receiver would read a subject from it.
+///
+/// | Text                | Reads like a subject |
+/// |---------------------|----------------------|
+/// | `#AAI#Text`         | yes                  |
+/// | `#3#`               | yes                  |
+/// | `#3 Teillieferung`  | no, no second `#`    |
+/// | `##Text`            | no, nothing between  |
+/// | `Text #AAI#`        | no, not at the start |
+/// | `#`                 | no                   |
+fn reads_like_subject(text: &str) -> bool {
+    text.strip_prefix(n::NOTE_SUBJECT_DELIMITER)
+        .and_then(|rest| rest.find(n::NOTE_SUBJECT_DELIMITER))
+        .is_some_and(|end| end > 0)
 }
 
 /// The attribute that names the scheme of an identifier, if it has one.
@@ -489,7 +509,7 @@ impl UblWriter<'_> {
                 xml.optional_text(n::PAYMENT_ID, payment.remittance_information.as_deref())?;
                 if let Some(account) = account {
                     xml.element(n::PAYEE_FINANCIAL_ACCOUNT, &[], |xml| {
-                        xml.text(n::ID, &[], &account.account.0)?;
+                        xml.text(n::ID, &[], shared::account(account).value())?;
                         xml.optional_text(n::NAME_ELEMENT, account.account_name.as_deref())?;
                         match &account.service_provider {
                             Some(provider) => {
@@ -947,4 +967,23 @@ fn item(
         }
         Ok(())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::reads_like_subject;
+
+    #[test]
+    fn notes_read_like_a_subject_as_their_table_says() {
+        for (text, subject) in [
+            ("#AAI#Text", true),
+            ("#3#", true),
+            ("#3 Teillieferung", false),
+            ("##Text", false),
+            ("Text #AAI#", false),
+            ("#", false),
+        ] {
+            assert_eq!(reads_like_subject(text), subject, "{text}");
+        }
+    }
 }

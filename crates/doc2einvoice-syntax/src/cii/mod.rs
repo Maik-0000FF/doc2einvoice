@@ -10,8 +10,6 @@ mod names;
 
 use std::io;
 
-use iban::{Iban, IbanLike};
-
 use doc2einvoice_model::{
     Amount, Buyer, Contact, CreditTransfer, Date, DocumentAdjustment, Invoice, InvoiceLine,
     ItemInformation, LineAdjustment, OptionalSchemeIdentifier, Payee, PaymentInstructions,
@@ -54,6 +52,9 @@ pub fn write(invoice: &Invoice) -> Result<Vec<u8>, WriteError> {
 
 /// The first thing CII needs that `invoice` does not have, if any.
 fn gap(invoice: &Invoice) -> Option<Gap> {
+    if let Some(term) = shared::blank_required_value(invoice) {
+        return Some(Gap::BlankRequiredValue(term));
+    }
     let lines = || invoice.lines.iter();
     if invoice.preceding_invoices.len() > 1 {
         return Some(Gap::SeveralPrecedingInvoices);
@@ -641,26 +642,19 @@ fn payment_means(xml: &mut Xml, payment: &PaymentInstructions) -> io::Result<()>
     Ok(())
 }
 
-/// The account to transfer to (BT-84): an IBAN as `IBANID`, in its
-/// electronic form, anything else as `ProprietaryID`, as given.
-///
-/// | Account                         | Written                                 |
-/// |---------------------------------|-----------------------------------------|
-/// | `DE75512108001245126199`        | `IBANID` DE75512108001245126199         |
-/// | `DE75 5121 0800 1245 1261 99`   | `IBANID` DE75512108001245126199         |
-/// | `DE75512108001245126198`        | `ProprietaryID`, the check digits fail  |
-/// | `0123456789`                    | `ProprietaryID`                         |
-fn creditor_account(xml: &mut Xml, account: &CreditTransfer) -> io::Result<()> {
-    let iban = account.account.0.parse::<Iban>().ok();
+/// The account to transfer to (BT-84): an IBAN as `IBANID`, anything else
+/// as `ProprietaryID` (see [`shared::account`]).
+fn creditor_account(xml: &mut Xml, transfer: &CreditTransfer) -> io::Result<()> {
+    let account = shared::account(transfer);
     xml.element(n::PAYEE_PARTY_CREDITOR_FINANCIAL_ACCOUNT, &[], |xml| {
-        if let Some(iban) = &iban {
-            xml.text(n::IBAN_ID, &[], iban.electronic_str())?;
+        if let shared::Account::Iban(iban) = &account {
+            xml.text(n::IBAN_ID, &[], iban)?;
         }
-        xml.optional_text(n::ACCOUNT_NAME, account.account_name.as_deref())?;
-        if iban.is_some() {
-            return Ok(());
+        xml.optional_text(n::ACCOUNT_NAME, transfer.account_name.as_deref())?;
+        match &account {
+            shared::Account::Other(other) => xml.text(n::PROPRIETARY_ID, &[], other),
+            shared::Account::Iban(_) => Ok(()),
         }
-        xml.text(n::PROPRIETARY_ID, &[], &account.account.0)
     })
 }
 
@@ -866,51 +860,4 @@ fn prices(xml: &mut Xml, price: &PriceDetails) -> io::Result<()> {
         number(xml, n::CHARGE_AMOUNT, price.net_price.0)?;
         base_quantity(xml)
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use doc2einvoice_model::{CreditTransfer, Identifier};
-
-    use super::creditor_account;
-    use crate::xml::Xml;
-
-    fn written(account: &str) -> String {
-        let transfer = CreditTransfer {
-            account: Identifier(account.to_owned()),
-            account_name: None,
-            service_provider: None,
-        };
-        let mut xml = Xml::new().unwrap_or_else(|error| unreachable!("{error}"));
-        creditor_account(&mut xml, &transfer).unwrap_or_else(|error| unreachable!("{error}"));
-        String::from_utf8(xml.finish()).unwrap_or_else(|error| unreachable!("{error}"))
-    }
-
-    #[test]
-    fn accounts_follow_their_table() {
-        for (account, element, value) in [
-            (
-                "DE75512108001245126199",
-                "ram:IBANID",
-                "DE75512108001245126199",
-            ),
-            (
-                "DE75 5121 0800 1245 1261 99",
-                "ram:IBANID",
-                "DE75512108001245126199",
-            ),
-            (
-                "DE75512108001245126198",
-                "ram:ProprietaryID",
-                "DE75512108001245126198",
-            ),
-            ("0123456789", "ram:ProprietaryID", "0123456789"),
-        ] {
-            let document = written(account);
-            assert!(
-                document.contains(&format!("<{element}>{value}</{element}>")),
-                "{account}: {document}"
-            );
-        }
-    }
 }

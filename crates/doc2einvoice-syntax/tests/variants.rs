@@ -11,11 +11,9 @@ use doc2einvoice_model::{Code, InvoiceNote, NonEmpty, PrecedingInvoice, UnitPric
 use doc2einvoice_syntax::{Gap, Syntax, UblDocument, WriteError, write_cii, write_ubl};
 use doc2einvoice_validation::Profile;
 use support::{
-    EN16931, Payment, XRECHNUNG, complete, date, decimal, exempt, findings, minimal, paid_by_card,
+    CREDIT_NOTE, EN16931, Payment, XRECHNUNG, complete, date, decimal, exempt, findings, minimal,
+    paid_by_card,
 };
-
-/// A credit note (UNTDID 1001).
-const CREDIT_NOTE: &str = "381";
 
 fn assert_clean(document: &[u8], profile: Profile) {
     let found = findings(document, profile);
@@ -164,6 +162,13 @@ fn ubl_refuses_what_it_cannot_express() {
     );
 
     let mut invoice = minimal();
+    invoice.seller.name = "  ".to_owned();
+    assert_eq!(
+        ubl(&invoice, UblDocument::Invoice),
+        refused(Gap::BlankRequiredValue("BT-27"))
+    );
+
+    let mut invoice = minimal();
     invoice.notes.push(InvoiceNote {
         subject_code: None,
         text: "#AAI#Text".to_owned(),
@@ -184,6 +189,13 @@ fn ubl_refuses_what_it_cannot_express() {
 #[test]
 fn cii_refuses_what_it_cannot_express() {
     let refused = |gap| Some((Syntax::Cii, gap));
+
+    let mut invoice = minimal();
+    invoice.seller.name = String::new();
+    assert_eq!(
+        gap_of(write_cii(&invoice)),
+        refused(Gap::BlankRequiredValue("BT-27"))
+    );
 
     let mut invoice = complete(Payment::CreditTransfer, EN16931);
     invoice.preceding_invoices.push(PrecedingInvoice {
@@ -220,4 +232,29 @@ fn cii_refuses_what_it_cannot_express() {
         gap_of(write_cii(&invoice)),
         refused(Gap::DiscountWithoutGrossPrice)
     );
+}
+
+#[test]
+fn a_note_that_starts_with_a_hash_but_no_subject_is_written() {
+    let mut invoice = minimal();
+    invoice.notes.push(InvoiceNote {
+        subject_code: None,
+        text: "#3 Teillieferung".to_owned(),
+    });
+    assert_clean(&ubl(&invoice, UblDocument::Invoice), Profile::En16931);
+}
+
+#[test]
+fn an_iban_given_with_spaces_is_written_in_its_electronic_form() {
+    let mut invoice = complete(Payment::CreditTransfer, XRECHNUNG);
+    if let Some(payment) = &mut invoice.payment_instructions {
+        for transfer in &mut payment.credit_transfers {
+            transfer.account =
+                doc2einvoice_model::Identifier("DE75 5121 0800 1245 1261 99".to_owned());
+        }
+    }
+    for document in [ubl(&invoice, UblDocument::Invoice), cii(&invoice)] {
+        assert_clean(&document, Profile::XRechnung);
+        assert!(String::from_utf8_lossy(&document).contains("DE75512108001245126199"));
+    }
 }

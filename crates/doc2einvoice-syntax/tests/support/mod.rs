@@ -34,6 +34,9 @@ pub const XRECHNUNG: &str = "urn:cen.eu:en16931:2017#compliant#urn:xeinkauf.de:k
 /// The default business process of the Peppol network (BT-23).
 const BUSINESS_PROCESS: &str = "urn:fdc:peppol.eu:2017:poacc:billing:01:1.0";
 
+/// A credit note (UNTDID 1001).
+pub const CREDIT_NOTE: &str = "381";
+
 /// Codes of UNTDID 4461: SEPA credit transfer and SEPA direct debit.
 const SEPA_CREDIT_TRANSFER: &str = "58";
 const SEPA_DIRECT_DEBIT: &str = "59";

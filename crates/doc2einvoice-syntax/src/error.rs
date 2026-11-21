@@ -52,6 +52,9 @@ pub enum Gap {
     /// the subject UBL writes in front of a note, `#`; a receiver would read
     /// a subject nobody gave.
     NoteTextLikeSubject,
+    /// A business term the invoice requires is given only as blank text;
+    /// it holds the identifier of the term, such as `BT-27`.
+    BlankRequiredValue(&'static str),
 }
 
 /// An invoice that could not be written.

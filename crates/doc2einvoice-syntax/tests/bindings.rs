@@ -17,7 +17,7 @@ use doc2einvoice_syntax::namespaces::{
     UBL_CREDIT_NOTE, UBL_INVOICE,
 };
 use doc2einvoice_syntax::{Gap, Syntax, UblDocument, WriteError, write_cii, write_ubl};
-use support::{EN16931, Payment, complete, exempt, paid_by_card, with_vat_point_code};
+use support::{CREDIT_NOTE, EN16931, Payment, complete, exempt, paid_by_card, with_vat_point_code};
 use xee_xpath::context::StaticContextBuilder;
 use xee_xpath::{Documents, Item, Queries, Query};
 
@@ -49,9 +49,6 @@ const NAMESPACES: [(&str, &str); 8] = [
 /// What UBL cannot write: a payment card, whose network UBL requires and no
 /// business term holds.
 const NOT_IN_UBL: [&str; 3] = ["BG-18", "BT-87", "BT-88"];
-
-/// A credit note (UNTDID 1001).
-const CREDIT_NOTE: &str = "381";
 
 /// The invoices that, together, give every business term a value: the
 /// complete invoice paid by transfer, paid by direct debit, with the VAT
