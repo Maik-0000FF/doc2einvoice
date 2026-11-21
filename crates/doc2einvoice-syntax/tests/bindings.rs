@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! Every business term and group is written at its place: for each one, the
-//! path that holds it (`data/bindings.tsv`, alternatives joined with `|`)
+//! path that holds it (the bindings of the crate, alternatives joined with `|`)
 //! selects a node in at least one of the written documents, in a UBL invoice,
 //! a UBL credit note and a Cross Industry Invoice.
 //!
@@ -12,6 +12,7 @@
 mod support;
 
 use doc2einvoice_model::{Code, Invoice};
+use doc2einvoice_syntax::bindings::{Binding, bindings};
 use doc2einvoice_syntax::namespaces::{
     CII_AGGREGATE, CII_INVOICE, CII_QUALIFIED, CII_UNQUALIFIED, UBL_AGGREGATE, UBL_BASIC,
     UBL_CREDIT_NOTE, UBL_INVOICE,
@@ -20,19 +21,6 @@ use doc2einvoice_syntax::{Gap, Syntax, UblDocument, WriteError, write_cii, write
 use support::{CREDIT_NOTE, EN16931, Payment, complete, exempt, paid_by_card, with_vat_point_code};
 use xee_xpath::context::StaticContextBuilder;
 use xee_xpath::{Documents, Item, Queries, Query};
-
-/// For each business term or group: its identifier and its path in a UBL
-/// invoice, a Cross Industry Invoice and a UBL credit note, separated by
-/// tabs, after a header line.
-const BINDINGS: &str = include_str!("data/bindings.tsv");
-
-/// The columns of the table.
-const UBL_COLUMN: usize = 1;
-const CII_COLUMN: usize = 2;
-const CREDIT_NOTE_COLUMN: usize = 3;
-
-/// Business terms and groups that have a row in the table.
-const ROWS: usize = 196;
 
 /// The prefixes the paths use.
 const NAMESPACES: [(&str, &str); 8] = [
@@ -120,20 +108,17 @@ impl Parsed {
         Self { documents, roots }
     }
 
-    /// The identifiers whose path in `column` selects nothing.
-    fn unplaced(&mut self, column: usize, skipped: &[&str]) -> Vec<String> {
+    /// The identifiers whose path, as `path` picks it, selects nothing.
+    fn unplaced(&mut self, path: fn(&Binding) -> &str, skipped: &[&str]) -> Vec<String> {
         let mut context = StaticContextBuilder::default();
         context.namespaces(NAMESPACES);
         let queries = Queries::new(context);
         let mut unplaced = Vec::new();
-        for line in BINDINGS.lines().skip(1) {
-            let fields: Vec<&str> = line.split('\t').collect();
-            let (Some(id), Some(path)) = (fields.first(), fields.get(column)) else {
-                unreachable!("a short row: {line}");
-            };
-            if skipped.contains(id) {
+        for binding in bindings() {
+            if skipped.contains(&binding.id) {
                 continue;
             }
+            let path = path(&binding);
             let query = queries
                 .sequence(&format!("exists({path})"))
                 .unwrap_or_else(|error| unreachable!("{path}: {error}"));
@@ -146,7 +131,7 @@ impl Parsed {
                     .unwrap_or_else(|error| unreachable!("{path}: {error:?}"))
             });
             if !placed {
-                unplaced.push((*id).to_owned());
+                unplaced.push(binding.id.to_owned());
             }
         }
         unplaced
@@ -154,14 +139,9 @@ impl Parsed {
 }
 
 #[test]
-fn the_table_has_a_row_for_every_term_and_group() {
-    assert_eq!(BINDINGS.lines().skip(1).count(), ROWS);
-}
-
-#[test]
 fn every_term_has_its_place_in_a_ubl_invoice() {
-    let unplaced =
-        Parsed::new(&ubl(&invoices(), UblDocument::Invoice)).unplaced(UBL_COLUMN, &NOT_IN_UBL);
+    let unplaced = Parsed::new(&ubl(&invoices(), UblDocument::Invoice))
+        .unplaced(|binding| binding.ubl, &NOT_IN_UBL);
     assert!(unplaced.is_empty(), "not at their place: {unplaced:?}");
 }
 
@@ -169,12 +149,12 @@ fn every_term_has_its_place_in_a_ubl_invoice() {
 fn every_term_has_its_place_in_a_ubl_credit_note() {
     let notes: Vec<Invoice> = invoices().into_iter().map(as_credit_note).collect();
     let unplaced = Parsed::new(&ubl(&notes, UblDocument::CreditNote))
-        .unplaced(CREDIT_NOTE_COLUMN, &NOT_IN_UBL);
+        .unplaced(|binding| binding.ubl_credit_note, &NOT_IN_UBL);
     assert!(unplaced.is_empty(), "not at their place: {unplaced:?}");
 }
 
 #[test]
 fn every_term_has_its_place_in_cii() {
-    let unplaced = Parsed::new(&cii(&invoices())).unplaced(CII_COLUMN, &[]);
+    let unplaced = Parsed::new(&cii(&invoices())).unplaced(|binding| binding.cii, &[]);
     assert!(unplaced.is_empty(), "not at their place: {unplaced:?}");
 }
