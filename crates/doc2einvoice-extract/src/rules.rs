@@ -4,10 +4,12 @@
 //! The rules that read a business term next to its labels.
 //!
 //! A value is looked for after its label in the same line, then to its
-//! right on the same baseline, then at the start of the next line of the
-//! block if the label closes a line with text before it, as a sentence that
-//! wraps, then, for the terms of the header, in the line below. A value beside its label counts more than one below it:
-//! below a label stand the values of a column too.
+//! right on the same baseline. For the terms of the header, it is then
+//! looked for at the start of the next line of the block, if the label
+//! closes a line with text before it as a sentence that wraps, and then in
+//! the line below. A value beside its label counts more than one below it:
+//! below a label stand the values of a column too, which is why a total is
+//! never looked for there, nor where a table heading ends with its label.
 //!
 //! A label that names its term counts more than a general one: "Datum" is
 //! the issue date only where no "Rechnungsdatum" gives one. Labels that do
@@ -50,6 +52,9 @@ struct Rule {
     read: fn(&[&str]) -> Option<Read>,
     /// Whether the value may stand below its label.
     below: bool,
+    /// Whether the value may start the next line where the sentence that
+    /// ends with its label wraps.
+    wraps: bool,
     /// Whether the value is looked for beside the label in another block
     /// when the words after the label in its line are not one.
     past_words: bool,
@@ -72,6 +77,7 @@ const fn header(term: u16, read: fn(&[&str]) -> Option<Read>) -> Rule {
         term,
         read,
         below: true,
+        wraps: true,
         past_words: false,
         choice: Choice::First,
     }
@@ -82,6 +88,7 @@ const fn total(term: u16) -> Rule {
         term,
         read: values::monetary,
         below: false,
+        wraps: false,
         past_words: true,
         choice: Choice::Last,
     }
@@ -237,7 +244,7 @@ fn candidate(
     }
     // Only a label that closes a line with text before it ends a sentence
     // that may wrap: a label alone in its line heads a column.
-    let closes_sentence = found.first > 0 && end == printed.words.len();
+    let closes_sentence = rule.wraps && found.first > 0 && end == printed.words.len();
     let places = [
         (Nearness::Beside, Some(page::right_of(lines, line, last))),
         (
@@ -450,6 +457,16 @@ mod tests {
         )])];
         assert_eq!(value(&pages, INVOICE_NUMBER).as_deref(), Some("471102"));
         assert_eq!(value(&pages, ISSUE_DATE).as_deref(), Some("2018-03-05"));
+    }
+
+    #[test]
+    fn a_table_heading_that_ends_with_a_total_label_does_not_wrap() {
+        let pages = [page(vec![wrapped_block(
+            50.0,
+            100.0,
+            &[&["Pos", "Menge", "Gesamtbetrag"], &["1", "10", "5,00"]],
+        )])];
+        assert_eq!(value(&pages, TOTAL_WITH_VAT), None);
     }
 
     #[test]
