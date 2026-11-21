@@ -273,6 +273,21 @@ fn label(term: u16) -> (String, &'static str) {
     )
 }
 
+/// What separates several values in one cell of the listing.
+const VALUE_SEPARATOR: &str = " / ";
+
+/// `text` as one cell of a Markdown table: its bars escaped, its line breaks
+/// turned into spaces.
+///
+/// | Text      | Cell       |
+/// |-----------|------------|
+/// | `A`       | `A`        |
+/// | `A \| B`  | `A \\| B`  |
+/// | `A`, line break, `B` | `A B` |
+fn cell(text: &str) -> String {
+    text.replace('|', "\\|").replace(['\n', '\r'], " ")
+}
+
 /// The differences at terms the extraction found a value for anywhere.
 fn listing(differences: &[(PathBuf, Difference)], counts: &BTreeMap<u16, Count>) -> String {
     let mut out =
@@ -285,10 +300,10 @@ fn listing(differences: &[(PathBuf, Difference)], counts: &BTreeMap<u16, Count>)
         let _ = writeln!(
             out,
             "| {} | {} | {} | {} |",
-            path.display(),
+            cell(&path.display().to_string()),
             label(term).0,
-            difference.expected.join(" / "),
-            difference.found.join(" / ")
+            cell(&difference.expected.join(VALUE_SEPARATOR)),
+            cell(&difference.found.join(VALUE_SEPARATOR))
         );
     }
     out
@@ -347,7 +362,7 @@ mod tests {
 
     use doc2einvoice_model::{Draft, Entry, Occurrence, Origin};
 
-    use super::{Count, Place, pdf_files, tally};
+    use super::{Count, Place, cell, pdf_files, tally};
 
     /// The business group of an invoice line, and two terms: the invoice
     /// number and the item name.
@@ -494,6 +509,14 @@ mod tests {
             expected.sort_unstable();
         }
         assert_eq!(names, expected);
+    }
+
+    #[test]
+    fn cells_follow_their_table() {
+        assert_eq!(cell("A"), "A");
+        assert_eq!(cell("A | B"), "A \\| B");
+        assert_eq!(cell("A\nB"), "A B");
+        assert_eq!(cell("A\r\nB"), "A  B");
     }
 
     #[test]

@@ -4,7 +4,7 @@
 //! The closed code lists of the model are those of the published rules of
 //! EN 16931, read from the rule files in this repository.
 
-use doc2einvoice_model::VatCategory;
+use doc2einvoice_model::{CURRENCY_CODES, VatCategory};
 
 /// The published rules of EN 16931, one file per syntax.
 const RULE_FILES: [(&str, &str); 2] = [
@@ -20,6 +20,9 @@ const RULE_FILES: [(&str, &str); 2] = [
 
 /// The rule that lists the VAT category codes.
 const VAT_CATEGORY_RULE: &str = "BR-CL-18";
+
+/// The rule that lists the currency codes.
+const CURRENCY_RULE: &str = "BR-CL-04";
 
 /// The test of the Schematron assertion with the identifier `rule`.
 fn rule_test<'a>(document: &'a roxmltree::Document<'a>, rule: &str) -> Option<&'a str> {
@@ -71,6 +74,21 @@ fn the_vat_categories_are_those_of_the_rules() {
             .unwrap_or_else(|error| unreachable!("{syntax}: {error}"));
         let test = rule_test(&document, VAT_CATEGORY_RULE)
             .unwrap_or_else(|| unreachable!("{syntax}: {VAT_CATEGORY_RULE} not found"));
+        let mut published = allowed_codes(test);
+        published.sort_unstable();
+        assert_eq!(model, published, "{syntax}");
+    }
+}
+
+#[test]
+fn the_currencies_are_those_of_the_rules() {
+    let mut model: Vec<&str> = CURRENCY_CODES.to_vec();
+    model.sort_unstable();
+    for (syntax, rules) in RULE_FILES {
+        let document = roxmltree::Document::parse(rules)
+            .unwrap_or_else(|error| unreachable!("{syntax}: {error}"));
+        let test = rule_test(&document, CURRENCY_RULE)
+            .unwrap_or_else(|| unreachable!("{syntax}: {CURRENCY_RULE} not found"));
         let mut published = allowed_codes(test);
         published.sort_unstable();
         assert_eq!(model, published, "{syntax}");

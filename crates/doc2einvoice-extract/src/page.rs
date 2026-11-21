@@ -28,8 +28,13 @@ pub struct Line<'a> {
 
 impl Line<'_> {
     pub fn texts(&self) -> Vec<&str> {
-        self.words.iter().map(|word| word.text.as_str()).collect()
+        texts(self.words)
     }
+}
+
+/// The texts of `words`, in their order.
+fn texts<'w>(words: impl IntoIterator<Item = &'w Word>) -> Vec<&'w str> {
+    words.into_iter().map(|word| word.text.as_str()).collect()
 }
 
 /// Words that stand together, on one page.
@@ -40,7 +45,7 @@ pub struct Span<'a> {
 
 impl Span<'_> {
     pub fn texts(&self) -> Vec<&str> {
-        self.words.iter().map(|word| word.text.as_str()).collect()
+        texts(self.words.iter().copied())
     }
 
     /// The place of the words from `first` on, `count` of them.

@@ -47,6 +47,9 @@ pub enum ValueError {
     /// A code is none of the codes of its list.
     #[error("\"{0}\" is not a VAT category code")]
     UnknownVatCategory(String),
+    /// A currency code is none of the codes the standard allows.
+    #[error("\"{0}\" is not a currency code the standard allows")]
+    UnknownCurrency(String),
 }
 
 /// A monetary amount, in the currency the invoice names, or in the VAT
@@ -122,8 +125,8 @@ fn is_capital_letters(code: &str, length: usize) -> bool {
     code.len() == length && code.bytes().all(|byte| byte.is_ascii_uppercase())
 }
 
-/// A code of `N` capital letters A to Z, as the ISO lists of currencies and
-/// countries use them.
+/// A code of `N` capital letters A to Z, as the ISO lists of countries use
+/// them.
 ///
 /// Only the form is checked here. Whether the code is in its list is checked
 /// by the validation rules, which carry the list itself.
@@ -153,8 +156,60 @@ impl<const N: usize> LetterCode<N> {
     }
 }
 
-/// A currency, as an alphabetic code of ISO 4217 (EUR, USD).
-pub type CurrencyCode = LetterCode<CURRENCY_CODE_LENGTH>;
+/// The currency codes the standard allows (rule BR-CL-04): the alphabetic
+/// codes of ISO 4217, in the order of the rule.
+pub const CURRENCY_CODES: [&str; 178] = [
+    "AED", "AFN", "ALL", "AMD", "AOA", "ARS", "AUD", "AWG", "AZN", "BAM", "BBD", "BDT", "BHD",
+    "BIF", "BMD", "BND", "BOB", "BOV", "BRL", "BSD", "BTN", "BWP", "BYN", "BZD", "CAD", "CDF",
+    "CHE", "CHF", "CHW", "CLF", "CLP", "CNH", "CNY", "COP", "COU", "CRC", "CUP", "CVE", "CZK",
+    "DJF", "DKK", "DOP", "DZD", "EGP", "ERN", "ETB", "EUR", "FJD", "FKP", "GBP", "GEL", "GHS",
+    "GIP", "GMD", "GNF", "GTQ", "GYD", "HKD", "HNL", "HTG", "HUF", "IDR", "ILS", "INR", "IQD",
+    "IRR", "ISK", "JMD", "JOD", "JPY", "KES", "KGS", "KHR", "KMF", "KPW", "KRW", "KWD", "KYD",
+    "KZT", "LAK", "LBP", "LKR", "LRD", "LSL", "LYD", "MAD", "MDL", "MGA", "MKD", "MMK", "MNT",
+    "MOP", "MRU", "MUR", "MVR", "MWK", "MXN", "MXV", "MYR", "MZN", "NAD", "NGN", "NIO", "NOK",
+    "NPR", "NZD", "OMR", "PAB", "PEN", "PGK", "PHP", "PKR", "PLN", "PYG", "QAR", "RON", "RSD",
+    "RUB", "RWF", "SAR", "SBD", "SCR", "SDG", "SEK", "SGD", "SHP", "SLE", "SOS", "SRD", "SSP",
+    "STN", "SVC", "SYP", "SZL", "THB", "TJS", "TMT", "TND", "TOP", "TRY", "TTD", "TWD", "TZS",
+    "UAH", "UGX", "USD", "USN", "UYI", "UYU", "UYW", "UZS", "VES", "VED", "VND", "VUV", "WST",
+    "XAF", "XAG", "XAU", "XBA", "XBB", "XBC", "XBD", "XCD", "XCG", "XDR", "XOF", "XPD", "XPF",
+    "XPT", "XSU", "XTS", "XUA", "XXX", "YER", "ZAR", "ZMW", "ZWG",
+];
+
+/// A currency, as an alphabetic code of ISO 4217 that the standard allows
+/// (EUR, USD).
+///
+/// | Given | Result                              |
+/// |-------|-------------------------------------|
+/// | EUR   | the code                            |
+/// | CHF   | the code                            |
+/// | eur   | error, not three capital letters    |
+/// | EURO  | error, not three capital letters    |
+/// | VAT   | error, three capitals but no currency |
+/// | DEM   | error, no longer a currency of ISO 4217 |
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CurrencyCode(LetterCode<CURRENCY_CODE_LENGTH>);
+
+impl CurrencyCode {
+    /// Takes a currency code the standard allows.
+    ///
+    /// # Errors
+    ///
+    /// [`ValueError::CodeForm`] for anything but three capital letters,
+    /// [`ValueError::UnknownCurrency`] for a code outside the list.
+    pub fn new(code: &str) -> Result<Self, ValueError> {
+        let form = LetterCode::new(code)?;
+        if !CURRENCY_CODES.contains(&code) {
+            return Err(ValueError::UnknownCurrency(code.to_owned()));
+        }
+        Ok(Self(form))
+    }
+
+    /// The code as written.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
 
 /// A country, as an alpha-2 code of ISO 3166-1 (DE, FR).
 pub type CountryCode = LetterCode<COUNTRY_CODE_LENGTH>;
@@ -344,6 +399,19 @@ mod tests {
     #[test]
     fn codes_are_checked_for_their_length() {
         assert!(CurrencyCode::new("EUR").is_ok());
+        assert!(CurrencyCode::new("CHF").is_ok());
+        for code in ["eur", "EURO"] {
+            assert!(
+                matches!(CurrencyCode::new(code), Err(ValueError::CodeForm { .. })),
+                "{code}"
+            );
+        }
+        for code in ["VAT", "DEM"] {
+            assert!(
+                matches!(CurrencyCode::new(code), Err(ValueError::UnknownCurrency(_))),
+                "{code}"
+            );
+        }
         assert!(CurrencyCode::new("DE").is_err());
         assert!(CountryCode::new("DE").is_ok());
         assert_eq!(

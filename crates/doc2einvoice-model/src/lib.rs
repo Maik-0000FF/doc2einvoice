@@ -45,7 +45,7 @@ pub use terms::{
 };
 pub use totals::{DocumentAdjustment, DocumentTotals, VatBreakdown};
 pub use values::{
-    Amount, BinaryObject, Code, CountryCode, CurrencyCode, Date, DocumentReference, Identifier,
-    ItemClassification, LetterCode, OptionalSchemeIdentifier, Percentage, Quantity,
+    Amount, BinaryObject, CURRENCY_CODES, Code, CountryCode, CurrencyCode, Date, DocumentReference,
+    Identifier, ItemClassification, LetterCode, OptionalSchemeIdentifier, Percentage, Quantity,
     RequiredSchemeIdentifier, Text, UnitPriceAmount, ValueError, VatCategory,
 };

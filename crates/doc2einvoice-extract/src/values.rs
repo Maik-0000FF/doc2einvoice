@@ -12,8 +12,10 @@
 use std::str::FromStr;
 
 use chrono::NaiveDate;
-use doc2einvoice_model::DATE_FORMAT;
+use doc2einvoice_model::{Amount, CurrencyCode, DATE_FORMAT};
 use rust_decimal::Decimal;
+
+use crate::labels::{NUMBER_MARKERS, normalized};
 
 /// A value read from words: its text in the form of the draft, and how many
 /// of the words, from the first on, it was read from.
@@ -90,19 +92,12 @@ const GROUP_DIGITS: usize = 3;
 /// Currency marks that name exactly one currency.
 const CURRENCY_SYMBOLS: [(&str, &str); 2] = [("€", "EUR"), ("£", "GBP")];
 
-/// How many letters a currency code has.
-const CODE_LETTERS: usize = 3;
-
-/// Words that say a number follows, compared in lower case without a point
-/// or colon at the end, as "Nr." in "Bau (877) Nr. 210113".
-const NUMBER_MARKERS: [&str; 5] = ["nr", "no", "#", "n°", "nummer"];
+/// The sign of a rate, as in `19 %` or `19%`.
+const PERCENT: char = '%';
 
 /// How many words after a label a number marker may stand, not counting
 /// words in brackets.
 const MARKER_REACH: usize = 3;
-
-/// Characters a number marker may end in.
-const MARKER_ENDINGS: [char; 2] = ['.', ':'];
 
 /// The identifier the words stand for: the first word, or the word after a
 /// number marker among the first few, if it holds a digit and is no date.
@@ -158,8 +153,7 @@ fn after_marker(words: &[&str]) -> Option<usize> {
         if inside {
             continue;
         }
-        let normal = word.trim_end_matches(MARKER_ENDINGS).to_lowercase();
-        if NUMBER_MARKERS.contains(&normal.as_str()) {
+        if NUMBER_MARKERS.contains(&normalized(word).as_str()) {
             return Some(index + 1);
         }
         counted += 1;
@@ -234,7 +228,8 @@ fn dated(word: &str, form: &DateForm) -> Option<NaiveDate> {
     unambiguous.then_some(parsed)
 }
 
-/// The amount the first word after any currency marks stands for.
+/// The amount the first word after any currency marks and rates stands
+/// for.
 ///
 /// | Words                     | Read                       |
 /// |---------------------------|----------------------------|
@@ -246,6 +241,9 @@ fn dated(word: &str, form: &DateForm) -> Option<NaiveDate> {
 /// | `1234,567`                | `1234.567` (no group has four digits) |
 /// | `EUR` `-1,12`             | `-1.12`, one word skipped  |
 /// | `€` `571.04`              | `571.04`, one word skipped |
+/// | `19` `%` `11,20`          | `11.2`, two words skipped (a rate before it) |
+/// | `19%` `11,20`             | `11.2`, one word skipped   |
+/// | `EUR` `19,00%` `11,20`    | `11.2`, two words skipped  |
 /// | `571,04€`, `€571.04`      | `571.04`                   |
 /// | `−7,67` (minus sign)      | `-7.67`                    |
 /// | `218,48-`                 | `-218.48`                  |
@@ -254,21 +252,59 @@ fn dated(word: &str, form: &DateForm) -> Option<NaiveDate> {
 /// | `1.234`, `1,234`          | none (thousands or decimals) |
 /// | `1.23.4`, `1,2,3`, `1.234.5` | none (groups out of place) |
 /// | `1,234,5.0`, `1.0,5`      | none                       |
-/// | `12,5%`                   | none (a rate)              |
+/// | `12,5%`, `19` `%`         | none (only a rate)         |
 /// | `1` `234,50` (two words)  | `1` (a space may part columns as well as groups) |
 /// | `in` `EUR`                | none                       |
 pub fn amount(words: &[&str]) -> Option<Read> {
-    let skipped = words
-        .iter()
-        .take_while(|word| currency_mark(word).is_some())
-        .count();
-    let word = words.get(skipped)?.trim_end_matches(TRAILING);
-    let value = number(strip_currency(word))?;
+    let (skipped, value) = number_after_marks(words)?;
     Some(Read {
         text: value.normalize().to_string(),
         skipped,
         used: 1,
     })
+}
+
+/// A monetary amount, as a total is: an amount with at most the decimal
+/// places the model allows.
+///
+/// | Words       | Read     |
+/// |-------------|----------|
+/// | `571,04`    | `571.04` |
+/// | `1.234,50`  | `1234.5` |
+/// | `1234,567`  | none (three decimal places) |
+/// | `0,025`     | none     |
+/// | `19` `%` `11,20` | `11.2` |
+pub fn monetary(words: &[&str]) -> Option<Read> {
+    let (skipped, value) = number_after_marks(words)?;
+    let amount = Amount::new(value).ok()?;
+    Some(Read {
+        text: amount.value().to_string(),
+        skipped,
+        used: 1,
+    })
+}
+
+/// The number of the first word after currency marks and rates, and how
+/// many words were skipped before it.
+fn number_after_marks(words: &[&str]) -> Option<(usize, Decimal)> {
+    let mut skipped = 0;
+    loop {
+        let word = words.get(skipped)?.trim_end_matches(TRAILING);
+        let next = words.get(skipped + 1);
+        if currency_mark(word).is_some() || is_rate(word) {
+            skipped += 1;
+        } else if next.is_some_and(|next| next.starts_with(PERCENT)) && number(word).is_some() {
+            skipped += 2;
+        } else {
+            return Some((skipped, number(strip_currency(word))?));
+        }
+    }
+}
+
+/// Whether a word is a rate with its sign joined, as `19%` or `19,00%`.
+fn is_rate(word: &str) -> bool {
+    word.strip_suffix(PERCENT)
+        .is_some_and(|rate| number(rate).is_some())
 }
 
 /// The word without a currency symbol at its start or end.
@@ -340,8 +376,8 @@ fn ungrouped(text: &str, separator: char) -> Option<String> {
         .then(|| text.replace(separator, ""))
 }
 
-/// The currency a word marks: a symbol that names one currency, or a code of
-/// three capital letters.
+/// The currency a word marks: a symbol that names one currency, or a code
+/// the standard allows.
 ///
 /// | Word   | Currency |
 /// |--------|----------|
@@ -350,13 +386,15 @@ fn ungrouped(text: &str, separator: char) -> Option<String> {
 /// | `EUR`  | `EUR`    |
 /// | `CHF`  | `CHF`    |
 /// | `$`    | none (several currencies use it) |
-/// | `Eur`, `EURO`, `GLN` | `GLN` is three capitals: a code; the others none |
+/// | `VAT`, `NET`, `GLN` | none (three capitals, but no currency) |
+/// | `Eur`, `EURO` | none |
 pub fn currency_mark(word: &str) -> Option<String> {
     if let Some((_, code)) = CURRENCY_SYMBOLS.iter().find(|(symbol, _)| *symbol == word) {
         return Some((*code).to_owned());
     }
-    let is_code = word.len() == CODE_LETTERS && word.chars().all(|c| c.is_ascii_uppercase());
-    is_code.then(|| word.to_owned())
+    CurrencyCode::new(word)
+        .ok()
+        .map(|code| code.as_str().to_owned())
 }
 
 /// Whether a word is an amount printed with decimals, as currency marks
@@ -406,7 +444,9 @@ pub fn currency(words: &[&str]) -> Option<Read> {
 
 #[cfg(test)]
 mod tests {
-    use super::{amount, currency, currency_mark, date, has_decimals, identifier, joined_symbol};
+    use super::{
+        amount, currency, currency_mark, date, has_decimals, identifier, joined_symbol, monetary,
+    };
 
     fn text(read: Option<super::Read>) -> Option<String> {
         read.map(|read| read.text)
@@ -483,7 +523,11 @@ mod tests {
 
     #[test]
     fn amounts_follow_their_table() {
-        let rows: [Row; 24] = [
+        let rows: [Row; 28] = [
+            (&["19", "%", "11,20"], Some(("11.2", 2))),
+            (&["19%", "11,20"], Some(("11.2", 1))),
+            (&["EUR", "19,00%", "11,20"], Some(("11.2", 2))),
+            (&["19", "%"], None),
             (&["571,04", "€"], Some(("571.04", 0))),
             (&["1.234,50"], Some(("1234.5", 0))),
             (&["1,234.50"], Some(("1234.5", 0))),
@@ -517,13 +561,28 @@ mod tests {
     }
 
     #[test]
+    fn totals_follow_their_table() {
+        let rows: [Row; 5] = [
+            (&["571,04"], Some(("571.04", 0))),
+            (&["1.234,50"], Some(("1234.5", 0))),
+            (&["1234,567"], None),
+            (&["0,025"], None),
+            (&["19", "%", "11,20"], Some(("11.2", 2))),
+        ];
+        for (words, expected) in rows {
+            let read = monetary(words).map(|read| (read.text, read.skipped));
+            let expected = expected.map(|(text, skipped)| (text.to_owned(), skipped));
+            assert_eq!(read, expected, "{words:?}");
+        }
+    }
+
+    #[test]
     fn currencies_follow_their_table() {
         assert_eq!(currency_mark("€").as_deref(), Some("EUR"));
         assert_eq!(currency_mark("£").as_deref(), Some("GBP"));
         assert_eq!(currency_mark("EUR").as_deref(), Some("EUR"));
         assert_eq!(currency_mark("CHF").as_deref(), Some("CHF"));
-        assert_eq!(currency_mark("GLN").as_deref(), Some("GLN"));
-        for word in ["$", "Eur", "EURO"] {
+        for word in ["$", "VAT", "NET", "GLN", "Eur", "EURO"] {
             assert_eq!(currency_mark(word), None, "{word}");
         }
         assert_eq!(text(currency(&["EUR"])).as_deref(), Some("EUR"));

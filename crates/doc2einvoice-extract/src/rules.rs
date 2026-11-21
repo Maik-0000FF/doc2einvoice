@@ -8,6 +8,11 @@
 //! line below. A value beside its label counts more than one below it:
 //! below a label stand the values of a column too.
 //!
+//! A label that names its term counts more than a general one: "Datum" is
+//! the issue date only where no "Rechnungsdatum" gives one. Labels that do
+//! not count where they stand, as "vom" away from the invoice number, are
+//! ordinary words and do not end the value of the label before them.
+//!
 //! A label in the line of the invoice number, as "vom" in "Rechnung Nr. 17
 //! vom 16.09.2026", counts more than a label elsewhere. For the header, the
 //! words after a label in its line are its value or nothing: only a label
@@ -22,7 +27,7 @@ use doc2einvoice_pdf::PageLayout;
 
 use crate::labels::{
     self, AMOUNT_DUE, CURRENCY, Found, INVOICE_NUMBER, ISSUE_DATE, Scope, TOTAL_WITH_VAT,
-    TOTAL_WITHOUT_VAT, VAT_TOTAL,
+    TOTAL_WITHOUT_VAT, VAT_TOTAL, Weight,
 };
 use crate::page::{self, Line, Span};
 use crate::values::{self, Read};
@@ -74,7 +79,7 @@ const fn header(term: u16, read: fn(&[&str]) -> Option<Read>) -> Rule {
 const fn total(term: u16) -> Rule {
     Rule {
         term,
-        read: values::amount,
+        read: values::monetary,
         below: false,
         past_words: true,
         choice: Choice::Last,
@@ -155,29 +160,36 @@ fn chosen(
     labelled: &[Labelled],
     number: Option<(usize, usize)>,
 ) -> Option<Candidate> {
-    let mut candidates: Vec<Candidate> = Vec::new();
+    let mut candidates: Vec<(Weight, Candidate)> = Vec::new();
     for line in labelled {
-        for (index, found) in line.found.iter().enumerate() {
-            if found.label.term != rule.term || !in_scope(found, line.line, number) {
+        let valid: Vec<&Found> = line
+            .found
+            .iter()
+            .filter(|found| in_scope(found, line.line, number))
+            .collect();
+        for (index, found) in valid.iter().enumerate() {
+            if found.label.term != rule.term {
                 continue;
             }
-            let end = line
-                .found
+            let end = valid
                 .get(index + 1)
                 .map_or(line.words.len(), |next| next.first);
             if let Some(mut candidate) = candidate(rule, lines, line.line, found, end) {
                 if found.label.scope == Scope::AfterNumber {
                     candidate.standing = Standing::InNumberLine;
                 }
-                candidates.push(candidate);
+                candidates.push((found.label.weight, candidate));
             }
         }
     }
-    let rank = |candidate: &Candidate| (candidate.standing, candidate.nearness);
+    let rank = |(weight, candidate): &(Weight, Candidate)| {
+        (candidate.standing, *weight, candidate.nearness)
+    };
     let best = candidates.iter().map(rank).min()?;
     let mut nearest = candidates
         .into_iter()
-        .filter(|candidate| rank(candidate) == best);
+        .filter(|candidate| rank(candidate) == best)
+        .map(|(_, candidate)| candidate);
     match rule.choice {
         Choice::First => nearest.next(),
         Choice::Last => nearest.next_back(),
@@ -459,6 +471,68 @@ mod tests {
     }
 
     #[test]
+    fn a_label_that_does_not_count_where_it_stands_is_an_ordinary_word() {
+        let pages = [page(vec![block(
+            50.0,
+            100.0,
+            &["Facture", "du", "16/11/2017", "N°", "FA-2017-1"],
+        )])];
+        assert_eq!(value(&pages, INVOICE_NUMBER).as_deref(), Some("FA-2017-1"));
+    }
+
+    #[test]
+    fn a_number_named_for_another_term_is_not_the_invoice_number() {
+        let pages = [page(vec![block(
+            50.0,
+            100.0,
+            &["Rechnung", "Kunden", "Nr.", "4711"],
+        )])];
+        assert_eq!(value(&pages, INVOICE_NUMBER), None);
+    }
+
+    #[test]
+    fn a_specific_date_label_counts_before_a_general_one() {
+        let ordered = [page(vec![
+            block(50.0, 100.0, &["Order", "Date:", "01.01.2026"]),
+            block(50.0, 120.0, &["Invoice", "Date:", "02.01.2026"]),
+        ])];
+        assert_eq!(value(&ordered, ISSUE_DATE).as_deref(), Some("2026-01-02"));
+        let general_first = [page(vec![
+            block(50.0, 100.0, &["Datum:", "01.01.2026"]),
+            block(50.0, 120.0, &["Rechnungsdatum:", "02.01.2026"]),
+        ])];
+        assert_eq!(
+            value(&general_first, ISSUE_DATE).as_deref(),
+            Some("2026-01-02")
+        );
+        let only_general = [page(vec![block(50.0, 100.0, &["Datum:", "01.01.2026"])])];
+        assert_eq!(
+            value(&only_general, ISSUE_DATE).as_deref(),
+            Some("2026-01-01")
+        );
+    }
+
+    #[test]
+    fn a_total_has_at_most_two_decimal_places() {
+        let pages = [page(vec![block(
+            50.0,
+            100.0,
+            &["Gesamtbetrag:", "1234,567"],
+        )])];
+        assert_eq!(value(&pages, TOTAL_WITH_VAT), None);
+    }
+
+    #[test]
+    fn a_rate_before_a_total_is_passed_over() {
+        let pages = [page(vec![block(
+            50.0,
+            100.0,
+            &["Steuerbetrag", "19", "%", "11,20"],
+        )])];
+        assert_eq!(value(&pages, VAT_TOTAL).as_deref(), Some("11.2"));
+    }
+
+    #[test]
     fn an_unlabelled_currency_is_taken_from_the_marks_of_amounts_if_they_agree() {
         let euro = [page(vec![block(50.0, 100.0, &["Summe", "571,04", "€"])])];
         assert_eq!(value(&euro, CURRENCY).as_deref(), Some("EUR"));
@@ -469,5 +543,7 @@ mod tests {
         assert_eq!(value(&mixed, CURRENCY), None);
         let register = [page(vec![block(50.0, 100.0, &["HRB", "372876"])])];
         assert_eq!(value(&register, CURRENCY), None);
+        let no_currency = [page(vec![block(50.0, 100.0, &["VAT", "19,00"])])];
+        assert_eq!(value(&no_currency, CURRENCY), None);
     }
 }

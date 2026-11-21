@@ -7,7 +7,9 @@
 //! The table also holds labels of terms that are not read yet. They take
 //! their words away from shorter labels: "Gesamtbetrag der Zuschläge" is not
 //! the total "Gesamtbetrag", and "Date d'échéance" is not the issue date
-//! "Date".
+//! "Date". Labels of other numbers and dates end the words a label of a term
+//! read here may take its value from: in "Rechnung Kunden Nr. 4711" the
+//! number belongs to the customer.
 
 use Scope::{AfterNumber, Anywhere, LineStart};
 use Word::{EndsWith, Is};
@@ -37,12 +39,24 @@ pub enum Scope {
     AfterNumber,
 }
 
-/// A label: its words, the business term it names and where it counts.
+/// How much a label says about its term.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Weight {
+    /// It names the term, as "Rechnungsdatum".
+    Specific,
+    /// It names the term only where nothing more specific is printed, as
+    /// "Datum", or a title such as "Rechnung" with the number after it.
+    General,
+}
+
+/// A label: its words, the business term it names, where it counts and how
+/// much it says.
 #[derive(Debug, Clone, Copy)]
 pub struct Label {
     pub words: &'static [Word],
     pub term: u16,
     pub scope: Scope,
+    pub weight: Weight,
 }
 
 /// The business terms of the labels.
@@ -60,10 +74,34 @@ pub const TOTAL_WITHOUT_VAT: u16 = 109;
 pub const VAT_TOTAL: u16 = 110;
 pub const TOTAL_WITH_VAT: u16 = 112;
 const PAID: u16 = 113;
+/// A label that names no business term, as "Druckdatum" or "Bestelldatum",
+/// dates the standard has no term for: it only keeps its words from the
+/// labels read here.
+const NOT_A_TERM: u16 = 0;
+/// Terms whose labels only keep their words from the labels read here.
+const BUYER_IDENTIFIER: u16 = 46;
+const SELLER_TAX_NUMBER: u16 = 32;
+const DESPATCH_ADVICE: u16 = 16;
+const SALES_ORDER: u16 = 14;
+const SELLER_VAT_IDENTIFIER: u16 = 31;
 pub const AMOUNT_DUE: u16 = 115;
 
 const fn label(words: &'static [Word], term: u16, scope: Scope) -> Label {
-    Label { words, term, scope }
+    Label {
+        words,
+        term,
+        scope,
+        weight: Weight::Specific,
+    }
+}
+
+const fn general(words: &'static [Word], term: u16, scope: Scope) -> Label {
+    Label {
+        words,
+        term,
+        scope,
+        weight: Weight::General,
+    }
 }
 
 /// Every label.
@@ -86,19 +124,19 @@ pub const LABELS: &[Label] = &[
         Anywhere,
     ),
     label(&[Is("gutschriftsnummer")], INVOICE_NUMBER, Anywhere),
-    label(&[EndsWith("rechnung")], INVOICE_NUMBER, LineStart),
-    label(&[Is("gutschrift")], INVOICE_NUMBER, LineStart),
+    general(&[EndsWith("rechnung")], INVOICE_NUMBER, LineStart),
+    general(&[Is("gutschrift")], INVOICE_NUMBER, LineStart),
     label(&[Is("invoice"), Is("number")], INVOICE_NUMBER, Anywhere),
     label(&[Is("invoice"), Is("no")], INVOICE_NUMBER, Anywhere),
     label(&[Is("invoice"), Is("nr")], INVOICE_NUMBER, Anywhere),
     label(&[Is("invoice"), Is("#")], INVOICE_NUMBER, Anywhere),
-    label(&[Is("invoice")], INVOICE_NUMBER, LineStart),
+    general(&[Is("invoice")], INVOICE_NUMBER, LineStart),
     label(
         &[Is("credit"), Is("note"), Is("number")],
         INVOICE_NUMBER,
         Anywhere,
     ),
-    label(&[Is("credit"), Is("note")], INVOICE_NUMBER, LineStart),
+    general(&[Is("credit"), Is("note")], INVOICE_NUMBER, LineStart),
     label(
         &[Is("numéro"), Is("de"), Is("facture")],
         INVOICE_NUMBER,
@@ -110,17 +148,17 @@ pub const LABELS: &[Label] = &[
         Anywhere,
     ),
     label(&[Is("facture"), Is("n°")], INVOICE_NUMBER, Anywhere),
-    label(&[Is("facture")], INVOICE_NUMBER, LineStart),
+    general(&[Is("facture")], INVOICE_NUMBER, LineStart),
     label(&[Is("avoir"), Is("n°")], INVOICE_NUMBER, Anywhere),
-    label(&[Is("avoir")], INVOICE_NUMBER, LineStart),
+    general(&[Is("avoir")], INVOICE_NUMBER, LineStart),
     // The issue date (BT-2).
     label(&[Is("rechnungsdatum")], ISSUE_DATE, Anywhere),
     label(&[Is("gutschriftsdatum")], ISSUE_DATE, Anywhere),
-    label(&[Is("datum")], ISSUE_DATE, Anywhere),
+    general(&[Is("datum")], ISSUE_DATE, Anywhere),
     label(&[Is("invoice"), Is("date")], ISSUE_DATE, Anywhere),
     label(&[Is("date"), Is("of"), Is("issue")], ISSUE_DATE, Anywhere),
     label(&[Is("issue"), Is("date")], ISSUE_DATE, Anywhere),
-    label(&[Is("date")], ISSUE_DATE, Anywhere),
+    general(&[Is("date")], ISSUE_DATE, Anywhere),
     label(&[Is("date"), Is("de"), Is("facture")], ISSUE_DATE, Anywhere),
     label(&[Is("date"), Is("d'émission")], ISSUE_DATE, Anywhere),
     label(&[Is("vom")], ISSUE_DATE, AfterNumber),
@@ -265,14 +303,61 @@ pub const LABELS: &[Label] = &[
     label(&[Is("erhaltene"), Is("anzahlungen")], PAID, Anywhere),
     label(&[Is("bereits"), Is("gezahlt")], PAID, Anywhere),
     label(&[Is("paid"), Is("amount")], PAID, Anywhere),
+    // Other numbers, which keep a title such as "Rechnung" from them.
+    label(&[Is("kunden"), Is("nr")], BUYER_IDENTIFIER, Anywhere),
+    label(&[Is("kunden-nr")], BUYER_IDENTIFIER, Anywhere),
+    label(&[Is("kundennr")], BUYER_IDENTIFIER, Anywhere),
+    label(&[Is("kundennummer")], BUYER_IDENTIFIER, Anywhere),
+    label(&[Is("customer"), Is("no")], BUYER_IDENTIFIER, Anywhere),
+    label(&[Is("customer"), Is("number")], BUYER_IDENTIFIER, Anywhere),
+    label(&[Is("n°"), Is("client")], BUYER_IDENTIFIER, Anywhere),
+    label(&[Is("bestell-nr")], PURCHASE_ORDER, Anywhere),
+    label(&[Is("bestellnr")], PURCHASE_ORDER, Anywhere),
+    label(&[Is("order"), Is("no")], PURCHASE_ORDER, Anywhere),
+    label(&[Is("order"), Is("number")], PURCHASE_ORDER, Anywhere),
+    label(&[Is("auftrags-nr")], SALES_ORDER, Anywhere),
+    label(&[Is("auftragsnummer")], SALES_ORDER, Anywhere),
+    label(&[Is("auftrag"), Is("nr")], SALES_ORDER, Anywhere),
+    label(&[Is("lieferschein-nr")], DESPATCH_ADVICE, Anywhere),
+    label(&[Is("lieferscheinnummer")], DESPATCH_ADVICE, Anywhere),
+    label(&[Is("lieferschein"), Is("nr")], DESPATCH_ADVICE, Anywhere),
+    label(&[Is("steuer-nr")], SELLER_TAX_NUMBER, Anywhere),
+    label(&[Is("steuernummer")], SELLER_TAX_NUMBER, Anywhere),
+    label(&[Is("steuer"), Is("nr")], SELLER_TAX_NUMBER, Anywhere),
+    label(&[Is("ust-idnr")], SELLER_VAT_IDENTIFIER, Anywhere),
+    label(&[Is("ust.-id.-nr")], SELLER_VAT_IDENTIFIER, Anywhere),
+    label(&[Is("ust-id")], SELLER_VAT_IDENTIFIER, Anywhere),
+    label(&[Is("vat"), Is("id")], SELLER_VAT_IDENTIFIER, Anywhere),
+    // Other dates, which keep "Datum" and "Date" from them.
+    label(&[Is("bestelldatum")], NOT_A_TERM, Anywhere),
+    label(&[Is("order"), Is("date")], NOT_A_TERM, Anywhere),
+    label(
+        &[Is("date"), Is("de"), Is("commande")],
+        NOT_A_TERM,
+        Anywhere,
+    ),
+    label(&[Is("auftragsdatum")], NOT_A_TERM, Anywhere),
+    label(&[Is("lieferscheindatum")], NOT_A_TERM, Anywhere),
+    label(
+        &[Is("datum"), Is("der"), Is("lieferung")],
+        DELIVERY_DATE,
+        Anywhere,
+    ),
+    label(&[Is("druckdatum")], NOT_A_TERM, Anywhere),
+    label(&[Is("print"), Is("date")], NOT_A_TERM, Anywhere),
 ];
 
 /// Characters a printed word may end in that do not belong to the word of
 /// a label.
 const LABEL_ENDINGS: [char; 2] = [':', '.'];
 
-/// A printed word as it is compared with the words of labels.
-fn normalized(word: &str) -> String {
+/// Words that say a number follows, as "Nr." in "Bau (877) Nr. 210113",
+/// written as [`normalized`] gives them.
+pub const NUMBER_MARKERS: [&str; 5] = ["nr", "no", "#", "n°", "nummer"];
+
+/// A printed word as it is compared with the words of labels: in lower case,
+/// without a colon or point at its end.
+pub fn normalized(word: &str) -> String {
     word.trim_end_matches(LABEL_ENDINGS).to_lowercase()
 }
 
