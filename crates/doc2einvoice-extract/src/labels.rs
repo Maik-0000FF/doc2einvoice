@@ -49,24 +49,44 @@ pub enum Weight {
     General,
 }
 
-/// A label: its words, the business term it names, where it counts and how
-/// much it says.
+/// What a label names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Names {
+    /// A business term, by its number.
+    Term(u16),
+    /// Nothing the standard has a term for, as "Druckdatum" or
+    /// "Bestelldatum": the label only keeps its words from the labels read
+    /// here.
+    Nothing,
+    /// The name of a party, whichever party the section it stands in is
+    /// about: "Name".
+    PartyName,
+}
+
+/// A label: its words, what it names, where it counts and how much it says.
 #[derive(Debug, Clone, Copy)]
 pub struct Label {
     pub words: &'static [Word],
-    pub term: u16,
+    pub names: Names,
     pub scope: Scope,
     pub weight: Weight,
+}
+
+impl Label {
+    /// Whether the label names the business term `term`.
+    pub fn names_term(&self, term: u16) -> bool {
+        self.names == Names::Term(term)
+    }
 }
 
 /// The business terms of the labels.
 pub const INVOICE_NUMBER: u16 = 1;
 pub const ISSUE_DATE: u16 = 2;
 pub const CURRENCY: u16 = 5;
-const DUE_DATE: u16 = 9;
+pub const DUE_DATE: u16 = 9;
 const PURCHASE_ORDER: u16 = 13;
 const PRECEDING_INVOICE: u16 = 25;
-const DELIVERY_DATE: u16 = 72;
+pub const DELIVERY_DATE: u16 = 72;
 const LINE_TOTAL: u16 = 106;
 const ALLOWANCES: u16 = 107;
 const CHARGES: u16 = 108;
@@ -74,10 +94,6 @@ pub const TOTAL_WITHOUT_VAT: u16 = 109;
 pub const VAT_TOTAL: u16 = 110;
 pub const TOTAL_WITH_VAT: u16 = 112;
 const PAID: u16 = 113;
-/// A label that names no business term, as "Druckdatum" or "Bestelldatum",
-/// dates the standard has no term for: it only keeps its words from the
-/// labels read here.
-const NOT_A_TERM: u16 = 0;
 /// Terms whose labels only keep their words from the labels read here.
 const BUYER_IDENTIFIER: u16 = 46;
 const SELLER_TAX_NUMBER: u16 = 32;
@@ -89,7 +105,7 @@ pub const AMOUNT_DUE: u16 = 115;
 const fn label(words: &'static [Word], term: u16, scope: Scope) -> Label {
     Label {
         words,
-        term,
+        names: Names::Term(term),
         scope,
         weight: Weight::Specific,
     }
@@ -98,9 +114,19 @@ const fn label(words: &'static [Word], term: u16, scope: Scope) -> Label {
 const fn general(words: &'static [Word], term: u16, scope: Scope) -> Label {
     Label {
         words,
-        term,
+        names: Names::Term(term),
         scope,
         weight: Weight::General,
+    }
+}
+
+/// A label that names nothing the standard has a term for.
+const fn blocking(words: &'static [Word], scope: Scope) -> Label {
+    Label {
+        words,
+        names: Names::Nothing,
+        scope,
+        weight: Weight::Specific,
     }
 }
 
@@ -260,16 +286,27 @@ pub const LABELS: &[Label] = &[
     label(&[Is("net"), Is("à"), Is("payer")], AMOUNT_DUE, Anywhere),
     label(&[Is("solde"), Is("à"), Is("payer")], AMOUNT_DUE, Anywhere),
     label(&[Is("montant"), Is("à"), Is("payer")], AMOUNT_DUE, Anywhere),
-    // Terms not read yet, which keep their words from shorter labels.
+    // The payment due date (BT-9).
     label(&[Is("fälligkeitsdatum")], DUE_DATE, Anywhere),
+    label(&[Is("fälligkeit")], DUE_DATE, Anywhere),
+    label(&[Is("netto"), Is("bis")], DUE_DATE, Anywhere),
+    label(&[Is("ohne"), Is("abzug"), Is("bis")], DUE_DATE, Anywhere),
+    label(&[Is("ohne"), Is("abschlag"), Is("bis")], DUE_DATE, Anywhere),
+    label(
+        &[Is("überweisen"), Is("sie"), Is("bis"), Is("zum")],
+        DUE_DATE,
+        Anywhere,
+    ),
     label(&[Is("fällig"), Is("am")], DUE_DATE, Anywhere),
+    label(&[Is("fällig"), Is("bis")], DUE_DATE, Anywhere),
     label(&[Is("zahlbar"), Is("bis")], DUE_DATE, Anywhere),
+    label(&[Is("zahlbar"), Is("bis"), Is("zum")], DUE_DATE, Anywhere),
     label(&[Is("due"), Is("date")], DUE_DATE, Anywhere),
+    label(&[Is("payment"), Is("due")], DUE_DATE, Anywhere),
+    label(&[Is("payable"), Is("by")], DUE_DATE, Anywhere),
     label(&[Is("date"), Is("d'échéance")], DUE_DATE, Anywhere),
-    label(&[Is("bestellung"), Is("nr")], PURCHASE_ORDER, Anywhere),
-    label(&[Is("bestellnummer")], PURCHASE_ORDER, Anywhere),
-    label(&[Is("your"), Is("order")], PURCHASE_ORDER, Anywhere),
-    label(&[Is("facture"), Is("liée")], PRECEDING_INVOICE, Anywhere),
+    label(&[Is("échéance")], DUE_DATE, Anywhere),
+    // The actual delivery date (BT-72).
     label(&[Is("leistungsdatum")], DELIVERY_DATE, Anywhere),
     label(&[Is("lieferdatum")], DELIVERY_DATE, Anywhere),
     label(
@@ -288,6 +325,11 @@ pub const LABELS: &[Label] = &[
         DELIVERY_DATE,
         Anywhere,
     ),
+    // Terms not read yet, which keep their words from shorter labels.
+    label(&[Is("bestellung"), Is("nr")], PURCHASE_ORDER, Anywhere),
+    label(&[Is("bestellnummer")], PURCHASE_ORDER, Anywhere),
+    label(&[Is("your"), Is("order")], PURCHASE_ORDER, Anywhere),
+    label(&[Is("facture"), Is("liée")], PRECEDING_INVOICE, Anywhere),
     label(&[Is("positionssumme")], LINE_TOTAL, Anywhere),
     label(&[Is("summe"), Is("positionen")], LINE_TOTAL, Anywhere),
     label(
@@ -303,6 +345,13 @@ pub const LABELS: &[Label] = &[
     label(&[Is("erhaltene"), Is("anzahlungen")], PAID, Anywhere),
     label(&[Is("bereits"), Is("gezahlt")], PAID, Anywhere),
     label(&[Is("paid"), Is("amount")], PAID, Anywhere),
+    // "Name" outside any section; a section gives it its term.
+    Label {
+        words: NAME,
+        names: Names::PartyName,
+        scope: Anywhere,
+        weight: Weight::Specific,
+    },
     // Other numbers, which keep a title such as "Rechnung" from them.
     label(&[Is("kunden"), Is("nr")], BUYER_IDENTIFIER, Anywhere),
     label(&[Is("kunden-nr")], BUYER_IDENTIFIER, Anywhere),
@@ -329,23 +378,165 @@ pub const LABELS: &[Label] = &[
     label(&[Is("ust-id")], SELLER_VAT_IDENTIFIER, Anywhere),
     label(&[Is("vat"), Is("id")], SELLER_VAT_IDENTIFIER, Anywhere),
     // Other dates, which keep "Datum" and "Date" from them.
-    label(&[Is("bestelldatum")], NOT_A_TERM, Anywhere),
-    label(&[Is("order"), Is("date")], NOT_A_TERM, Anywhere),
-    label(
-        &[Is("date"), Is("de"), Is("commande")],
-        NOT_A_TERM,
-        Anywhere,
-    ),
-    label(&[Is("auftragsdatum")], NOT_A_TERM, Anywhere),
-    label(&[Is("lieferscheindatum")], NOT_A_TERM, Anywhere),
+    blocking(&[Is("bestelldatum")], Anywhere),
+    blocking(&[Is("order"), Is("date")], Anywhere),
+    blocking(&[Is("date"), Is("de"), Is("commande")], Anywhere),
+    blocking(&[Is("auftragsdatum")], Anywhere),
+    blocking(&[Is("lieferscheindatum")], Anywhere),
     label(
         &[Is("datum"), Is("der"), Is("lieferung")],
         DELIVERY_DATE,
         Anywhere,
     ),
-    label(&[Is("druckdatum")], NOT_A_TERM, Anywhere),
-    label(&[Is("print"), Is("date")], NOT_A_TERM, Anywhere),
+    blocking(&[Is("druckdatum")], Anywhere),
+    blocking(&[Is("print"), Is("date")], Anywhere),
 ];
+
+/// The party a section of an invoice is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Party {
+    Seller,
+    Buyer,
+    /// The party the goods are delivered to (BG-13).
+    DeliverTo,
+    /// A payee other than the seller (BG-10).
+    Payee,
+    /// The tax representative of the seller (BG-11).
+    TaxRepresentative,
+}
+
+/// The business terms of the names of the parties.
+pub const SELLER_NAME: u16 = 27;
+pub const BUYER_NAME: u16 = 44;
+const PAYEE_NAME: u16 = 59;
+const TAX_REPRESENTATIVE_NAME: u16 = 62;
+const DELIVER_TO_NAME: u16 = 70;
+
+/// The label "Name", which names the name of the party whose section it
+/// stands in.
+const NAME: &[Word] = &[Is("name")];
+
+/// "Name" in the section of each party.
+const SELLER_NAME_LABEL: Label = label(NAME, SELLER_NAME, Anywhere);
+const BUYER_NAME_LABEL: Label = label(NAME, BUYER_NAME, Anywhere);
+const DELIVER_TO_NAME_LABEL: Label = label(NAME, DELIVER_TO_NAME, Anywhere);
+const PAYEE_NAME_LABEL: Label = label(NAME, PAYEE_NAME, Anywhere);
+const TAX_REPRESENTATIVE_NAME_LABEL: Label = label(NAME, TAX_REPRESENTATIVE_NAME, Anywhere);
+
+/// What a section of an invoice is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Section {
+    /// A party, whose name "Name" in the section names.
+    Party(Party),
+    /// Something else, as the bank account: it ends the section of a party,
+    /// so that the name of the bank is not the name of the seller.
+    Other,
+}
+
+/// The headings of sections that are not about a party, each a line of its
+/// own.
+const OTHER_HEADINGS: &[&[Word]] = &[
+    &[Is("bankverbindung")],
+    &[Is("zahlungsinformationen")],
+    &[Is("zahlungsart")],
+    &[Is("zahlungsbedingungen")],
+    &[Is("bemerkungen")],
+    &[Is("positionen")],
+    &[Is("rechnungspositionen")],
+    &[Is("belegsummen")],
+    &[Is("umsatzsteueraufschlüsselung")],
+    &[Is("bank"), Is("details")],
+    &[Is("payment"), Is("details")],
+    &[Is("payment"), Is("information")],
+    &[Is("payment"), Is("terms")],
+    &[Is("notes")],
+    &[Is("remarks")],
+    &[Is("coordonnées"), Is("bancaires")],
+];
+
+/// The headings of the sections of the parties, each a line of its own.
+const HEADINGS: &[(&[Word], Party)] = &[
+    (&[Is("verkäufer")], Party::Seller),
+    (&[Is("lieferant")], Party::Seller),
+    (&[Is("rechnungssteller")], Party::Seller),
+    (&[Is("seller")], Party::Seller),
+    (&[Is("supplier")], Party::Seller),
+    (&[Is("vendeur")], Party::Seller),
+    (&[Is("fournisseur")], Party::Seller),
+    (&[Is("käufer")], Party::Buyer),
+    (&[Is("käufer/leistungsempfänger")], Party::Buyer),
+    (&[Is("leistungsempfänger")], Party::Buyer),
+    (&[Is("rechnungsempfänger")], Party::Buyer),
+    (&[Is("buyer")], Party::Buyer),
+    (&[Is("bill"), Is("to")], Party::Buyer),
+    (&[Is("acheteur")], Party::Buyer),
+    (&[Is("warenempfänger")], Party::DeliverTo),
+    (
+        &[Is("abweichender"), Is("warenempfänger")],
+        Party::DeliverTo,
+    ),
+    (&[Is("lieferanschrift")], Party::DeliverTo),
+    (&[Is("lieferadresse")], Party::DeliverTo),
+    (&[Is("ship"), Is("to")], Party::DeliverTo),
+    (&[Is("deliver"), Is("to")], Party::DeliverTo),
+    (
+        &[Is("adresse"), Is("de"), Is("livraison")],
+        Party::DeliverTo,
+    ),
+    (&[Is("zahlungsempfänger")], Party::Payee),
+    (&[Is("abweichender"), Is("zahlungsempfänger")], Party::Payee),
+    (&[Is("payee")], Party::Payee),
+    (&[Is("steuervertreter")], Party::TaxRepresentative),
+    (&[Is("tax"), Is("representative")], Party::TaxRepresentative),
+];
+
+/// The section a line heads, if the line is nothing but the heading of it.
+///
+/// | Words                              | Section    |
+/// |------------------------------------|------------|
+/// | `Verkäufer`                        | seller     |
+/// | `Käufer/Leistungsempfänger:`       | buyer      |
+/// | `Abweichender` `Warenempfänger`    | deliver to |
+/// | `Bankverbindung`                   | other      |
+/// | `Bank` `details:`                  | other      |
+/// | `Verkäufer` `Muster` `GmbH`        | none (more than a heading) |
+/// | `Name:`                            | none       |
+pub fn heading(words: &[&str]) -> Option<Section> {
+    let normal: Vec<String> = words.iter().map(|word| normalized(word)).collect();
+    let is = |pattern: &[Word]| {
+        pattern.len() == normal.len()
+            && pattern
+                .iter()
+                .zip(&normal)
+                .all(|(word, printed)| matches(*word, printed))
+    };
+    let party = HEADINGS
+        .iter()
+        .find(|(pattern, _)| is(pattern))
+        .map(|(_, party)| Section::Party(*party));
+    party.or_else(|| {
+        OTHER_HEADINGS
+            .iter()
+            .any(|pattern| is(pattern))
+            .then_some(Section::Other)
+    })
+}
+
+/// The label "Name" stands for in the section of `party`.
+pub fn party_name(party: Party) -> &'static Label {
+    match party {
+        Party::Seller => &SELLER_NAME_LABEL,
+        Party::Buyer => &BUYER_NAME_LABEL,
+        Party::DeliverTo => &DELIVER_TO_NAME_LABEL,
+        Party::Payee => &PAYEE_NAME_LABEL,
+        Party::TaxRepresentative => &TAX_REPRESENTATIVE_NAME_LABEL,
+    }
+}
+
+/// Whether `found` is the label "Name", which only a section gives a term.
+pub fn is_party_name(found: &Found) -> bool {
+    found.label.names == Names::PartyName
+}
 
 /// Characters a printed word may end in that do not belong to the word of
 /// a label.
@@ -441,12 +632,17 @@ fn covered(label: &Label, words: &[&str], normal: &[String], at: usize) -> Optio
 
 #[cfg(test)]
 mod tests {
-    use super::{CHARGES, INVOICE_NUMBER, ISSUE_DATE, TOTAL_WITH_VAT, find};
+    use super::{
+        CHARGES, INVOICE_NUMBER, ISSUE_DATE, Names, Party, Section, TOTAL_WITH_VAT, find, heading,
+    };
 
     fn found(words: &[&str]) -> Vec<(u16, usize, usize)> {
         find(words)
             .iter()
-            .map(|found| (found.label.term, found.first, found.end))
+            .filter_map(|found| match found.label.names {
+                Names::Term(term) => Some((term, found.first, found.end)),
+                Names::Nothing | Names::PartyName => None,
+            })
             .collect()
     }
 
@@ -474,5 +670,27 @@ mod tests {
             found(&["Nr.", "17", "vom", "16.09.2026"]),
             [(ISSUE_DATE, 2, 3)]
         );
+    }
+
+    #[test]
+    fn headings_follow_their_table() {
+        let rows: [(&[&str], Option<Section>); 7] = [
+            (&["Verkäufer"], Some(Section::Party(Party::Seller))),
+            (
+                &["Käufer/Leistungsempfänger:"],
+                Some(Section::Party(Party::Buyer)),
+            ),
+            (
+                &["Abweichender", "Warenempfänger"],
+                Some(Section::Party(Party::DeliverTo)),
+            ),
+            (&["Bankverbindung"], Some(Section::Other)),
+            (&["Bank", "details:"], Some(Section::Other)),
+            (&["Verkäufer", "Muster", "GmbH"], None),
+            (&["Name:"], None),
+        ];
+        for (words, expected) in rows {
+            assert_eq!(heading(words), expected, "{words:?}");
+        }
     }
 }

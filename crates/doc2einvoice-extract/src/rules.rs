@@ -29,8 +29,9 @@ use doc2einvoice_model::{Draft, Entry, Origin};
 use doc2einvoice_pdf::PageLayout;
 
 use crate::labels::{
-    self, AMOUNT_DUE, CURRENCY, Found, INVOICE_NUMBER, ISSUE_DATE, Scope, TOTAL_WITH_VAT,
-    TOTAL_WITHOUT_VAT, VAT_TOTAL, Weight,
+    self, AMOUNT_DUE, BUYER_NAME, CURRENCY, DELIVERY_DATE, DUE_DATE, Found, INVOICE_NUMBER,
+    ISSUE_DATE, Party, SELLER_NAME, Scope, Section, TOTAL_WITH_VAT, TOTAL_WITHOUT_VAT, VAT_TOTAL,
+    Weight,
 };
 use crate::page::{self, Line, Span};
 use crate::values::{self, Read};
@@ -46,26 +47,72 @@ enum Choice {
 /// "Währung | : EUR".
 const SEPARATING_WORD: &str = ":";
 
+/// The kinds of terms, which differ in where their values stand. The
+/// columns are the methods below: a total is not looked for below its
+/// label, where a column stands, nor where a table heading ends with it.
+///
+/// | Kind   | Below | Wrapped line | Whole cell | Past words | Of several |
+/// |--------|-------|--------------|------------|------------|------------|
+/// | header | yes   | yes          | no         | no         | first      |
+/// | name   | yes   | no           | yes        | no         | first      |
+/// | total  | no    | no           | no         | yes        | last       |
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Header,
+    Name,
+    Total,
+}
+
+impl Kind {
+    /// Whether the value may stand below its label.
+    fn below(self) -> bool {
+        self != Self::Total
+    }
+
+    /// Whether the value may start the next line where the sentence that
+    /// ends with its label wraps.
+    fn wraps(self) -> bool {
+        self == Self::Header
+    }
+
+    /// Whether the value beside its label in another block is that whole
+    /// block, as a name set over two lines in its cell.
+    fn cell(self) -> bool {
+        self == Self::Name
+    }
+
+    /// Whether the value is looked for beside the label in another block
+    /// when the words after the label in its line are not one.
+    fn past_words(self) -> bool {
+        self == Self::Total
+    }
+
+    /// Which of several values found counts.
+    fn choice(self) -> Choice {
+        if self == Self::Total {
+            Choice::Last
+        } else {
+            Choice::First
+        }
+    }
+}
+
 /// How a business term is read.
 struct Rule {
     term: u16,
     read: fn(&[&str]) -> Option<Read>,
-    /// Whether the value may stand below its label.
-    below: bool,
-    /// Whether the value may start the next line where the sentence that
-    /// ends with its label wraps.
-    wraps: bool,
-    /// Whether the value is looked for beside the label in another block
-    /// when the words after the label in its line are not one.
-    past_words: bool,
-    choice: Choice,
+    kind: Kind,
 }
 
 /// The terms read, the invoice number first: the issue date may follow it.
-const RULES: [Rule; 7] = [
+const RULES: [Rule; 11] = [
     header(INVOICE_NUMBER, values::identifier),
     header(ISSUE_DATE, values::date),
     header(CURRENCY, values::currency),
+    header(DUE_DATE, values::date),
+    header(DELIVERY_DATE, values::date),
+    name(SELLER_NAME),
+    name(BUYER_NAME),
     total(TOTAL_WITHOUT_VAT),
     total(VAT_TOTAL),
     total(TOTAL_WITH_VAT),
@@ -76,10 +123,16 @@ const fn header(term: u16, read: fn(&[&str]) -> Option<Read>) -> Rule {
     Rule {
         term,
         read,
-        below: true,
-        wraps: true,
-        past_words: false,
-        choice: Choice::First,
+        kind: Kind::Header,
+    }
+}
+
+/// A name of a party: a text, which may fill its cell over several lines.
+const fn name(term: u16) -> Rule {
+    Rule {
+        term,
+        read: values::text,
+        kind: Kind::Name,
     }
 }
 
@@ -87,10 +140,7 @@ const fn total(term: u16) -> Rule {
     Rule {
         term,
         read: values::monetary,
-        below: false,
-        wraps: false,
-        past_words: true,
-        choice: Choice::Last,
+        kind: Kind::Total,
     }
 }
 
@@ -132,18 +182,7 @@ struct Labelled<'a> {
 /// The values the rules find on `pages`.
 pub fn draft(pages: &[PageLayout]) -> Draft {
     let lines = page::lines(pages);
-    let labelled: Vec<Labelled> = lines
-        .iter()
-        .enumerate()
-        .map(|(line, printed)| {
-            let words = printed.texts();
-            Labelled {
-                line,
-                found: labels::find(&words),
-                words,
-            }
-        })
-        .collect();
+    let labelled = labelled(&lines);
     let mut draft = Draft::default();
     let mut number: Option<(usize, usize)> = None;
     for rule in &RULES {
@@ -162,6 +201,35 @@ pub fn draft(pages: &[PageLayout]) -> Draft {
     draft
 }
 
+/// The labels of every line. "Name" takes the term of the party whose
+/// section it stands in: the last heading before it on its page, unless the
+/// heading of another section stands between them.
+fn labelled<'a>(lines: &[Line<'a>]) -> Vec<Labelled<'a>> {
+    let mut section: Option<(usize, Party)> = None;
+    let mut labelled = Vec::with_capacity(lines.len());
+    for (line, printed) in lines.iter().enumerate() {
+        let words = printed.texts();
+        match labels::heading(&words) {
+            Some(Section::Party(party)) => section = Some((printed.page, party)),
+            Some(Section::Other) => section = None,
+            None => {}
+        }
+        let party = section
+            .filter(|(page, _)| *page == printed.page)
+            .map(|(_, party)| party);
+        let mut found = labels::find(&words);
+        for label in &mut found {
+            if labels::is_party_name(label)
+                && let Some(party) = party
+            {
+                label.label = labels::party_name(party);
+            }
+        }
+        labelled.push(Labelled { line, found, words });
+    }
+    labelled
+}
+
 /// The value that counts for `rule`, if one is found. `number` is the line
 /// of the invoice number and the word after it.
 fn chosen(
@@ -178,7 +246,7 @@ fn chosen(
             .filter(|found| in_scope(found, line.line, number))
             .collect();
         for (index, found) in valid.iter().enumerate() {
-            if found.label.term != rule.term {
+            if !found.label.names_term(rule.term) {
                 continue;
             }
             let end = valid
@@ -200,7 +268,7 @@ fn chosen(
         .into_iter()
         .filter(|candidate| rank(candidate) == best)
         .map(|(_, candidate)| candidate);
-    match rule.choice {
+    match rule.kind.choice() {
         Choice::First => nearest.next(),
         Choice::Last => nearest.next_back(),
     }
@@ -239,14 +307,21 @@ fn candidate(
         });
     }
     let only_separators = after.texts().iter().all(|text| *text == SEPARATING_WORD);
-    if !only_separators && !rule.past_words {
+    if !only_separators && !rule.kind.past_words() {
         return None;
     }
     // Only a label that closes a line with text before it ends a sentence
     // that may wrap: a label alone in its line heads a column.
-    let closes_sentence = rule.wraps && found.first > 0 && end == printed.words.len();
+    let closes_sentence = rule.kind.wraps() && found.first > 0 && end == printed.words.len();
     let places = [
-        (Nearness::Beside, Some(page::right_of(lines, line, last))),
+        (
+            Nearness::Beside,
+            Some(if rule.kind.cell() {
+                page::cell_right_of(lines, line, last)
+            } else {
+                page::right_of(lines, line, last)
+            }),
+        ),
         (
             Nearness::Wrapped,
             closes_sentence
@@ -255,7 +330,9 @@ fn candidate(
         ),
         (
             Nearness::Below,
-            rule.below.then(|| page::below(lines, line, first, last)),
+            rule.kind
+                .below()
+                .then(|| page::below(lines, line, first, last)),
         ),
     ];
     places.into_iter().find_map(|(nearness, span)| {
@@ -348,8 +425,8 @@ mod tests {
 
     use super::draft;
     use crate::labels::{
-        AMOUNT_DUE, CURRENCY, INVOICE_NUMBER, ISSUE_DATE, TOTAL_WITH_VAT, TOTAL_WITHOUT_VAT,
-        VAT_TOTAL,
+        AMOUNT_DUE, BUYER_NAME, CURRENCY, DELIVERY_DATE, DUE_DATE, INVOICE_NUMBER, ISSUE_DATE,
+        SELLER_NAME, TOTAL_WITH_VAT, TOTAL_WITHOUT_VAT, VAT_TOTAL,
     };
 
     /// The font size of every word, and the width of one character.
@@ -487,6 +564,106 @@ mod tests {
             &[&["Gesamtbetrag"], &["160,00"]],
         )])];
         assert_eq!(value(&pages, TOTAL_WITH_VAT), None);
+    }
+
+    #[test]
+    fn a_name_takes_the_party_of_its_section_and_its_whole_cell() {
+        let pages = [page(vec![
+            block(50.0, 80.0, &["Name:", "Niemand"]),
+            block(50.0, 100.0, &["Verkäufer"]),
+            wrapped_block(
+                300.0,
+                120.0 - LINE_PITCH,
+                &[&["MVM", "Musterhafter"], &["Versicherungsverein", "a.G."]],
+            ),
+            block(50.0, 120.0, &["Name:"]),
+            block(50.0, 160.0, &["Abweichender", "Warenempfänger"]),
+            block(50.0, 180.0, &["Name:", "Lager", "Nord"]),
+            block(50.0, 200.0, &["Käufer/Leistungsempfänger:"]),
+            block(50.0, 220.0, &["Name:", "Kunden", "AG"]),
+        ])];
+        assert_eq!(
+            value(&pages, SELLER_NAME).as_deref(),
+            Some("MVM Musterhafter Versicherungsverein a.G.")
+        );
+        assert_eq!(value(&pages, BUYER_NAME).as_deref(), Some("Kunden AG"));
+    }
+
+    #[test]
+    fn the_name_of_the_party_delivered_to_is_not_the_buyer() {
+        let pages = [page(vec![
+            block(50.0, 100.0, &["Käufer:"]),
+            block(50.0, 120.0, &["Abweichender", "Warenempfänger"]),
+            block(50.0, 140.0, &["Name:", "Lager", "Nord"]),
+        ])];
+        assert_eq!(value(&pages, BUYER_NAME), None);
+    }
+
+    #[test]
+    fn the_heading_of_another_section_ends_that_of_a_party() {
+        let pages = [page(vec![
+            block(50.0, 100.0, &["Verkäufer"]),
+            block(50.0, 120.0, &["Bankverbindung"]),
+            block(50.0, 140.0, &["Name:", "Sparkasse", "Musterstadt"]),
+        ])];
+        assert_eq!(value(&pages, SELLER_NAME), None);
+    }
+
+    #[test]
+    fn a_name_beside_its_label_leaves_out_the_address_beside_other_labels() {
+        let labels = wrapped_block(50.0, 120.0, &[&["Name:"], &["Straße:"], &["Ort:"]]);
+        let values = wrapped_block(
+            300.0,
+            120.0,
+            &[
+                &["Muster", "GmbH"],
+                &["Hauptstr.", "1"],
+                &["12345", "Stadt"],
+            ],
+        );
+        let pages = [page(vec![
+            block(50.0, 100.0, &["Verkäufer"]),
+            labels,
+            values,
+        ])];
+        assert_eq!(value(&pages, SELLER_NAME).as_deref(), Some("Muster GmbH"));
+    }
+
+    #[test]
+    fn a_section_ends_with_its_page() {
+        let pages = [
+            page(vec![block(50.0, 100.0, &["Verkäufer"])]),
+            page(vec![block(50.0, 100.0, &["Name:", "Kunden", "AG"])]),
+        ];
+        assert_eq!(value(&pages, SELLER_NAME), None);
+    }
+
+    #[test]
+    fn the_due_date_is_read_and_a_discount_date_is_not() {
+        let pages = [page(vec![
+            block(
+                50.0,
+                100.0,
+                &["Zahlbar", "mit", "2%", "Skonto", "bis", "14.12.2025"],
+            ),
+            block(
+                50.0,
+                120.0,
+                &["Zahlbar", "ohne", "Abschlag", "bis", "31.12.2025"],
+            ),
+            block(
+                50.0,
+                140.0,
+                &["Liefer-", "und", "Leistungsdatum:", "05.08.2026"],
+            ),
+        ])];
+        assert_eq!(value(&pages, DUE_DATE).as_deref(), Some("2025-12-31"));
+        assert_eq!(value(&pages, DELIVERY_DATE).as_deref(), Some("2026-08-05"));
+        let column = [page(vec![
+            block(226.0, 100.0, &["Fälligkeit"]),
+            block(226.0, 100.0 + LINE_PITCH, &["04.04.2026"]),
+        ])];
+        assert_eq!(value(&column, DUE_DATE).as_deref(), Some("2026-04-04"));
     }
 
     #[test]
