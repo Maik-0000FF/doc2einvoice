@@ -681,6 +681,44 @@ pub fn says_direct_debit(words: &[&str]) -> bool {
     })
 }
 
+/// Notes the zone for additions of a letter window prints above the
+/// address, each as the first words of its line.
+const WINDOW_NOTES: &[&[Word]] = &[
+    &[Is("persönlich")],
+    &[Is("vertraulich")],
+    &[Is("einschreiben")],
+    &[Is("eilzustellung")],
+    &[Is("bei"), Is("unzustellbarkeit")],
+    &[Is("personal")],
+    &[Is("confidential")],
+    &[Is("registered")],
+    &[Is("personnel")],
+    &[Is("confidentiel")],
+    &[Is("recommandé")],
+];
+
+/// Whether a line starts with a note of the zone for additions of a letter
+/// window, which is no line of the address below it.
+///
+/// | Words                                 | Note |
+/// |---------------------------------------|------|
+/// | `Persönlich`                          | yes  |
+/// | `Einschreiben` `Rückschein`           | yes  |
+/// | `Bei` `Unzustellbarkeit` `zurück`     | yes  |
+/// | `PERSONAL`                            | yes  |
+/// | `Kunden` `AG`                         | no   |
+/// | `Persönliche` `Beratung` `GmbH`       | no   |
+pub fn is_window_note(words: &[&str]) -> bool {
+    let normal: Vec<String> = words.iter().map(|word| normalized(word)).collect();
+    WINDOW_NOTES.iter().any(|pattern| {
+        pattern.len() <= normal.len()
+            && pattern
+                .iter()
+                .zip(&normal)
+                .all(|(word, printed)| matches(*word, printed))
+    })
+}
+
 /// Labels printed beside the lines of an address, which belong to it.
 const ADDRESS_LABELS: &[&[Word]] = &[
     &[Is("anschrift")],
@@ -804,7 +842,7 @@ fn covered(label: &Label, words: &[&str], normal: &[String], at: usize) -> Optio
 mod tests {
     use super::{
         CHARGES, INVOICE_NUMBER, ISSUE_DATE, Names, Party, Section, TOTAL_WITH_VAT, find, heading,
-        says_direct_debit,
+        is_window_note, says_direct_debit,
     };
 
     fn found(words: &[&str]) -> Vec<(u16, usize, usize)> {
@@ -881,6 +919,21 @@ mod tests {
         ];
         for (words, expected) in rows {
             assert_eq!(says_direct_debit(words), expected, "{words:?}");
+        }
+    }
+
+    #[test]
+    fn window_notes_follow_their_table() {
+        let rows: [(&[&str], bool); 6] = [
+            (&["Persönlich"], true),
+            (&["Einschreiben", "Rückschein"], true),
+            (&["Bei", "Unzustellbarkeit", "zurück"], true),
+            (&["PERSONAL"], true),
+            (&["Kunden", "AG"], false),
+            (&["Persönliche", "Beratung", "GmbH"], false),
+        ];
+        for (words, expected) in rows {
+            assert_eq!(is_window_note(words), expected, "{words:?}");
         }
     }
 }

@@ -1229,6 +1229,19 @@ mod tests {
     }
 
     #[test]
+    fn a_note_above_the_window_address_is_not_part_of_it() {
+        let pages = [page(vec![
+            block(mm(25.0), mm(58.0), &["Persönlich"]),
+            window_address(58.0 + LINE_PITCH / crate::address::POINTS_PER_MM),
+        ])];
+        assert_eq!(value(&pages, BUYER_NAME).as_deref(), Some("Kunden AG"));
+        assert_eq!(
+            value(&pages, BUYER_ADDRESS_LINES[0]).as_deref(),
+            Some("Bahnstr. 42")
+        );
+    }
+
+    #[test]
     fn a_heading_without_a_colon_is_not_the_name() {
         let pages = [page(vec![wrapped_block(
             50.0,

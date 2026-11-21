@@ -168,7 +168,8 @@ fn postcode_starting(words: &[&str]) -> Option<Postcode> {
 
 /// The address that ends in `region`, lines of one page in reading order:
 /// the first line that starts with a postal code, and the lines above it in
-/// its column, up to a gap wider than a line, a heading, a label, or a line
+/// its column, up to a gap wider than a line, a heading, a note of the window
+/// as "Persönlich", a label, or a line
 /// with text beside it other than a label of the address, as "Anschrift:".
 /// Only text whose left edge lies in `across`, in points, counts as beside.
 ///
@@ -177,6 +178,7 @@ fn postcode_starting(words: &[&str]) -> Option<Postcode> {
 /// | `Kunden AG`, `Hauptstr. 1`, `80333 München`          | `Kunden AG`; `Hauptstr. 1` |
 /// | `Metallbau GmbH`, `Pappelallee 15`, `Hof 3`, place   | `Metallbau GmbH`; `Pappelallee 15`, `Hof 3` |
 /// | `Verkäufer`, `Kunden AG`, street, place              | `Kunden AG`; street (a heading ends it) |
+/// | `Persönlich`, `Kunden AG`, street, place             | `Kunden AG`; street (a note ends it) |
 /// | `Nummer` beside `: 549910`, `Kunden AG`, street, place | `Kunden AG`; street      |
 /// | `Globale Nummer: 4000…`, `Kunden AG`, street, place  | `Kunden AG`; street        |
 /// | `Kunden AG` with `Kundennummer: 4711` outside `across`, street, place | `Kunden AG`; street |
@@ -216,6 +218,7 @@ pub fn in_region<'a>(
         let baseline = line.words[0].baseline;
         let ends = lowest - baseline > reach
             || labels::heading(&texts).is_some()
+            || labels::is_window_note(&texts)
             || texts.iter().any(|text| text.ends_with(LABEL_END))
             || beside_is_other(lines, index, across);
         if ends {
