@@ -16,7 +16,7 @@ use doc2einvoice_model::{Amount, CurrencyCode, DATE_FORMAT};
 use iban::{Iban, IbanLike};
 use rust_decimal::Decimal;
 
-use crate::labels::{NUMBER_MARKERS, normalized};
+use crate::labels::{CLOSING_BRACKET, NUMBER_MARKERS, OPENING_BRACKET, bracketed, normalized};
 
 /// A value read from words: its text in the form of the draft, and how many
 /// of the words, from the first on, it was read from.
@@ -114,10 +114,6 @@ const MARKER_REACH: usize = 3;
 /// The highest rate of a tax: the whole of what it is charged on.
 const RATE_MOST: Decimal = Decimal::ONE_HUNDRED;
 
-/// The brackets a rate may stand in, as in `USt. (19 %)`.
-const OPENING_BRACKET: char = '(';
-const CLOSING_BRACKET: char = ')';
-
 /// The identifier the words stand for: the first word, or the word after a
 /// number marker among the first few, if it holds a digit and is no date.
 ///
@@ -161,12 +157,12 @@ fn after_marker(words: &[&str]) -> Option<usize> {
     let mut depth = 0_usize;
     let mut counted = 0;
     for (index, word) in words.iter().enumerate() {
-        let opens = word.starts_with('(');
+        let opens = word.starts_with(OPENING_BRACKET);
         let inside = depth > 0 || opens;
         if opens {
             depth += 1;
         }
-        if word.ends_with(')') {
+        if word.ends_with(CLOSING_BRACKET) {
             depth = depth.saturating_sub(1);
         }
         if inside {
@@ -187,8 +183,9 @@ fn after_marker(words: &[&str]) -> Option<usize> {
 /// a code in brackets.
 fn identifier_word(word: &str) -> Option<String> {
     let word = word.trim_end_matches(TRAILING);
-    let bracketed = word.starts_with('(') && word.ends_with(')');
-    let usable = !bracketed && word.chars().any(|c| c.is_ascii_digit()) && date(&[word]).is_none();
+    let usable = bracketed(word).is_none()
+        && word.chars().any(|c| c.is_ascii_digit())
+        && date(&[word]).is_none();
     usable.then(|| word.to_owned())
 }
 
@@ -272,6 +269,7 @@ fn dated(word: &str, form: &DateForm) -> Option<NaiveDate> {
 /// | `1.23.4`, `1,2,3`, `1.234.5` | none (groups out of place) |
 /// | `1,234,5.0`, `1.0,5`      | none                       |
 /// | `12,5%`, `19` `%`         | none (only a rate)         |
+/// | `(19` `%)` `11,20`        | `11.2` (a rate in brackets passed over) |
 /// | `1` `234,50` (two words)  | `1` (a space may part columns as well as groups) |
 /// | `in` `EUR`                | none                       |
 pub fn amount(words: &[&str]) -> Option<Read> {
@@ -309,11 +307,10 @@ fn number_after_marks(words: &[&str]) -> Option<(usize, Decimal)> {
     let mut skipped = 0;
     loop {
         let word = words.get(skipped)?.trim_end_matches(TRAILING);
-        let next = words.get(skipped + 1);
-        if currency_mark(word).is_some() || is_rate(word) {
+        if currency_mark(word).is_some() {
             skipped += 1;
-        } else if next.is_some_and(|next| next.starts_with(PERCENT)) && number(word).is_some() {
-            skipped += 2;
+        } else if let Some(rate) = rate(&words[skipped..]) {
+            skipped += rate.used;
         } else {
             return Some((skipped, number(strip_currency(word))?));
         }
@@ -366,12 +363,6 @@ pub fn rate(words: &[&str]) -> Option<Read> {
 /// Whether a number can be the rate of a tax: from nothing to the whole.
 pub fn may_be_rate(value: Decimal) -> bool {
     (Decimal::ZERO..=RATE_MOST).contains(&value)
-}
-
-/// Whether a word is a rate with its sign joined, as `19%` or `19,00%`.
-fn is_rate(word: &str) -> bool {
-    word.strip_suffix(PERCENT)
-        .is_some_and(|rate| number(rate).is_some())
 }
 
 /// The word without a currency symbol at its start or end.
@@ -680,7 +671,8 @@ mod tests {
 
     #[test]
     fn amounts_follow_their_table() {
-        let rows: [Row; 28] = [
+        let rows: [Row; 29] = [
+            (&["(19", "%)", "11,20"], Some(("11.2", 2))),
             (&["19", "%", "11,20"], Some(("11.2", 2))),
             (&["19%", "11,20"], Some(("11.2", 1))),
             (&["EUR", "19,00%", "11,20"], Some(("11.2", 2))),

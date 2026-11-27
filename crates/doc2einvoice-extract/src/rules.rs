@@ -35,7 +35,8 @@ use crate::labels::{
     BUYER_VAT_IDENTIFIER, CHARGES, CURRENCY, DELIVERY_DATE, DUE_DATE, Found, INVOICE_NUMBER,
     ISSUE_DATE, LINE_TOTAL, Names, PAID, PAYMENT_ACCOUNT, PURCHASE_ORDER, Party,
     SELLER_ADDRESS_LINES, SELLER_CITY, SELLER_NAME, SELLER_POST_CODE, SELLER_VAT_IDENTIFIER, Scope,
-    Section, TOTAL_WITH_VAT, TOTAL_WITHOUT_VAT, VAT_TOTAL, Weight,
+    Section, TOTAL_WITH_VAT, TOTAL_WITHOUT_VAT, VAT_CATEGORY, VAT_RATE, VAT_TAX_AMOUNT,
+    VAT_TAXABLE_AMOUNT, VAT_TOTAL, Weight,
 };
 use crate::page::{self, Line, Span};
 use crate::values::{self, Read};
@@ -257,23 +258,19 @@ pub fn draft(pages: &[PageLayout]) -> Draft {
 /// `index`: the amount the tax is charged on, the tax, the category and the
 /// rate, each where the row has it.
 fn add_breakdown(draft: &mut Draft, index: usize, row: &Breakdown) {
-    let category = row.category.clone();
     let parts = [
         (
-            breakdown::TAXABLE_AMOUNT,
+            VAT_TAXABLE_AMOUNT,
             row.base
                 .as_ref()
                 .map(|base| (base.text.clone(), base.location)),
         ),
         (
-            breakdown::TAX_AMOUNT,
+            VAT_TAX_AMOUNT,
             Some((row.tax.text.clone(), row.tax.location)),
         ),
-        (breakdown::CATEGORY, category),
-        (
-            breakdown::RATE,
-            Some((row.rate.text.clone(), row.rate.location)),
-        ),
+        (VAT_CATEGORY, row.category.clone()),
+        (VAT_RATE, Some((row.rate.text.clone(), row.rate.location))),
     ];
     for (term, part) in parts {
         let Some((text, location)) = part else {
@@ -707,13 +704,12 @@ mod tests {
     use doc2einvoice_pdf::{Block, Line, PageLayout, Word};
 
     use super::draft;
-    use crate::breakdown;
     use crate::labels::{
         ALLOWANCES, AMOUNT_DUE, BUYER_ADDRESS_LINES, BUYER_CITY, BUYER_NAME, BUYER_POST_CODE,
         BUYER_VAT_IDENTIFIER, CHARGES, CURRENCY, DELIVERY_DATE, DUE_DATE, INVOICE_NUMBER,
         ISSUE_DATE, LINE_TOTAL, PAID, PAYMENT_ACCOUNT, PURCHASE_ORDER, SELLER_ADDRESS_LINES,
         SELLER_CITY, SELLER_NAME, SELLER_POST_CODE, SELLER_VAT_IDENTIFIER, TOTAL_WITH_VAT,
-        TOTAL_WITHOUT_VAT, VAT_TOTAL,
+        TOTAL_WITHOUT_VAT, VAT_CATEGORY, VAT_RATE, VAT_TAX_AMOUNT, VAT_TAXABLE_AMOUNT, VAT_TOTAL,
     };
 
     /// The font size of every word, and the width of one character.
@@ -813,24 +809,21 @@ mod tests {
             block(250.0, 124.0, &["63,84", "€"]),
         ])];
         assert_eq!(
-            breakdown_values(&pages, breakdown::TAXABLE_AMOUNT),
+            breakdown_values(&pages, VAT_TAXABLE_AMOUNT),
             numbered(&["160", "336"])
         );
         assert_eq!(
-            breakdown_values(&pages, breakdown::TAX_AMOUNT),
+            breakdown_values(&pages, VAT_TAX_AMOUNT),
             numbered(&["11.2", "63.84"])
         );
+        assert_eq!(breakdown_values(&pages, VAT_RATE), numbered(&["7", "19"]));
         assert_eq!(
-            breakdown_values(&pages, breakdown::RATE),
-            numbered(&["7", "19"])
-        );
-        assert_eq!(
-            breakdown_values(&pages, breakdown::CATEGORY),
+            breakdown_values(&pages, VAT_CATEGORY),
             numbered(&["S", "S"])
         );
         let found = draft(&pages);
         let place = found
-            .values_of(breakdown::TAX_AMOUNT)
+            .values_of(VAT_TAX_AMOUNT)
             .next()
             .and_then(|entry| entry.location)
             .map(|at| (at.page, at.left, at.bottom));
@@ -848,19 +841,19 @@ mod tests {
             block(300.0, 124.0, &["104,00", "€"]),
         ])];
         assert_eq!(
-            breakdown_values(&pages, breakdown::TAXABLE_AMOUNT),
+            breakdown_values(&pages, VAT_TAXABLE_AMOUNT),
             numbered(&["87.39"])
         );
         assert_eq!(
-            breakdown_values(&pages, breakdown::TAX_AMOUNT),
+            breakdown_values(&pages, VAT_TAX_AMOUNT),
             numbered(&["16.61"])
         );
-        assert_eq!(breakdown_values(&pages, breakdown::RATE), numbered(&["19"]));
+        assert_eq!(breakdown_values(&pages, VAT_RATE), numbered(&["19"]));
         let unconfirmed = [page(vec![
             block(50.0, 112.0, &["USt.", "(19", "%)"]),
             block(300.0, 112.0, &["16,61", "€"]),
         ])];
-        assert_eq!(breakdown_values(&unconfirmed, breakdown::RATE), []);
+        assert_eq!(breakdown_values(&unconfirmed, VAT_RATE), []);
     }
 
     #[test]

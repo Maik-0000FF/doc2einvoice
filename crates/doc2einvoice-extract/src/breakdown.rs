@@ -19,15 +19,9 @@ use doc2einvoice_model::{AMOUNT_DECIMAL_PLACES, Entry, Location, VatCategory};
 use doc2einvoice_pdf::Word;
 use rust_decimal::{Decimal, RoundingStrategy};
 
-use crate::labels::{self, Scope, normalized};
-use crate::page::Row;
+use crate::labels::{self, Scope, bracketed, normalized};
+use crate::page::{Row, Span};
 use crate::values;
-
-/// The business terms of a row of the breakdown.
-pub const TAXABLE_AMOUNT: u16 = 116;
-pub const TAX_AMOUNT: u16 = 117;
-pub const CATEGORY: u16 = 118;
-pub const RATE: u16 = 119;
 
 /// One value of a row: its text in the form of the draft, the number it
 /// stands for, and where it is printed.
@@ -100,9 +94,6 @@ const VAT_WORDS: [&str; 6] = [
 /// start, as a multiple of the font size of the heading: what stands
 /// further right is beside the table, as the totals of the invoice.
 const TABLE_REACH: f64 = 3.0;
-
-/// The brackets the code of a category is printed in, as `(S)`.
-const CODE_BRACKETS: (char, char) = ('(', ')');
 
 /// A number of a row.
 struct Figure {
@@ -199,7 +190,8 @@ struct Table {
     right: f64,
 }
 
-/// The table a row heads, if it names each column of a breakdown once.
+/// The table the words of a row head, if they name each column of a
+/// breakdown once.
 ///
 /// | Row                                                          | Table              |
 /// |--------------------------------------------------------------|--------------------|
@@ -211,12 +203,8 @@ struct Table {
 /// | `Datum` `Steuerbetrag` `Steuersatz`                          | none (no amount charged on) |
 /// | `VAT` `Net` `amount` `VAT` `amount` `VAT`                    | none (a column twice) |
 /// | `7%` `160,00` `11,20`                                        | none               |
-fn heading(row: &Row) -> Option<Table> {
-    let normal: Vec<String> = row
-        .words
-        .iter()
-        .map(|word| normalized(&word.text))
-        .collect();
+fn heading(words: &[&Word]) -> Option<Table> {
+    let normal: Vec<String> = words.iter().map(|word| normalized(&word.text)).collect();
     let mut order: Vec<Column> = Vec::new();
     let mut right: Option<f64> = None;
     let mut at = 0;
@@ -241,7 +229,7 @@ fn heading(row: &Row) -> Option<Table> {
         }
         order.push(*column);
         at += name.len();
-        let last = row.words.get(at - 1)?;
+        let last = words.get(at - 1)?;
         right = Some(last.right + last.font_size * TABLE_REACH);
     }
     Some(Table {
@@ -308,12 +296,12 @@ fn within<'a>(row: &Row<'a>, table: &Table) -> Vec<&'a Word> {
 /// | `Taxe` `Base` `Montant`            | yes (another table) |
 /// | `VAT` `(E)`                        | no             |
 /// | `befreit` `von` `der` `Steuer`     | no             |
-fn ends_table(row: &Row, words: &[&Word]) -> bool {
+fn ends_table(words: &[&Word]) -> bool {
     let texts: Vec<&str> = words.iter().map(|word| word.text.as_str()).collect();
     let labelled = labels::find(&texts)
         .iter()
         .any(|found| found.label.scope != Scope::AfterNumber);
-    labelled || labels::heading(&texts).is_some() || heading(row).is_some()
+    labelled || labels::heading(&texts).is_some() || heading(words).is_some()
 }
 
 /// The rows of the table that the row at `at` heads: the rows below it on
@@ -353,7 +341,7 @@ fn table_rows(rows: &[Row], at: usize, table: &Table) -> Vec<Breakdown> {
             breakdown.category = printed.or_else(|| told_by_rate(&breakdown.rate));
             found.push(breakdown);
             before = index;
-        } else if ends_table(row, &words) {
+        } else if ends_table(&words) {
             break;
         }
     }
@@ -376,19 +364,12 @@ fn table_rows(rows: &[Row], at: usize, table: &Table) -> Vec<Breakdown> {
 /// | `(380)`         | none |
 fn printed_category(page: usize, words: &[&Word]) -> Option<(String, Option<Location>)> {
     words.iter().find_map(|word| {
-        let code = word
-            .text
-            .strip_prefix(CODE_BRACKETS.0)?
-            .strip_suffix(CODE_BRACKETS.1)?;
-        let category = VatCategory::from_code(code).ok()?;
-        let location = Location {
+        let category = VatCategory::from_code(bracketed(&word.text)?).ok()?;
+        let printed = Span {
             page,
-            left: word.left,
-            top: word.baseline - word.font_size,
-            right: word.right,
-            bottom: word.baseline,
+            words: vec![*word],
         };
-        Some((category.code().to_owned(), Some(location)))
+        Some((category.code().to_owned(), printed.location(0, 1)))
     })
 }
 
@@ -464,7 +445,7 @@ pub fn read(rows: &[Row]) -> Vec<Breakdown> {
     let table = rows
         .iter()
         .enumerate()
-        .filter_map(|(at, row)| heading(row).map(|table| table_rows(rows, at, &table)))
+        .filter_map(|(at, row)| heading(&row.words).map(|table| table_rows(rows, at, &table)))
         .find(|found| !found.is_empty());
     let found = table.unwrap_or_else(|| rows.iter().filter_map(totals_row).collect());
     let mut once: Vec<Breakdown> = Vec::new();
@@ -486,45 +467,68 @@ fn same_values(a: &Breakdown, b: &Breakdown) -> bool {
         && a.category.as_ref().map(|(code, _)| code) == b.category.as_ref().map(|(code, _)| code)
 }
 
-/// The rows the totals of the invoice bear out. Rows that print the amount
-/// the tax is charged on bear themselves out, and where there are any, only
-/// they count. Rows that print the tax alone need a total:
+/// The rows the totals of the invoice bear out. A row that prints the amount
+/// the tax is charged on bears itself out by its numbers; a row that prints
+/// the tax alone needs a total. Rows with the amount beside rows without
+/// are the breakdown only if the total of VAT says none is left out: a
+/// breakdown that leaves a rate out is none. Where every row prints the
+/// amount, a total of VAT that differs does not count against them: it may
+/// be the one misread.
 ///
-/// | Rows                         | Totals                                  | Read                 |
-/// |------------------------------|-----------------------------------------|----------------------|
-/// | with the amount charged on   | any                                     | those rows           |
-/// | one, the tax alone           | the total without VAT agrees with it    | it, charged on that total |
-/// | one or more, the tax alone   | their taxes add up to the total of VAT  | them, no amount charged on |
-/// | the tax alone                | neither                                 | none                 |
-/// | none                         | any                                     | none                 |
+/// | Rows                               | Totals                                        | Read                       |
+/// |------------------------------------|-----------------------------------------------|----------------------------|
+/// | all with the amount charged on     | any                                           | them                       |
+/// | some with it, some the tax alone   | the taxes of all add up to the total of VAT   | all                        |
+/// | some with it, some the tax alone   | no total of VAT, or the taxes of those with it add up to it | those with it |
+/// | some with it, some the tax alone   | a total of VAT that neither sum comes to      | none                       |
+/// | one, the tax alone                 | the total without VAT agrees with it          | it, charged on that total  |
+/// | only the tax alone                 | their taxes add up to the total of VAT        | them, no amount charged on |
+/// | only the tax alone                 | neither                                       | none                       |
+/// | none                               | any                                           | none                       |
 pub fn borne_out(
     found: Vec<Breakdown>,
     without_vat: Option<&Entry>,
     vat_total: Option<&Entry>,
 ) -> Vec<Breakdown> {
-    let (whole, mut alone): (Vec<Breakdown>, Vec<Breakdown>) = found
-        .into_iter()
-        .partition(|breakdown| breakdown.base.is_some());
-    if !whole.is_empty() {
-        return whole;
-    }
     let number = |entry: &Entry| Decimal::from_str(&entry.text).ok();
-    if let ([only], Some(total)) = (alone.as_mut_slice(), without_vat)
+    let vat = vat_total.and_then(number);
+    let add_up = |rows: &[&Breakdown]| {
+        let taxes = rows
+            .iter()
+            .try_fold(Decimal::ZERO, |sum, row| sum.checked_add(row.tax.value));
+        !rows.is_empty() && taxes.is_some() && taxes == vat
+    };
+    let all: Vec<&Breakdown> = found.iter().collect();
+    let whole: Vec<&Breakdown> = all
+        .iter()
+        .copied()
+        .filter(|row| row.base.is_some())
+        .collect();
+    if whole.is_empty()
+        && let ([only], Some(total)) = (all.as_slice(), without_vat)
         && let Some(value) = number(total)
         && agree(value, only.rate.value, only.tax.value)
     {
-        only.base = Some(Part {
+        let base = Part {
             text: total.text.clone(),
             location: total.location,
             value,
-        });
-        return alone;
+        };
+        return vec![Breakdown {
+            base: Some(base),
+            ..(*only).clone()
+        }];
     }
-    let taxes = alone.iter().try_fold(Decimal::ZERO, |sum, breakdown| {
-        sum.checked_add(breakdown.tax.value)
-    });
-    let added_up = !alone.is_empty() && taxes.is_some() && taxes == vat_total.and_then(number);
-    if added_up { alone } else { Vec::new() }
+    let keep_all = add_up(&all);
+    let keep_whole =
+        !whole.is_empty() && (whole.len() == all.len() || vat.is_none() || add_up(&whole));
+    if keep_all {
+        found
+    } else if keep_whole {
+        found.into_iter().filter(|row| row.base.is_some()).collect()
+    } else {
+        Vec::new()
+    }
 }
 
 #[cfg(test)]
@@ -698,7 +702,7 @@ mod tests {
         ];
         for (texts, expected) in table {
             let printed = words(LEFT, TOP, texts);
-            let order = heading(&row(&printed)).map(|table| table.order);
+            let order = heading(&row(&printed).words).map(|table| table.order);
             assert_eq!(order, expected, "{texts:?}");
         }
     }
@@ -923,7 +927,7 @@ mod tests {
         for (texts, ends) in table {
             let printed = words(LEFT, TOP, texts);
             let printed = row(&printed);
-            assert_eq!(ends_table(&printed, &printed.words), ends, "{texts:?}");
+            assert_eq!(ends_table(&printed.words), ends, "{texts:?}");
         }
     }
 
@@ -997,6 +1001,23 @@ mod tests {
         let whole: &[&[&str]] = &[&["USt.", "19%", "100,00", "19,00"], &["USt.", "7%", "7,00"]];
         assert_eq!(
             borne_out_values(whole, None, None),
+            [expected(Some("100"), "19", "19", Some("S"))]
+        );
+        assert_eq!(
+            borne_out_values(whole, None, Some("26.00")),
+            [
+                expected(Some("100"), "19", "19", Some("S")),
+                expected(None, "7", "7", Some("S")),
+            ]
+        );
+        assert_eq!(
+            borne_out_values(whole, None, Some("19.00")),
+            [expected(Some("100"), "19", "19", Some("S"))]
+        );
+        assert_eq!(borne_out_values(whole, None, Some("30.00")), []);
+        let all_whole: &[&[&str]] = &[&["USt.", "19%", "100,00", "19,00"]];
+        assert_eq!(
+            borne_out_values(all_whole, None, Some("30.00")),
             [expected(Some("100"), "19", "19", Some("S"))]
         );
         let one: &[&[&str]] = &[&["USt.", "(19", "%)", "16,61"]];
