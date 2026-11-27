@@ -15,22 +15,16 @@
 
 use std::str::FromStr;
 
-use doc2einvoice_model::{AMOUNT_DECIMAL_PLACES, Entry, Location, VatCategory};
+use doc2einvoice_model::Entry;
 use doc2einvoice_pdf::Word;
-use rust_decimal::{Decimal, RoundingStrategy};
+use rust_decimal::Decimal;
 
-use crate::labels::{self, Scope, bracketed, normalized};
-use crate::page::{Row, Span};
+use crate::labels::normalized;
+use crate::page::Row;
+use crate::table::{
+    self, Figure, Part, Printed, comes_to, figures, part, printed_category, told_by_rate,
+};
 use crate::values;
-
-/// One value of a row: its text in the form of the draft, the number it
-/// stands for, and where it is printed.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Part {
-    pub text: String,
-    pub location: Option<Location>,
-    value: Decimal,
-}
 
 /// One row of the breakdown.
 #[derive(Debug, Clone, PartialEq)]
@@ -41,7 +35,7 @@ pub struct Breakdown {
     pub tax: Part,
     /// The code of the category and where it is printed, or where the rate
     /// is that tells it.
-    pub category: Option<(String, Option<Location>)>,
+    pub category: Option<Printed>,
 }
 
 /// A column of a breakdown table.
@@ -95,56 +89,6 @@ const VAT_WORDS: [&str; 6] = [
 /// further right is beside the table, as the totals of the invoice.
 const TABLE_REACH: f64 = 3.0;
 
-/// A number of a row.
-struct Figure {
-    value: Decimal,
-    text: String,
-    /// Its first word in the row, and how many it spans.
-    first: usize,
-    count: usize,
-    /// Whether it carries the sign of a rate.
-    marked: bool,
-    /// Whether it can be a monetary amount.
-    monetary: bool,
-}
-
-/// The numbers of `words`, from left to right.
-///
-/// | Words                     | Figures                          |
-/// |---------------------------|----------------------------------|
-/// | `7%` `160,00` `€` `11,20` | rate 7; 160; 11.2                |
-/// | `19` `%` `64,46`          | rate 19 (two words); 64.46       |
-/// | `19` `2.923,55`           | 19 (could be a rate); 2923.55    |
-/// | `0,025`                   | 0.025 (no monetary amount)       |
-/// | `USt.` `(S)` `16.09.2026` | none                             |
-fn figures(words: &[&Word]) -> Vec<Figure> {
-    let texts: Vec<&str> = words.iter().map(|word| word.text.as_str()).collect();
-    let mut found = Vec::new();
-    let mut at = 0;
-    while at < texts.len() {
-        let rate = values::rate(&texts[at..]);
-        let amount = values::amount(&texts[at..=at]).filter(|read| read.skipped == 0);
-        let monetary = values::monetary(&texts[at..=at]).filter(|read| read.skipped == 0);
-        let marked = rate.is_some();
-        let count = rate.as_ref().map_or(1, |read| read.used);
-        let read = rate.or_else(|| monetary.clone()).or(amount);
-        if let Some(read) = read
-            && let Ok(value) = Decimal::from_str(&read.text)
-        {
-            found.push(Figure {
-                value,
-                text: read.text,
-                first: at,
-                count,
-                marked,
-                monetary: !marked && monetary.is_some(),
-            });
-        }
-        at += count;
-    }
-    found
-}
-
 /// Whether a tax of `tax` is what `rate` per cent of `base` come to, give
 /// or take the smallest amount of money: the sum of taxes rounded line by
 /// line may be off by it.
@@ -160,27 +104,10 @@ fn figures(words: &[&Word]) -> Vec<Figure> {
 /// | 0.025   | 19   | 20.00  | no    |
 /// | too large to multiply | | | no  |
 fn agree(base: Decimal, rate: Decimal, tax: Decimal) -> bool {
-    let smallest = Decimal::new(1, AMOUNT_DECIMAL_PLACES);
-    base.checked_mul(rate)
-        .and_then(|product| product.checked_div(Decimal::ONE_HUNDRED))
-        .map(|exact| {
-            exact.round_dp_with_strategy(
-                AMOUNT_DECIMAL_PLACES,
-                RoundingStrategy::MidpointAwayFromZero,
-            )
-        })
-        .and_then(|computed| computed.checked_sub(tax))
-        .is_some_and(|difference| difference.abs() <= smallest)
-}
-
-fn part(row: &Row, figure: &Figure) -> Part {
-    Part {
-        text: figure.text.clone(),
-        location: row
-            .span(figure.first, figure.count)
-            .and_then(|span| span.location(0, figure.count)),
-        value: figure.value,
-    }
+    let charged = base
+        .checked_mul(rate)
+        .and_then(|product| product.checked_div(Decimal::ONE_HUNDRED));
+    comes_to(charged, tax)
 }
 
 /// A breakdown table: the order of its columns, and how far right its
@@ -204,37 +131,18 @@ struct Table {
 /// | `VAT` `Net` `amount` `VAT` `amount` `VAT`                    | none (a column twice) |
 /// | `7%` `160,00` `11,20`                                        | none               |
 fn heading(words: &[&Word]) -> Option<Table> {
-    let normal: Vec<String> = words.iter().map(|word| normalized(&word.text)).collect();
+    let named = table::named(COLUMN_NAMES, words);
     let mut order: Vec<Column> = Vec::new();
-    let mut right: Option<f64> = None;
-    let mut at = 0;
-    while at < normal.len() {
-        let named = COLUMN_NAMES
-            .iter()
-            .filter(|(name, _)| {
-                normal.get(at..at + name.len()).is_some_and(|printed| {
-                    printed
-                        .iter()
-                        .zip(name.iter())
-                        .all(|(word, expected)| word.as_str() == *expected)
-                })
-            })
-            .max_by_key(|(name, _)| name.len());
-        let Some((name, column)) = named else {
-            at += 1;
-            continue;
-        };
+    for (column, _) in &named {
         if order.contains(column) {
             return None;
         }
         order.push(*column);
-        at += name.len();
-        let last = words.get(at - 1)?;
-        right = Some(last.right + last.font_size * TABLE_REACH);
     }
+    let last = words.get(named.last()?.1.end.checked_sub(1)?)?;
     Some(Table {
         order: order.try_into().ok()?,
-        right: right?,
+        right: last.right + last.font_size * TABLE_REACH,
     })
 }
 
@@ -285,23 +193,15 @@ fn within<'a>(row: &Row<'a>, table: &Table) -> Vec<&'a Word> {
         .collect()
 }
 
-/// Whether the words of a row end a table: a label, the heading of a
-/// section, or the heading of another table. A word that is a label only
-/// after the invoice number, as "von", is an ordinary word here.
-///
-/// | Words of the row                   | Ends the table |
-/// |------------------------------------|----------------|
-/// | `Positionssumme` `320,00`          | yes (a label)  |
-/// | `Käufer`                           | yes (a section) |
-/// | `Taxe` `Base` `Montant`            | yes (another table) |
-/// | `VAT` `(E)`                        | no             |
-/// | `befreit` `von` `der` `Steuer`     | no             |
+/// Whether the words of a row head a breakdown table.
+pub fn heads_table(words: &[&Word]) -> bool {
+    heading(words).is_some()
+}
+
+/// Whether the words of a row end a breakdown table: what ends any table,
+/// or the heading of another breakdown.
 fn ends_table(words: &[&Word]) -> bool {
-    let texts: Vec<&str> = words.iter().map(|word| word.text.as_str()).collect();
-    let labelled = labels::find(&texts)
-        .iter()
-        .any(|found| found.label.scope != Scope::AfterNumber);
-    labelled || labels::heading(&texts).is_some() || heading(words).is_some()
+    table::ends(words) || heading(words).is_some()
 }
 
 /// The rows of the table that the row at `at` heads: the rows below it on
@@ -352,40 +252,6 @@ fn table_rows(rows: &[Row], at: usize, table: &Table) -> Vec<Breakdown> {
             .any(|other| other.rate.value == row.rate.value && code(other) == code(row))
     });
     if repeats { Vec::new() } else { found }
-}
-
-/// The code of a category printed in brackets among `words`, and its place.
-///
-/// | Word            | Code |
-/// |-----------------|------|
-/// | `(S)`, `(AE)`   | `S`, `AE` |
-/// | `(s)`, `(X)`    | none (no code of the list) |
-/// | `S`, `(S`       | none (not in brackets) |
-/// | `(380)`         | none |
-fn printed_category(page: usize, words: &[&Word]) -> Option<(String, Option<Location>)> {
-    words.iter().find_map(|word| {
-        let category = VatCategory::from_code(bracketed(&word.text)?).ok()?;
-        let printed = Span {
-            page,
-            words: vec![*word],
-        };
-        Some((category.code().to_owned(), printed.location(0, 1)))
-    })
-}
-
-/// The category a rate tells where none is printed: a rate above nothing is
-/// the standard rate, which the standard also files reduced rates under.
-/// Without tax the category is open: exempt, zero rated, reverse charge and
-/// others all print 0 %.
-///
-/// | Rate | Category |
-/// |------|----------|
-/// | 19   | `S`      |
-/// | 7    | `S`      |
-/// | 0    | none     |
-fn told_by_rate(rate: &Part) -> Option<(String, Option<Location>)> {
-    (rate.value > Decimal::ZERO)
-        .then(|| (VatCategory::StandardRate.code().to_owned(), rate.location))
 }
 
 /// The row of the totals `row` is, if it starts with a word for VAT before
@@ -540,47 +406,10 @@ mod tests {
     use rust_decimal::Decimal;
 
     use super::{
-        Breakdown, Column, agree, borne_out, ends_table, figures, heading, printed_category, read,
-        table_row, totals_row,
+        Breakdown, Column, agree, borne_out, ends_table, heading, read, table_row, totals_row,
     };
     use crate::page::Row;
-
-    /// The font size of every word, the width of one character, the gap
-    /// between two words and the distance of two baselines.
-    const FONT: f64 = 10.0;
-    const CHARACTER: f64 = 5.0;
-    const GAP: f64 = 3.0;
-    const PITCH: f64 = 12.0;
-    /// Where the rows of the tests start.
-    const LEFT: f64 = 50.0;
-    const TOP: f64 = 100.0;
-
-    /// The words of `texts` from `left` on `baseline`.
-    fn words(left: f64, baseline: f64, texts: &[&str]) -> Vec<Word> {
-        let mut at = left;
-        texts
-            .iter()
-            .map(|text| {
-                let right = text.chars().fold(at, |end, _| end + CHARACTER);
-                let word = Word {
-                    text: (*text).to_owned(),
-                    left: at,
-                    right,
-                    baseline,
-                    font_size: FONT,
-                };
-                at = right + GAP;
-                word
-            })
-            .collect()
-    }
-
-    fn row(words: &[Word]) -> Row<'_> {
-        Row {
-            page: 0,
-            words: words.iter().collect(),
-        }
-    }
+    use crate::table::printed::{LEFT, PITCH, TOP, row, stacked, words};
 
     fn number(text: &str) -> Decimal {
         Decimal::from_str(text).unwrap_or_default()
@@ -605,44 +434,6 @@ mod tests {
             tax.to_owned(),
             category.map(str::to_owned),
         )
-    }
-
-    #[test]
-    fn figures_follow_their_table() {
-        type Figures = &'static [(&'static str, bool, bool)];
-        let table: [(&[&str], Figures); 5] = [
-            (
-                &["7%", "160,00", "€", "11,20"],
-                &[
-                    ("7", true, false),
-                    ("160", false, true),
-                    ("11.2", false, true),
-                ],
-            ),
-            (
-                &["19", "%", "64,46"],
-                &[("19", true, false), ("64.46", false, true)],
-            ),
-            (
-                &["19", "2.923,55"],
-                &[("19", false, true), ("2923.55", false, true)],
-            ),
-            (&["0,025"], &[("0.025", false, false)]),
-            (&["USt.", "(S)", "16.09.2026"], &[]),
-        ];
-        for (texts, expected) in table {
-            let printed = words(LEFT, TOP, texts);
-            let found = figures(&printed.iter().collect::<Vec<_>>());
-            let got: Vec<(Decimal, bool, bool)> = found
-                .iter()
-                .map(|figure| (figure.value, figure.marked, figure.monetary))
-                .collect();
-            let want: Vec<(Decimal, bool, bool)> = expected
-                .iter()
-                .map(|(text, marked, monetary)| (number(text), *marked, *monetary))
-                .collect();
-            assert_eq!(got, want, "{texts:?}");
-        }
     }
 
     #[test]
@@ -749,25 +540,6 @@ mod tests {
     }
 
     #[test]
-    fn codes_of_categories_follow_their_table() {
-        let table: [(&str, Option<&str>); 8] = [
-            ("(S)", Some("S")),
-            ("(AE)", Some("AE")),
-            ("(s)", None),
-            ("(X)", None),
-            ("S", None),
-            ("(S", None),
-            ("(380)", None),
-            ("()", None),
-        ];
-        for (text, expected) in table {
-            let printed = words(LEFT, TOP, &[text]);
-            let found = printed_category(0, &printed.iter().collect::<Vec<_>>());
-            assert_eq!(found.map(|(code, _)| code).as_deref(), expected, "{text}");
-        }
-    }
-
-    #[test]
     fn rows_of_the_totals_follow_their_table() {
         let table: [(&[&str], Option<Values>); 13] = [
             (
@@ -838,18 +610,6 @@ mod tests {
             totals_row(&row(&open)).as_ref().map(values),
             Some(expected(Some("100"), "0", "0", None))
         );
-    }
-
-    /// The rows of a table, each `PITCH` below the one before.
-    fn stacked(rows: &[&[&str]]) -> Vec<Vec<Word>> {
-        let mut baseline = TOP;
-        rows.iter()
-            .map(|texts| {
-                let printed = words(LEFT, baseline, texts);
-                baseline += PITCH;
-                printed
-            })
-            .collect()
     }
 
     fn read_values(printed: &[Vec<Word>]) -> Vec<Values> {
