@@ -43,9 +43,14 @@ pub struct Line {
     /// The gross price of one, where a discount is taken off it.
     pub gross_price: Option<Part>,
     /// The quantity the price is for, where the numbers of the line agree
-    /// only with a price for ten, a hundred or a thousand: worked out and
-    /// marked so, as the page does not print it.
+    /// only with a price for a hundred or a thousand: worked out and marked
+    /// so, as the page does not print it.
     pub price_base: Option<Part>,
+    /// The code of the unit of that quantity: the unit of the quantity of
+    /// the line, as the standard has the two be the same, marked as worked
+    /// out. None where no quantity the price is for is worked out, or the
+    /// line has no unit the table knows.
+    pub price_base_unit: Option<Stated>,
     /// The amount of the line.
     pub net: Part,
     /// The rate of VAT, where the table has a column for it.
@@ -600,6 +605,15 @@ fn line_of<'a>(
         .collect();
     let (quantity, net) = (part(row, quantity), part(row, net));
     let printed_price = price.map(|price| part(row, price));
+    let unit = unit.and_then(|word| {
+        let printed = row.span(word, 1)?;
+        let code = units::code(printed.texts().first()?)?;
+        Some(Stated {
+            text: code.to_owned(),
+            location: printed.location(0, 1),
+            origin: Origin::Derived,
+        })
+    });
     let line = Line {
         identifier: identifier.map(|head| Part {
             text: row.words[head.first].text.clone(),
@@ -622,15 +636,8 @@ fn line_of<'a>(
             origin: Origin::Derived,
             ..price
         }),
-        unit: unit.and_then(|word| {
-            let printed = row.span(word, 1)?;
-            let code = units::code(printed.texts().first()?)?;
-            Some(Stated {
-                text: code.to_owned(),
-                location: printed.location(0, 1),
-                origin: Origin::Derived,
-            })
-        }),
+        price_base_unit: unit.clone().filter(|_| base.is_some()),
+        unit,
         quantity,
         net,
         category: table::printed_category(row.page, &beside_name)
@@ -967,7 +974,7 @@ mod tests {
     };
     use crate::page::{self, Row};
     use crate::table::printed::{LEFT, PITCH, TOP, row, stacked, words};
-    use crate::table::{Part, figures, part};
+    use crate::table::{Part, Stated, figures, part};
 
     /// The line a row is, however it is borne out.
     fn any_line<'a>(row: &'a Row<'a>, table: &Table) -> Option<Found<'a>> {
@@ -1502,6 +1509,38 @@ mod tests {
                 &["1.00", "Std", "(hours)", "160.00", "160.00"]
             ),
             Some(None)
+        );
+    }
+
+    #[test]
+    fn a_price_base_has_the_unit_of_the_quantity() {
+        const HEADING: &[&str] = &["Pos", "Text", "Preis", "Menge", "Betrag"];
+        let units = |texts: &[&str]| {
+            let table = Table {
+                name_from: None,
+                name_until: None,
+                ..heads(HEADING)?
+            };
+            let printed = words(LEFT, TOP, texts);
+            let found = any_line(&row(&printed), &table)?.line;
+            let code = |unit: Option<Stated>| unit.map(|unit| (unit.text, unit.origin));
+            Some((code(found.unit), code(found.price_base_unit)))
+        };
+        let worked_out = |code: &str| Some((code.to_owned(), Origin::Derived));
+        // A price for a hundred: the hundred are pieces as the quantity is.
+        assert_eq!(
+            units(&["3", "Schraube", "32,76", "400", "Stk", "131,04"]),
+            Some((worked_out("H87"), worked_out("H87")))
+        );
+        // No quantity the price is for: no unit of one.
+        assert_eq!(
+            units(&["1", "Papier", "9,99", "20", "Stk", "199,80"]),
+            Some((worked_out("H87"), None))
+        );
+        // A price for a hundred of a unit the table does not know.
+        assert_eq!(
+            units(&["3", "Schraube", "32,76", "400", "Beutel", "131,04"]),
+            Some((None, None))
         );
     }
 
