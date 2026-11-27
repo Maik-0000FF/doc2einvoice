@@ -8,6 +8,10 @@ import type { AppInfo } from '#lib/ipc/bindings/AppInfo.ts';
  *
  * The wording is a legal notice, not interface text, and is therefore the same
  * in every language.
+ *
+ * It states the terms of the program itself. The material of other authors is
+ * left out on purpose: it keeps its own terms, which the interface shows in a
+ * section of their own, each with its licence text.
  */
 export function formatLegalNotice(info: AppInfo): string {
   return `Copyright (C) ${info.copyrightHolder}. Licensed under ${info.license}.`;

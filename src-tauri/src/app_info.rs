@@ -174,6 +174,51 @@ mod tests {
     /// What a copyright notice starts with, which the statement of the
     /// repository leaves out.
     const COPYRIGHT_MARK: &str = "Copyright (c) ";
+    /// What starts an entry of that statement, and the files of the
+    /// typeface, by which its entry is told from the others.
+    const ENTRY_MARK: &str = "[[annotations]]";
+    const TYPEFACE_FILES: &str = "src/lib/assets/fonts/inter/";
+    /// The lines of an entry that state the holder and the licence.
+    const HOLDER_LINE: &str = "SPDX-FileCopyrightText";
+    const LICENSE_LINE: &str = "SPDX-License-Identifier";
+
+    /// What the line of an entry that starts with `key` states, without its
+    /// quotation marks.
+    ///
+    /// | Entry                                  | Key                       | Stated    |
+    /// |----------------------------------------|---------------------------|-----------|
+    /// | `SPDX-License-Identifier = "OFL-1.1"`  | `SPDX-License-Identifier` | `OFL-1.1` |
+    /// | the same, after other lines            | `SPDX-License-Identifier` | `OFL-1.1` |
+    /// | the same                               | `SPDX-FileCopyrightText`  | none      |
+    /// | `SPDX-License-Identifier = OFL-1.1`    | `SPDX-License-Identifier` | none (not quoted) |
+    /// | nothing                                | any                       | none      |
+    fn stated<'a>(entry: &'a str, key: &str) -> Option<&'a str> {
+        entry.lines().find_map(|line| {
+            let (name, value) = line.split_once('=')?;
+            (name.trim() == key)
+                .then(|| value.trim().strip_prefix('"')?.strip_suffix('"'))
+                .flatten()
+        })
+    }
+
+    #[test]
+    fn what_an_entry_states_follows_its_table() {
+        let entry = "path = [\"a/**\"]\nSPDX-License-Identifier = \"OFL-1.1\"";
+        let table = [
+            (
+                "SPDX-License-Identifier = \"OFL-1.1\"",
+                LICENSE_LINE,
+                Some("OFL-1.1"),
+            ),
+            (entry, LICENSE_LINE, Some("OFL-1.1")),
+            (entry, HOLDER_LINE, None),
+            ("SPDX-License-Identifier = OFL-1.1", LICENSE_LINE, None),
+            ("", LICENSE_LINE, None),
+        ];
+        for (entry, key, expected) in table {
+            assert_eq!(stated(entry, key), expected, "{entry}");
+        }
+    }
 
     #[test]
     fn every_material_states_what_its_licence_asks_for() {
@@ -193,14 +238,23 @@ mod tests {
         }
     }
 
-    /// The repository states the terms of the typeface as well; the two must
-    /// say the same.
+    /// The repository states the terms of the typeface as well, in the entry
+    /// of its files; the two must say the same.
     #[test]
     fn the_typeface_is_stated_as_the_repository_states_it() {
-        let holder = TYPEFACE_COPYRIGHT.strip_prefix(COPYRIGHT_MARK);
+        let entries: Vec<&str> = REPOSITORY_TERMS
+            .split(ENTRY_MARK)
+            .filter(|entry| entry.contains(TYPEFACE_FILES))
+            .collect();
+        let [entry] = entries[..] else {
+            unreachable!("not one entry of the typeface: {}", entries.len())
+        };
 
-        assert!(holder.is_some_and(|holder| REPOSITORY_TERMS.contains(holder)));
-        assert!(REPOSITORY_TERMS.contains(TYPEFACE_LICENSE));
+        assert_eq!(
+            stated(entry, HOLDER_LINE),
+            TYPEFACE_COPYRIGHT.strip_prefix(COPYRIGHT_MARK)
+        );
+        assert_eq!(stated(entry, LICENSE_LINE), Some(TYPEFACE_LICENSE));
     }
 
     #[test]
