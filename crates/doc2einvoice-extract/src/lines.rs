@@ -719,7 +719,7 @@ fn name(
 /// The lines a name runs on over below its first word: the lines of its
 /// block that follow below it in the column of the names, above the row of
 /// the next line of the invoice, up to one that holds a field of its own or
-/// ends the table. A line of the block on the baseline of the name, or in
+/// ends the table. `page` is the page the name stands on. A line of the block on the baseline of the name, or in
 /// another column, belongs to a cell beside it.
 ///
 /// | Below "Wartung" in its block               | Runs on over        |
@@ -736,13 +736,17 @@ fn name(
 /// | nothing, or a line of another block        | nothing             |
 fn runs_on<'a>(
     printed: &[page::Line<'a>],
+    page: usize,
     first: &Word,
     next: Option<&Word>,
     table: &Table,
 ) -> Vec<&'a [Word]> {
-    let own = printed
-        .iter()
-        .position(|line| line.words.iter().any(|word| std::ptr::eq(word, first)));
+    let own = page::of_page(printed, page).find(|line| {
+        printed[*line]
+            .words
+            .iter()
+            .any(|word| std::ptr::eq(word, first))
+    });
     let Some(own) = own else {
         return Vec::new();
     };
@@ -876,7 +880,7 @@ fn table_lines(
                 .first()
                 .and_then(|start| line.row.words.get(*start));
             if let (Some(first), Some(name)) = (first, line.line.name.as_mut()) {
-                for more in runs_on(printed, first, next, table) {
+                for more in runs_on(printed, line.row.page, first, next, table) {
                     let span = Span {
                         page: line.row.page,
                         words: more.iter().collect(),
@@ -1686,9 +1690,12 @@ mod tests {
     }
 
     /// The lines of one block below each other, and one of another block.
+    /// The page every line of these tests stands on.
+    const PAGE: usize = 0;
+
     fn block_lines<'a>(block: &'a [Vec<Word>], other: &'a [Word]) -> Vec<page::Line<'a>> {
         let line = |block, words| page::Line {
-            page: 0,
+            page: PAGE,
             block,
             words,
         };
@@ -1710,7 +1717,7 @@ mod tests {
         };
         let within = |printed: &[Vec<Word>], next: Option<&Word>, table: &Table| -> Vec<String> {
             let lines = block_lines(printed, &other);
-            runs_on(&lines, &printed[0][0], next, table)
+            runs_on(&lines, PAGE, &printed[0][0], next, table)
                 .iter()
                 .map(|words| {
                     let texts: Vec<&str> = words.iter().map(|word| word.text.as_str()).collect();

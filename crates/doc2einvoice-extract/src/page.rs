@@ -6,6 +6,8 @@
 //! its right on the same baseline, at the start of the next line of its
 //! block where a sentence wraps, or in the line below it.
 
+use std::ops::Range;
+
 use doc2einvoice_model::Location;
 use doc2einvoice_pdf::{PageLayout, Word};
 
@@ -89,6 +91,24 @@ pub fn lines(pages: &[PageLayout]) -> Vec<Line<'_>> {
                 })
         })
         .collect()
+}
+
+/// Where the lines of `page` stand among `lines`, which [`lines`] gives page
+/// after page. What is looked up beside or below a word stands on its page:
+/// only these lines are gone through, however long the document.
+///
+/// | Pages of the lines  | Page | Where          |
+/// |---------------------|------|----------------|
+/// | 0, 0, 1, 1, 1, 3    | 0    | 0 and 1        |
+/// | 0, 0, 1, 1, 1, 3    | 1    | 2 to 4         |
+/// | 0, 0, 1, 1, 1, 3    | 3    | 5              |
+/// | 0, 0, 1, 1, 1, 3    | 2    | none, before 5 |
+/// | 0, 0, 1, 1, 1, 3    | 4    | none, at the end |
+/// | none                | 0    | none           |
+pub fn of_page(lines: &[Line], page: usize) -> Range<usize> {
+    let start = lines.partition_point(|line| line.page < page);
+    let end = lines.partition_point(|line| line.page <= page);
+    start..end
 }
 
 /// The words of one page that stand on one baseline, from left to right,
@@ -180,11 +200,9 @@ pub fn after<'a>(line: &Line<'a>, from: usize, end: usize) -> Span<'a> {
 pub fn right_of<'a>(lines: &[Line<'a>], line: usize, last: &Word) -> Span<'a> {
     let page = lines[line].page;
     let tolerance = last.font_size * SAME_BASELINE;
-    let mut words: Vec<&Word> = lines
-        .iter()
-        .enumerate()
-        .filter(|(index, other)| *index != line && other.page == page)
-        .flat_map(|(_, other)| other.words.iter())
+    let mut words: Vec<&Word> = of_page(lines, page)
+        .filter(|index| *index != line)
+        .flat_map(|index| lines[index].words.iter())
         .filter(|word| {
             (word.baseline - last.baseline).abs() <= tolerance && word.left >= last.right
         })
@@ -214,12 +232,10 @@ pub fn right_of<'a>(lines: &[Line<'a>], line: usize, last: &Word) -> Span<'a> {
 pub fn cell_right_of<'a>(lines: &[Line<'a>], line: usize, last: &Word) -> Span<'a> {
     let page = lines[line].page;
     let tolerance = last.font_size * SAME_BASELINE;
-    let nearest = lines
-        .iter()
-        .enumerate()
-        .filter(|(index, other)| *index != line && other.page == page)
-        .filter_map(|(index, other)| {
-            let head = other.words.first()?;
+    let nearest = of_page(lines, page)
+        .filter(|index| *index != line)
+        .filter_map(|index| {
+            let head = lines[index].words.first()?;
             let beside =
                 (head.baseline - last.baseline).abs() <= tolerance && head.left >= last.right;
             beside.then_some((index, head.left))
@@ -258,12 +274,9 @@ fn on_its_baseline<'l, 'a>(
     line: usize,
 ) -> impl Iterator<Item = &'a Word> + 'l {
     let head = lines[line].words.first();
-    let page = lines[line].page;
-    lines
-        .iter()
-        .enumerate()
-        .filter(move |(index, other)| *index != line && other.page == page)
-        .flat_map(|(_, other)| other.words.iter())
+    of_page(lines, lines[line].page)
+        .filter(move |index| *index != line)
+        .flat_map(|index| lines[index].words.iter())
         .filter(move |word| {
             head.is_some_and(|head| same_baseline(word.baseline, head.baseline, head.font_size))
         })
@@ -303,9 +316,8 @@ pub fn below<'a>(lines: &[Line<'a>], line: usize, first: &Word, last: &Word) -> 
     let page = lines[line].page;
     let slack = first.font_size * BELOW_SLACK;
     let reach = first.baseline + first.font_size * BELOW_WITHIN;
-    let nearest = lines
+    let nearest = lines[of_page(lines, page)]
         .iter()
-        .filter(|other| other.page == page)
         .filter_map(|other| other.words.first().map(|head| (other, head)))
         .filter(|(_, head)| {
             lies_below(head, first)
@@ -324,11 +336,51 @@ pub fn below<'a>(lines: &[Line<'a>], line: usize, first: &Word, last: &Word) -> 
 mod tests {
     use doc2einvoice_pdf::{Block, Line as Printed, PageLayout, Word};
 
-    use super::{cell_right_of, lines, rows, wrapped};
+    use super::{Line, cell_right_of, lines, of_page, rows, wrapped};
 
     /// The font size of every word, and the distance of two baselines.
     const FONT: f64 = 10.0;
     const PITCH: f64 = 12.0;
+
+    #[test]
+    fn the_lines_of_a_page_stand_where_their_table_says() {
+        let on = |pages: &[usize]| -> Vec<Line<'static>> {
+            pages
+                .iter()
+                .map(|page| Line {
+                    page: *page,
+                    block: 0,
+                    words: &[],
+                })
+                .collect()
+        };
+        let printed = on(&[0, 0, 1, 1, 1, 3]);
+        let table = [(0, 0..2), (1, 2..5), (3, 5..6), (2, 5..5), (4, 6..6)];
+        for (page, expected) in table {
+            assert_eq!(of_page(&printed, page), expected, "page {page}");
+        }
+        assert_eq!(of_page(&[], 0), 0..0);
+    }
+
+    /// The lookups go through the lines of one page only: the lines must
+    /// come page after page.
+    #[test]
+    fn lines_come_page_after_page() {
+        let page = |texts: &[&str]| PageLayout {
+            blocks: texts
+                .iter()
+                .map(|text| Block {
+                    lines: vec![line(0.0, 0.0, text)],
+                })
+                .collect(),
+            off_axis_glyphs: 0,
+            copied_glyphs: 0,
+        };
+        let pages = [page(&["a", "b"]), page(&[]), page(&["c"])];
+        let found: Vec<usize> = lines(&pages).iter().map(|line| line.page).collect();
+        assert_eq!(found, [0, 0, 2]);
+        assert!(found.is_sorted());
+    }
 
     fn line(left: f64, baseline: f64, text: &str) -> Printed {
         Printed {
