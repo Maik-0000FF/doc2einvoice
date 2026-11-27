@@ -20,6 +20,7 @@ use crate::breakdown;
 use crate::labels::{self, Names, TOTALS};
 use crate::page::{self, Row, Span};
 use crate::table::{self, Figure, Part, Reading, Stated, comes_to, figures, figures_as, part};
+use crate::units;
 use crate::values;
 
 /// One line of an invoice.
@@ -30,6 +31,10 @@ pub struct Line {
     /// The name of the item.
     pub name: Option<Stated>,
     pub quantity: Part,
+    /// The code of the unit of the quantity, looked up for the word printed
+    /// after it and marked as worked out: the page prints the word, not the
+    /// code. None where the word is no unit the table knows.
+    pub unit: Option<Stated>,
     /// The net price: as printed, or, where a discount is taken off the
     /// price printed, worked out from the two and marked so. None where the
     /// row prints no price: the amount by the quantity is not the price where
@@ -616,6 +621,14 @@ fn line_of<'a>(
             value: base,
             origin: Origin::Derived,
             ..price
+        }),
+        unit: unit.and_then(|word| {
+            let printed = row.span(word, 1)?;
+            Some(Stated {
+                text: units::code(&row.words.get(word)?.text)?.to_owned(),
+                location: printed.location(0, 1),
+                origin: Origin::Derived,
+            })
         }),
         quantity,
         net,
@@ -1440,6 +1453,54 @@ mod tests {
         assert_eq!(
             named.map(|[number, name, ..]| (number, name)),
             Some((Some("1".to_owned()), Some("Stahlcoil".to_owned())))
+        );
+    }
+
+    #[test]
+    fn the_unit_after_a_quantity_is_looked_up_and_marked() {
+        const HEADING: &[&str] = &["Pos", "Text", "Preis", "Menge", "Betrag"];
+        let unit = |heading: &[&str], texts: &[&str]| {
+            let table = Table {
+                name_from: None,
+                name_until: None,
+                ..heads(heading)?
+            };
+            let printed = words(LEFT, TOP, texts);
+            let found = any_line(&row(&printed), &table)?.line;
+            Some(found.unit.map(|unit| (unit.text, unit.origin)))
+        };
+        let worked_out = |code: &str| Some(Some((code.to_owned(), Origin::Derived)));
+        assert_eq!(
+            unit(HEADING, &["1", "Papier", "9,99", "20", "Stk", "199,80"]),
+            worked_out("H87")
+        );
+        assert_eq!(
+            unit(HEADING, &["1", "Rasen", "3,00", "3", "m²", "9,00"]),
+            worked_out("MTK")
+        );
+        assert_eq!(
+            unit(HEADING, &["2", "Stahlcoil", "10", "Stk", "850,00"]),
+            worked_out("H87")
+        );
+        // A word that is no unit the table knows has no code.
+        assert_eq!(
+            unit(
+                HEADING,
+                &["1", "Papier", "9,99", "20", "Paletten", "199,80"]
+            ),
+            Some(None)
+        );
+        // No word after the quantity, or the name after it: no unit.
+        assert_eq!(
+            unit(HEADING, &["1", "Papier", "9,99", "20", "199,80"]),
+            Some(None)
+        );
+        assert_eq!(
+            unit(
+                &["Amount", "Product", "Price", "Total"],
+                &["1.00", "Std", "(hours)", "160.00", "160.00"]
+            ),
+            Some(None)
         );
     }
 

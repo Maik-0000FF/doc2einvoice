@@ -34,10 +34,11 @@ use crate::labels::{
     self, ALLOWANCES, AMOUNT_DUE, BUYER_ADDRESS_LINES, BUYER_CITY, BUYER_NAME, BUYER_POST_CODE,
     BUYER_VAT_IDENTIFIER, CHARGES, CURRENCY, DELIVERY_DATE, DUE_DATE, Found, INVOICE_NUMBER,
     ISSUE_DATE, ITEM_GROSS_PRICE, ITEM_NAME, ITEM_NET_PRICE, ITEM_PRICE_BASE, ITEM_VAT_CATEGORY,
-    ITEM_VAT_RATE, LINE_IDENTIFIER, LINE_NET_AMOUNT, LINE_QUANTITY, LINE_TOTAL, Names, PAID,
-    PAYMENT_ACCOUNT, PURCHASE_ORDER, Party, SELLER_ADDRESS_LINES, SELLER_CITY, SELLER_NAME,
-    SELLER_POST_CODE, SELLER_VAT_IDENTIFIER, Scope, Section, TOTAL_WITH_VAT, TOTAL_WITHOUT_VAT,
-    VAT_CATEGORY, VAT_RATE, VAT_TAX_AMOUNT, VAT_TAXABLE_AMOUNT, VAT_TOTAL, Weight,
+    ITEM_VAT_RATE, LINE_IDENTIFIER, LINE_NET_AMOUNT, LINE_QUANTITY, LINE_QUANTITY_UNIT, LINE_TOTAL,
+    Names, PAID, PAYMENT_ACCOUNT, PURCHASE_ORDER, Party, SELLER_ADDRESS_LINES, SELLER_CITY,
+    SELLER_NAME, SELLER_POST_CODE, SELLER_VAT_IDENTIFIER, Scope, Section, TOTAL_WITH_VAT,
+    TOTAL_WITHOUT_VAT, VAT_CATEGORY, VAT_RATE, VAT_TAX_AMOUNT, VAT_TAXABLE_AMOUNT, VAT_TOTAL,
+    Weight,
 };
 use crate::lines::{self, Line as InvoiceLine};
 use crate::page::{self, Line, Span};
@@ -286,12 +287,14 @@ fn add_breakdown(draft: &mut Draft, index: usize, row: &Breakdown) {
 }
 
 /// The values of `line` as the entries of the invoice line at `index`: its
-/// number, its quantity and its amount, and the net or gross price, VAT
-/// category, VAT rate and name of its item, each where the line has it.
+/// number, its quantity with its unit and its amount, and the net or gross
+/// price, VAT category, VAT rate and name of its item, each where the line
+/// has it.
 fn add_line(draft: &mut Draft, index: usize, line: &InvoiceLine) {
     let parts = [
         (LINE_IDENTIFIER, line.identifier.as_ref().map(Part::stated)),
         (LINE_QUANTITY, Some(line.quantity.stated())),
+        (LINE_QUANTITY_UNIT, line.unit.clone()),
         (LINE_NET_AMOUNT, Some(line.net.stated())),
         (ITEM_NET_PRICE, line.price.as_ref().map(Part::stated)),
         (
@@ -749,10 +752,10 @@ mod tests {
         ALLOWANCES, AMOUNT_DUE, BUYER_ADDRESS_LINES, BUYER_CITY, BUYER_NAME, BUYER_POST_CODE,
         BUYER_VAT_IDENTIFIER, CHARGES, CURRENCY, DELIVERY_DATE, DUE_DATE, INVOICE_NUMBER,
         ISSUE_DATE, ITEM_NAME, ITEM_NET_PRICE, ITEM_PRICE_BASE, ITEM_VAT_RATE, LINE_IDENTIFIER,
-        LINE_NET_AMOUNT, LINE_QUANTITY, LINE_TOTAL, PAID, PAYMENT_ACCOUNT, PURCHASE_ORDER,
-        SELLER_ADDRESS_LINES, SELLER_CITY, SELLER_NAME, SELLER_POST_CODE, SELLER_VAT_IDENTIFIER,
-        TOTAL_WITH_VAT, TOTAL_WITHOUT_VAT, VAT_CATEGORY, VAT_RATE, VAT_TAX_AMOUNT,
-        VAT_TAXABLE_AMOUNT, VAT_TOTAL,
+        LINE_NET_AMOUNT, LINE_QUANTITY, LINE_QUANTITY_UNIT, LINE_TOTAL, PAID, PAYMENT_ACCOUNT,
+        PURCHASE_ORDER, SELLER_ADDRESS_LINES, SELLER_CITY, SELLER_NAME, SELLER_POST_CODE,
+        SELLER_VAT_IDENTIFIER, TOTAL_WITH_VAT, TOTAL_WITHOUT_VAT, VAT_CATEGORY, VAT_RATE,
+        VAT_TAX_AMOUNT, VAT_TAXABLE_AMOUNT, VAT_TOTAL,
     };
 
     /// The font size of every word, and the width of one character.
@@ -947,6 +950,12 @@ mod tests {
             numbered(&["Miete Halle", "Strom"])
         );
         assert_eq!(line_values(&pages, LINE_QUANTITY), numbered(&["2", "1"]));
+        // "Monate" after the quantity of the first line is its unit, looked
+        // up and marked; the second line prints none.
+        assert_eq!(
+            origins(&pages, LINE_QUANTITY_UNIT),
+            [("MON".to_owned(), Origin::Derived)]
+        );
         assert_eq!(
             line_values(&pages, ITEM_NET_PRICE),
             numbered(&["100", "35.5"])

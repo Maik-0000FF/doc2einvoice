@@ -19,6 +19,7 @@ mod page;
 mod postcodes;
 mod rules;
 mod table;
+mod units;
 mod values;
 
 use doc2einvoice_model::Draft;
