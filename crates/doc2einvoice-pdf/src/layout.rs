@@ -8,7 +8,12 @@
 //! font size, so that it holds for small print and headlines alike.
 //!
 //! - A **word** ends where the distance to the next character is a word gap,
-//!   or where a space is drawn.
+//!   or where a space is drawn after a character. A space drawn at nearly
+//!   the origin of the character before it, as some programs place it,
+//!   parts nothing: whether there is room there, the distance tells. The
+//!   origin is compared, not the end, so that a font stating no widths
+//!   does not hide a space after a narrow letter; "nearly" is the reach of
+//!   a copy, which also holds for condensed text.
 //! - A **line** is a run of words on one baseline without a column gap. Two
 //!   table cells next to each other are two lines.
 //! - A **block** is made of lines that stand below each other: they overlap
@@ -154,6 +159,7 @@ impl PageLayout {
     /// | none, or white space only                           | no blocks                  |
     /// | one following the other on a baseline               | one word                   |
     /// | apart by more than the word gap, or a space between | two words of one line      |
+    /// | a space drawn on the character before it, no gap    | one word                   |
     /// | apart by more than the column gap                   | two lines                  |
     /// | lines below each other at line distance that        | one block                  |
     /// | overlap horizontally                                |                            |
@@ -209,6 +215,15 @@ fn rows(mut glyphs: Vec<&Glyph>) -> Vec<Vec<&Glyph>> {
     rows
 }
 
+/// How far right of the origin of a character something drawn on it may
+/// start: [`COPY_DISTANCE_EM`] of the font size, but at most
+/// [`COPY_ADVANCE_SHARE`] of the width of the character, so that in
+/// condensed text the next letter is still a letter of its own.
+fn reach_on(character: &Glyph) -> f64 {
+    let by_size = COPY_DISTANCE_EM * character.font_size;
+    by_size.min(COPY_ADVANCE_SHARE * width_of(character))
+}
+
 /// How wide a character is: the advance its font states, or the assumed one.
 fn width_of(glyph: &Glyph) -> f64 {
     if glyph.advance > 0.0 {
@@ -240,7 +255,7 @@ fn without_copies(row: Vec<&Glyph>) -> (Vec<&Glyph>, usize) {
     let mut copies = 0;
     for glyph in row {
         let by_size = COPY_DISTANCE_EM * glyph.font_size;
-        let reach = by_size.min(COPY_ADVANCE_SHARE * width_of(glyph));
+        let reach = reach_on(glyph);
         let is_copy = kept
             .iter()
             .rev()
@@ -261,6 +276,10 @@ struct OpenLine {
     word: Option<Word>,
     /// Where the last character that is no white space ends.
     right: f64,
+    /// Where the last character that is no white space starts, and how far
+    /// right of that something drawn on it may start.
+    last_origin: f64,
+    last_reach: f64,
 }
 
 impl OpenLine {
@@ -289,10 +308,13 @@ fn lines(glyphs: Vec<&Glyph>) -> (Vec<Line>, usize) {
                 lines.extend(open.take().and_then(OpenLine::into_line));
             }
             // A space ends a word but neither starts a line nor widens one:
-            // a row of spaces would otherwise bridge any column gap.
+            // a row of spaces would otherwise bridge any column gap. Drawn on
+            // the origin of the character before it, it ends nothing.
             let visible: String = glyph.text.chars().filter(|c| !c.is_whitespace()).collect();
             if visible.is_empty() {
-                if let Some(line) = open.as_mut() {
+                if let Some(line) = open.as_mut()
+                    && glyph.x - line.last_origin > line.last_reach
+                {
                     line.close_word();
                 }
                 continue;
@@ -301,6 +323,8 @@ fn lines(glyphs: Vec<&Glyph>) -> (Vec<Line>, usize) {
                 words: Vec::new(),
                 word: None,
                 right: glyph.x,
+                last_origin: glyph.x,
+                last_reach: reach_on(glyph),
             });
             if gap.is_some_and(|gap| gap > WORD_GAP_EM * glyph.font_size) {
                 line.close_word();
@@ -316,6 +340,8 @@ fn lines(glyphs: Vec<&Glyph>) -> (Vec<Line>, usize) {
             word.right = word.right.max(glyph.x + width_of(glyph));
             word.font_size = word.font_size.max(glyph.font_size);
             line.right = line.right.max(word.right);
+            line.last_origin = glyph.x;
+            line.last_reach = reach_on(glyph);
         }
         lines.extend(open.and_then(OpenLine::into_line));
     }

@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: Maik-0000FF
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Program identity, the data of the legal notice, and the published files the
-//! validation works with.
+//! Program identity, the data of the legal notice, the published files the
+//! validation works with, and the material of other authors the application
+//! contains.
 //!
 //! Nothing is stated here a second time: identity and licence are read from
 //! the crate manifest at compile time, and the rule sets and schemas describe
@@ -35,6 +36,53 @@ pub struct AppInfo {
     pub rule_sets: Vec<Publication>,
     /// The XML Schemas the validation embeds.
     pub xml_schemas: Vec<Publication>,
+    /// The material of other authors the application contains, besides the
+    /// rule sets and the schemas.
+    pub materials: Vec<Material>,
+}
+
+/// Material of another author that the application contains, with what its
+/// licence asks to be stated wherever it is passed on: who holds the
+/// copyright, under which terms, and the terms themselves.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct Material {
+    /// The name its author gives it.
+    pub title: String,
+    /// The copyright notice of its author, word for word.
+    pub copyright: String,
+    /// SPDX identifier of its licence.
+    pub license: String,
+    /// The licence, in full.
+    pub license_text: String,
+    /// Where its author publishes it.
+    pub source: String,
+    /// What was changed from the original, if anything.
+    pub changes: Option<String>,
+}
+
+/// The typeface of the interface, contained unchanged.
+const TYPEFACE_TITLE: &str = "Inter";
+const TYPEFACE_COPYRIGHT: &str =
+    "Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter)";
+const TYPEFACE_LICENSE: &str = "OFL-1.1";
+const TYPEFACE_LICENSE_TEXT: &str = include_str!("../../LICENSES/OFL-1.1.txt");
+const TYPEFACE_SOURCE: &str = "https://rsms.me/inter/";
+
+/// The material of other authors the application contains. What belongs to
+/// the interface is stated here; a crate that holds material of its own
+/// states it itself, and it is listed here once the application depends on
+/// that crate.
+fn materials() -> Vec<Material> {
+    vec![Material {
+        title: TYPEFACE_TITLE.to_owned(),
+        copyright: TYPEFACE_COPYRIGHT.to_owned(),
+        license: TYPEFACE_LICENSE.to_owned(),
+        license_text: TYPEFACE_LICENSE_TEXT.to_owned(),
+        source: TYPEFACE_SOURCE.to_owned(),
+        changes: None,
+    }]
 }
 
 /// A file set of another publisher that the validation uses unchanged. A
@@ -79,6 +127,7 @@ impl AppInfo {
             repository: env!("CARGO_PKG_REPOSITORY").to_owned(),
             rule_sets: rule_sets(),
             xml_schemas: xml_schemas(),
+            materials: materials(),
         }
     }
 }
@@ -118,7 +167,107 @@ mod tests {
 
     use doc2einvoice_validation::{RuleSet, Syntax};
 
-    use super::{AppInfo, Publication};
+    use super::{AppInfo, Publication, TYPEFACE_COPYRIGHT, TYPEFACE_LICENSE};
+
+    /// The statement of the terms of every file of the repository.
+    const REPOSITORY_TERMS: &str = include_str!("../../REUSE.toml");
+    /// What a copyright notice starts with, which the statement of the
+    /// repository leaves out.
+    const COPYRIGHT_MARK: &str = "Copyright (c) ";
+    /// What starts an entry of that statement, and the files of the
+    /// typeface, by which its entry is told from the others.
+    const ENTRY_MARK: &str = "[[annotations]]";
+    const TYPEFACE_FILES: &str = "src/lib/assets/fonts/inter/";
+    /// The lines of an entry that state the holder and the licence.
+    const HOLDER_LINE: &str = "SPDX-FileCopyrightText";
+    const LICENSE_LINE: &str = "SPDX-License-Identifier";
+
+    /// What the line of an entry that starts with `key` states, without its
+    /// quotation marks.
+    ///
+    /// | Entry                                  | Key                       | Stated    |
+    /// |----------------------------------------|---------------------------|-----------|
+    /// | `SPDX-License-Identifier = "OFL-1.1"`  | `SPDX-License-Identifier` | `OFL-1.1` |
+    /// | the same, after other lines            | `SPDX-License-Identifier` | `OFL-1.1` |
+    /// | the same                               | `SPDX-FileCopyrightText`  | none      |
+    /// | `SPDX-License-Identifier = OFL-1.1`    | `SPDX-License-Identifier` | none (not quoted) |
+    /// | nothing                                | any                       | none      |
+    fn stated<'a>(entry: &'a str, key: &str) -> Option<&'a str> {
+        entry.lines().find_map(|line| {
+            let (name, value) = line.split_once('=')?;
+            (name.trim() == key)
+                .then(|| value.trim().strip_prefix('"')?.strip_suffix('"'))
+                .flatten()
+        })
+    }
+
+    #[test]
+    fn what_an_entry_states_follows_its_table() {
+        let entry = "path = [\"a/**\"]\nSPDX-License-Identifier = \"OFL-1.1\"";
+        let table = [
+            (
+                "SPDX-License-Identifier = \"OFL-1.1\"",
+                LICENSE_LINE,
+                Some("OFL-1.1"),
+            ),
+            (entry, LICENSE_LINE, Some("OFL-1.1")),
+            (entry, HOLDER_LINE, None),
+            ("SPDX-License-Identifier = OFL-1.1", LICENSE_LINE, None),
+            ("", LICENSE_LINE, None),
+        ];
+        for (entry, key, expected) in table {
+            assert_eq!(stated(entry, key), expected, "{entry}");
+        }
+    }
+
+    #[test]
+    fn every_material_states_what_its_licence_asks_for() {
+        let info = AppInfo::current();
+
+        assert!(!info.materials.is_empty());
+        for material in &info.materials {
+            for field in [
+                &material.title,
+                &material.copyright,
+                &material.license,
+                &material.license_text,
+                &material.source,
+            ] {
+                assert!(!field.trim().is_empty(), "{}", material.title);
+            }
+        }
+    }
+
+    /// The repository states the terms of the typeface as well, in the entry
+    /// of its files; the two must say the same.
+    #[test]
+    fn the_typeface_is_stated_as_the_repository_states_it() {
+        let entries: Vec<&str> = REPOSITORY_TERMS
+            .split(ENTRY_MARK)
+            .filter(|entry| entry.contains(TYPEFACE_FILES))
+            .collect();
+        let [entry] = entries[..] else {
+            unreachable!("not one entry of the typeface: {}", entries.len())
+        };
+
+        assert_eq!(
+            stated(entry, HOLDER_LINE),
+            TYPEFACE_COPYRIGHT.strip_prefix(COPYRIGHT_MARK)
+        );
+        assert_eq!(stated(entry, LICENSE_LINE), Some(TYPEFACE_LICENSE));
+    }
+
+    #[test]
+    fn no_two_materials_share_a_title() {
+        let info = AppInfo::current();
+        let titles: HashSet<&str> = info
+            .materials
+            .iter()
+            .map(|material| material.title.as_str())
+            .collect();
+
+        assert_eq!(titles.len(), info.materials.len());
+    }
 
     /// Length of a date written as `YYYY-MM-DD`.
     const DATE_LENGTH: usize = 10;
@@ -193,7 +342,7 @@ mod tests {
     {
         let json = serde_json::to_value(AppInfo::current())?;
 
-        for field in ["copyrightHolder", "ruleSets", "xmlSchemas"] {
+        for field in ["copyrightHolder", "ruleSets", "xmlSchemas", "materials"] {
             assert!(json.get(field).is_some(), "{field}");
         }
         Ok(())

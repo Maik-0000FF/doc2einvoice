@@ -131,9 +131,11 @@ The specifications and rule sets this project works against:
 
 - [EN 16931 validation artefacts](https://github.com/ConnectingEurope/eInvoicing-EN16931)
   (CEN/TC 434), licensed under EUPL 1.2
-- [XRechnung](https://xeinkauf.de/xrechnung/) and its
-  [Schematron rules](https://github.com/itplr-kosit/xrechnung-schematron)
-  (KoSIT), licensed under Apache-2.0
+- [XRechnung](https://xeinkauf.de/xrechnung/) (KoSIT): the
+  [specification 3.0.2](https://xeinkauf.de/app/uploads/2024/07/302-XRechnung-2024-06-20.pdf),
+  published under the licence agreement between the European Commission and CEN,
+  and its [Schematron rules](https://github.com/itplr-kosit/xrechnung-schematron),
+  licensed under Apache-2.0
 - [Peppol BIS Billing 3.0](https://docs.peppol.eu/poacc/billing/3.0/) (OpenPeppol)
 - [UBL 2.1](http://docs.oasis-open.org/ubl/os-UBL-2.1/) XML Schema (OASIS),
   distributed unmodified under the notice of the specification
@@ -203,8 +205,11 @@ The Rust code is a workspace:
 
 | Path                             | Purpose                                                      |
 | -------------------------------- | ------------------------------------------------------------ |
+| `crates/doc2einvoice-extract`    | finds the business terms of an invoice on its pages          |
+| `crates/doc2einvoice-model`      | the invoice after the semantic data model of EN 16931        |
 | `crates/doc2einvoice-pdf`        | reads the text of a PDF with its place on the page           |
 | `crates/doc2einvoice-schematron` | Schematron interpreter, knows nothing about invoices         |
+| `crates/doc2einvoice-syntax`     | writes an invoice of the model as UBL 2.1 or CII D16B        |
 | `crates/doc2einvoice-validation` | rule sets with version and date, profiles, validation report |
 | `src-tauri`                      | the desktop application                                      |
 | `rulesets`                       | the published rule files, unchanged                          |
@@ -244,4 +249,7 @@ versions.
 The files of other publishers keep their own terms, stated in
 [REUSE.toml](REUSE.toml) and in full under [LICENSES](LICENSES). That includes
 the typeface of the interface, [Inter](https://rsms.me/inter/), licensed under
-the SIL Open Font License 1.1.
+the SIL Open Font License 1.1, and the postal codes and places the extraction
+confirms addresses with, from [GeoNames](https://www.geonames.org/), licensed
+under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) and reduced to
+the country, the postal code and the place.

@@ -4,19 +4,26 @@ SPDX-License-Identifier: GPL-3.0-or-later
 -->
 <script lang="ts">
   // What the program is, under which terms it is distributed, which published
-  // files its validation uses and what the author does not answer for.
+  // files its validation uses, which material of other authors it contains
+  // and what the author does not answer for.
   import { formatLegalNotice } from '#lib/app-info/legal-notice.ts';
   import { i18n } from '#lib/i18n/i18n.svelte.ts';
   import type { MessageKey } from '#lib/i18n/translate.ts';
   import type { AppInfo } from '#lib/ipc/bindings/AppInfo.ts';
+  import type { Material } from '#lib/ipc/bindings/Material.ts';
+  import type { Publication } from '#lib/ipc/bindings/Publication.ts';
+
+  import Dialog from './base/Dialog.svelte';
+  import FactList from './base/FactList.svelte';
+  import type { Fact } from './base/facts.ts';
+  import FoldedText from './base/FoldedText.svelte';
+  import Note from './base/Note.svelte';
+  import SectionHeading from './base/SectionHeading.svelte';
+  import SubHeading from './base/SubHeading.svelte';
+  import Table from './base/Table.svelte';
+  import { byPosition, type TableColumn } from './base/table.ts';
 
   let { info, open = $bindable(false) }: { info: AppInfo; open?: boolean } = $props();
-
-  // Lets a script focus an element that the Tab key does not stop at.
-  const NOT_IN_TAB_ORDER = -1;
-
-  // Identifies the heading that names the dialog for assistive technology.
-  const TITLE_ID = 'about-dialog-title';
 
   // The sentences of the disclaimer, in the order they are shown.
   const DISCLAIMER: readonly MessageKey[] = [
@@ -28,147 +35,80 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
   const publications = $derived([...info.ruleSets, ...info.xmlSchemas]);
 
-  let dialog = $state<HTMLDialogElement>();
+  const facts: readonly Fact[] = $derived([
+    { term: i18n.t('about.license'), value: info.license },
+    { term: i18n.t('about.source'), value: info.repository, long: true, selectable: true },
+  ]);
 
-  // The dialog element is opened and closed by its own methods: only they make
-  // it modal, keep the focus inside and close it on Escape. Opening would put
-  // the focus on the first control, the button at the very end, and scroll
-  // there; the dialog takes the focus itself and starts at its top.
-  $effect(() => {
-    if (dialog === undefined || dialog.open === open) {
-      return;
-    }
-    if (open) {
-      dialog.showModal();
-      dialog.scrollTop = 0;
-      dialog.focus();
-    } else {
-      dialog.close();
-    }
-  });
+  // What the licence of a material asks to be stated, and what was changed
+  // from the original where something was.
+  function materialFacts(material: Material): readonly Fact[] {
+    const changes: readonly Fact[] =
+      material.changes === null
+        ? []
+        : [{ term: i18n.t('about.materials.changes'), value: material.changes }];
+    return [
+      { term: i18n.t('about.materials.copyright'), value: material.copyright, long: true },
+      { term: i18n.t('about.license'), value: material.license },
+      { term: i18n.t('about.materials.source'), value: material.source, long: true },
+      ...changes,
+    ];
+  }
+
+  const columns: readonly TableColumn<Publication>[] = $derived([
+    { heading: i18n.t('about.publications.title'), cell: titleCell },
+    { heading: i18n.t('about.publications.version'), cell: versionCell },
+    { heading: i18n.t('about.publications.published'), cell: publishedCell },
+    { heading: i18n.t('about.license'), cell: licenseCell },
+  ]);
 </script>
 
-<dialog
-  bind:this={dialog}
-  class="about"
-  tabindex={NOT_IN_TAB_ORDER}
-  aria-labelledby={TITLE_ID}
-  onclose={() => {
-    open = false;
-  }}
+{#snippet titleCell(publication: Publication)}{publication.title}{/snippet}
+{#snippet versionCell(publication: Publication)}
+  {publication.version ?? i18n.t('about.publications.notNumbered')}
+{/snippet}
+{#snippet publishedCell(publication: Publication)}{i18n.date(publication.published)}{/snippet}
+{#snippet licenseCell(publication: Publication)}
+  {publication.license ?? i18n.t('about.publications.ownTerms')}
+{/snippet}
+
+<Dialog
+  bind:open
+  title={i18n.t('about.title', { name: info.name })}
+  subtitle={i18n.t('about.version', { version: info.version })}
+  closeLabel={i18n.t('about.close')}
 >
-  <header class="about__header">
-    <h2 id={TITLE_ID} class="about__title">{i18n.t('about.title', { name: info.name })}</h2>
-    <p class="about__version">{i18n.t('about.version', { version: info.version })}</p>
-  </header>
+  <Note>{formatLegalNotice(info)}</Note>
 
-  <p class="about__legal">{formatLegalNotice(info)}</p>
-
-  <dl class="about__facts">
-    <dt>{i18n.t('about.license')}</dt>
-    <dd>{info.license}</dd>
-    <dt>{i18n.t('about.source')}</dt>
-    <dd class="about__address">{info.repository}</dd>
-  </dl>
+  <FactList {facts} />
 
   <section>
-    <h3 class="about__heading">{i18n.t('about.publications.heading')}</h3>
+    <SectionHeading text={i18n.t('about.publications.heading')} />
     <p class="about__text">{i18n.t('about.publications.text')}</p>
-    <table class="about__table">
-      <thead>
-        <tr>
-          <th scope="col">{i18n.t('about.publications.title')}</th>
-          <th scope="col">{i18n.t('about.publications.version')}</th>
-          <th scope="col">{i18n.t('about.publications.published')}</th>
-          <th scope="col">{i18n.t('about.license')}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {#each publications as publication (publication.title)}
-          <tr>
-            <th scope="row">{publication.title}</th>
-            <td>{publication.version ?? i18n.t('about.publications.notNumbered')}</td>
-            <td>{i18n.date(publication.published)}</td>
-            <td>{publication.license ?? i18n.t('about.publications.ownTerms')}</td>
-          </tr>
-        {/each}
-      </tbody>
-    </table>
+    <!-- A rule set and a schema may share a title. -->
+    <Table {columns} rows={publications} key={byPosition} />
   </section>
 
   <section>
-    <h3 class="about__heading">{i18n.t('about.disclaimer.heading')}</h3>
+    <SectionHeading text={i18n.t('about.materials.heading')} />
+    <p class="about__text">{i18n.t('about.materials.text')}</p>
+    {#each info.materials as material (material.title)}
+      <SubHeading text={material.title} />
+      <FactList facts={materialFacts(material)} />
+      <FoldedText summary={i18n.t('about.materials.licenseText')} text={material.licenseText} />
+    {/each}
+  </section>
+
+  <section>
+    <SectionHeading text={i18n.t('about.disclaimer.heading')} />
     <p class="about__text about__text--strong">{i18n.t('about.disclaimer.risk')}</p>
     {#each DISCLAIMER as sentence (sentence)}
       <p class="about__text">{i18n.t(sentence)}</p>
     {/each}
   </section>
-
-  <form method="dialog" class="about__actions">
-    <button class="about__close">{i18n.t('about.close')}</button>
-  </form>
-</dialog>
+</Dialog>
 
 <style>
-  .about {
-    width: min(var(--dialog-width), calc(100vw - 2 * var(--space-lg)));
-    max-height: calc(100vh - 2 * var(--space-lg));
-    padding: var(--space-lg);
-    overflow-y: auto;
-    border: var(--border-width) solid var(--color-border);
-    border-radius: var(--radius-lg);
-    background: var(--color-surface);
-    color: var(--color-text);
-  }
-
-  .about::backdrop {
-    background: var(--color-backdrop);
-  }
-
-  .about__header {
-    margin-bottom: var(--space-md);
-  }
-
-  .about__title {
-    font-size: var(--font-size-lg);
-    font-weight: var(--font-weight-bold);
-  }
-
-  .about__heading {
-    margin-top: var(--space-lg);
-    margin-bottom: var(--space-sm);
-    font-size: var(--font-size-md);
-    font-weight: var(--font-weight-bold);
-  }
-
-  .about__version,
-  .about__legal {
-    color: var(--color-text-muted);
-    font-size: var(--font-size-sm);
-  }
-
-  .about__facts {
-    display: grid;
-    grid-template-columns: max-content 1fr;
-    gap: var(--space-xs) var(--space-md);
-    margin: var(--space-md) 0 0;
-    font-size: var(--font-size-sm);
-  }
-
-  .about__facts dt {
-    color: var(--color-text-muted);
-  }
-
-  .about__facts dd {
-    margin: 0;
-  }
-
-  /* An address is one word that may be longer than the dialog is wide. */
-  .about__address {
-    overflow-wrap: anywhere;
-    user-select: all;
-  }
-
   .about__text {
     margin-bottom: var(--space-sm);
     font-size: var(--font-size-sm);
@@ -176,38 +116,5 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
   .about__text--strong {
     font-weight: var(--font-weight-bold);
-  }
-
-  .about__table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: var(--font-size-sm);
-    text-align: left;
-  }
-
-  .about__table th,
-  .about__table td {
-    padding: var(--space-xs) var(--space-sm) var(--space-xs) 0;
-    border-bottom: var(--border-width) solid var(--color-border);
-    font-weight: var(--font-weight-regular);
-    vertical-align: top;
-  }
-
-  .about__table thead th {
-    color: var(--color-text-muted);
-  }
-
-  .about__actions {
-    display: flex;
-    justify-content: flex-end;
-    margin-top: var(--space-lg);
-  }
-
-  .about__close {
-    padding: var(--space-xs) var(--space-md);
-    border: var(--border-width) solid var(--color-border);
-    border-radius: var(--radius-md);
-    background: var(--color-surface);
-    cursor: pointer;
   }
 </style>

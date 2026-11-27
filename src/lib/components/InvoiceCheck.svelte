@@ -14,6 +14,8 @@ SPDX-License-Identifier: GPL-3.0-or-later
   import type { Refusal } from '#lib/ipc/bindings/Refusal.ts';
   import { checkInvoice, checkInvoiceAgain, checkStartFile } from '#lib/ipc/check-invoice.ts';
 
+  import Button from './base/Button.svelte';
+  import Note from './base/Note.svelte';
   import CheckResult from './CheckResult.svelte';
 
   // While a check runs, nothing starts another one. The file dialog does not
@@ -70,20 +72,22 @@ SPDX-License-Identifier: GPL-3.0-or-later
 </script>
 
 <section class="check" aria-busy={busy}>
-  <button
-    class="check__open"
-    disabled={busy}
+  <Button
+    emphasis="primary"
+    {busy}
     onclick={() => {
       void run(checkInvoice);
     }}
   >
     {i18n.t(busy ? 'check.running' : 'check.open')}
-  </button>
+  </Button>
 
   {#if failure !== undefined}
-    <p class="check__refusal" role="alert">{i18n.t('check.failed', { detail: failure })}</p>
+    <Note tone="danger" size="body" long role="alert">
+      {i18n.t('check.failed', { detail: failure })}
+    </Note>
   {:else if refused !== undefined}
-    <p class="check__refusal" role="alert">{i18n.t(refused.name, refused.values)}</p>
+    <Note tone="danger" size="body" long role="alert">{i18n.t(refused.name, refused.values)}</Note>
   {/if}
 
   {#if check !== undefined}
@@ -98,24 +102,5 @@ SPDX-License-Identifier: GPL-3.0-or-later
     align-items: center;
     gap: var(--space-md);
     width: min(var(--content-width), 100%);
-  }
-
-  .check__open {
-    padding: var(--space-sm) var(--space-lg);
-    border: var(--border-width) solid var(--color-border);
-    border-radius: var(--radius-md);
-    background: var(--color-surface);
-    font-weight: var(--font-weight-bold);
-    cursor: pointer;
-  }
-
-  .check__open:disabled {
-    color: var(--color-text-muted);
-    cursor: progress;
-  }
-
-  .check__refusal {
-    color: var(--color-danger);
-    overflow-wrap: anywhere;
   }
 </style>

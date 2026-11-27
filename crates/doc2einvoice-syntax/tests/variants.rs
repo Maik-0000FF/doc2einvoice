@@ -1,0 +1,339 @@
+// SPDX-FileCopyrightText: Maik-0000FF
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+//! Invoices other than the complete one: a credit note, a payment by card, an
+//! invoice with only what is required, and each invoice a syntax cannot
+//! express.
+
+mod support;
+
+use doc2einvoice_model::{Code, InvoiceNote, NonEmpty, PrecedingInvoice, UnitPriceAmount};
+use doc2einvoice_syntax::{Gap, Syntax, UblDocument, WriteError, write_cii, write_ubl};
+use doc2einvoice_validation::Profile;
+use support::{
+    CREDIT_NOTE, EN16931, Payment, XRECHNUNG, complete, date, decimal, exempt, findings, minimal,
+    paid_by_card,
+};
+
+fn assert_clean(document: &[u8], profile: Profile) {
+    let found = findings(document, profile);
+    assert!(
+        found.is_empty(),
+        "{} findings:\n{}\n\n{}",
+        found.len(),
+        found.join("\n"),
+        String::from_utf8_lossy(document)
+    );
+}
+
+fn ubl(invoice: &doc2einvoice_model::Invoice, document: UblDocument) -> Vec<u8> {
+    write_ubl(invoice, document).unwrap_or_else(|error| unreachable!("{error}"))
+}
+
+fn cii(invoice: &doc2einvoice_model::Invoice) -> Vec<u8> {
+    write_cii(invoice).unwrap_or_else(|error| unreachable!("{error}"))
+}
+
+fn credit_note(specification: &str) -> doc2einvoice_model::Invoice {
+    let mut invoice = complete(Payment::CreditTransfer, specification);
+    invoice.type_code = Code(CREDIT_NOTE.to_owned());
+    invoice
+}
+
+#[test]
+fn a_credit_note_conforms_in_ubl() {
+    assert_clean(
+        &ubl(&credit_note(EN16931), UblDocument::CreditNote),
+        Profile::En16931,
+    );
+    assert_clean(
+        &ubl(&credit_note(XRECHNUNG), UblDocument::CreditNote),
+        Profile::XRechnung,
+    );
+}
+
+#[test]
+fn a_credit_note_conforms_in_cii() {
+    assert_clean(&cii(&credit_note(EN16931)), Profile::En16931);
+    assert_clean(&cii(&credit_note(XRECHNUNG)), Profile::XRechnung);
+}
+
+#[test]
+fn a_payment_by_card_conforms_in_cii() {
+    assert_clean(&cii(&paid_by_card(EN16931)), Profile::En16931);
+    assert_clean(&cii(&paid_by_card(XRECHNUNG)), Profile::XRechnung);
+}
+
+#[test]
+fn an_invoice_exempt_from_vat_conforms() {
+    assert_clean(&ubl(&exempt(), UblDocument::Invoice), Profile::En16931);
+    assert_clean(&cii(&exempt()), Profile::En16931);
+}
+
+#[test]
+fn a_blank_optional_value_is_left_out() {
+    let mut invoice = minimal();
+    invoice.seller.trading_name = Some("  ".to_owned());
+    invoice.buyer_reference = Some(String::new());
+    for document in [ubl(&invoice, UblDocument::Invoice), cii(&invoice)] {
+        assert_clean(&document, Profile::En16931);
+        let text = String::from_utf8_lossy(&document);
+        assert!(
+            !text.contains("BuyerReference")
+                && !text.contains("PartyName")
+                && !text.contains("TradingBusinessName"),
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn an_invoice_with_only_what_is_required_conforms() {
+    assert_clean(&ubl(&minimal(), UblDocument::Invoice), Profile::En16931);
+    assert_clean(&cii(&minimal()), Profile::En16931);
+}
+
+/// Changes the one line of `invoice`; the list of lines is rebuilt, since it
+/// can only be read.
+fn change_line(
+    invoice: &mut doc2einvoice_model::Invoice,
+    change: impl FnOnce(&mut doc2einvoice_model::InvoiceLine),
+) {
+    let mut line = invoice.lines.first().clone();
+    change(&mut line);
+    invoice.lines = NonEmpty::one(line);
+}
+
+fn gap_of(result: Result<Vec<u8>, WriteError>) -> Option<(Syntax, Gap)> {
+    match result.err()? {
+        WriteError::NotExpressible { syntax, gap } => Some((syntax, gap)),
+        WriteError::Xml(_) => None,
+    }
+}
+
+#[test]
+fn ubl_refuses_what_it_cannot_express() {
+    let ubl =
+        |invoice: &doc2einvoice_model::Invoice, document| gap_of(write_ubl(invoice, document));
+    let refused = |gap| Some((Syntax::Ubl, gap));
+
+    let mut invoice = minimal();
+    invoice.sales_order_reference = Some("AUFTRAG-1".to_owned());
+    assert_eq!(
+        ubl(&invoice, UblDocument::Invoice),
+        refused(Gap::SalesOrderWithoutPurchaseOrder)
+    );
+
+    let mut invoice = minimal();
+    invoice.totals.vat_total = None;
+    assert_eq!(
+        ubl(&invoice, UblDocument::Invoice),
+        refused(Gap::VatTotalMissing)
+    );
+
+    let mut invoice = complete(Payment::CreditTransfer, EN16931);
+    invoice.vat_accounting_currency = None;
+    assert_eq!(
+        ubl(&invoice, UblDocument::Invoice),
+        refused(Gap::AccountingCurrencyMissing)
+    );
+
+    let mut invoice = complete(Payment::CreditTransfer, EN16931);
+    change_line(&mut invoice, |line| {
+        line.price.discount = None;
+    });
+    assert_eq!(
+        ubl(&invoice, UblDocument::Invoice),
+        refused(Gap::GrossPriceWithoutDiscount)
+    );
+
+    let mut invoice = complete(Payment::CreditTransfer, EN16931);
+    change_line(&mut invoice, |line| {
+        line.price.base_quantity = None;
+    });
+    assert_eq!(
+        ubl(&invoice, UblDocument::Invoice),
+        refused(Gap::BaseUnitWithoutBaseQuantity)
+    );
+
+    assert_eq!(
+        ubl(&paid_by_card(EN16931), UblDocument::Invoice),
+        refused(Gap::CardNetworkMissing)
+    );
+
+    let mut invoice = minimal();
+    invoice.seller.name = "  ".to_owned();
+    assert_eq!(
+        ubl(&invoice, UblDocument::Invoice),
+        refused(Gap::BlankRequiredValue("BT-27"))
+    );
+
+    let mut invoice = minimal();
+    invoice.notes.push(InvoiceNote {
+        subject_code: None,
+        text: "#AAI#Text".to_owned(),
+    });
+    assert_eq!(
+        ubl(&invoice, UblDocument::Invoice),
+        refused(Gap::NoteTextLikeSubject)
+    );
+
+    let mut invoice = credit_note(EN16931);
+    invoice.payment_instructions = None;
+    assert_eq!(
+        ubl(&invoice, UblDocument::CreditNote),
+        refused(Gap::DueDateWithoutPaymentInstructions)
+    );
+}
+
+#[test]
+fn cii_refuses_what_it_cannot_express() {
+    let refused = |gap| Some((Syntax::Cii, gap));
+
+    let mut invoice = minimal();
+    invoice.seller.name = String::new();
+    assert_eq!(
+        gap_of(write_cii(&invoice)),
+        refused(Gap::BlankRequiredValue("BT-27"))
+    );
+
+    let mut invoice = complete(Payment::CreditTransfer, EN16931);
+    invoice.preceding_invoices.push(PrecedingInvoice {
+        reference: "RE-0".to_owned(),
+        issue_date: Some(date(2026, 1, 2)),
+    });
+    assert_eq!(
+        gap_of(write_cii(&invoice)),
+        refused(Gap::SeveralPrecedingInvoices)
+    );
+
+    let mut invoice = complete(Payment::CreditTransfer, EN16931);
+    invoice.vat_accounting_currency = None;
+    assert_eq!(
+        gap_of(write_cii(&invoice)),
+        refused(Gap::AccountingCurrencyMissing)
+    );
+
+    let mut invoice = complete(Payment::CreditTransfer, EN16931);
+    change_line(&mut invoice, |line| {
+        line.price.base_quantity = None;
+    });
+    assert_eq!(
+        gap_of(write_cii(&invoice)),
+        refused(Gap::BaseUnitWithoutBaseQuantity)
+    );
+
+    let mut invoice = complete(Payment::CreditTransfer, EN16931);
+    change_line(&mut invoice, |line| {
+        line.price.gross_price = None;
+        line.price.discount = Some(UnitPriceAmount(decimal("5")));
+    });
+    assert_eq!(
+        gap_of(write_cii(&invoice)),
+        refused(Gap::DiscountWithoutGrossPrice)
+    );
+}
+
+#[test]
+fn a_note_that_starts_with_a_hash_but_no_subject_is_written() {
+    let mut invoice = minimal();
+    invoice.notes.push(InvoiceNote {
+        subject_code: None,
+        text: "#3 Teillieferung".to_owned(),
+    });
+    assert_clean(&ubl(&invoice, UblDocument::Invoice), Profile::En16931);
+}
+
+#[test]
+fn an_iban_given_with_spaces_is_written_in_its_electronic_form() {
+    let mut invoice = complete(Payment::CreditTransfer, XRECHNUNG);
+    if let Some(payment) = &mut invoice.payment_instructions {
+        for transfer in &mut payment.credit_transfers {
+            transfer.account =
+                doc2einvoice_model::Identifier("DE75 5121 0800 1245 1261 99".to_owned());
+        }
+    }
+    for document in [ubl(&invoice, UblDocument::Invoice), cii(&invoice)] {
+        assert_clean(&document, Profile::XRechnung);
+        assert!(String::from_utf8_lossy(&document).contains("DE75512108001245126199"));
+    }
+}
+
+/// The blank required values of the table of `blank_required_value`, each in
+/// the complete invoice: the gap each syntax reports.
+#[test]
+fn blank_required_values_follow_their_table() {
+    type Change = fn(&mut doc2einvoice_model::Invoice);
+    let cases: [(&str, Change); 7] = [
+        ("BT-27", |invoice| invoice.seller.name = " ".to_owned()),
+        ("BT-34", |invoice| {
+            if let Some(address) = &mut invoice.seller.electronic_address {
+                address.scheme = String::new();
+            }
+        }),
+        ("BT-49", |invoice| {
+            if let Some(address) = &mut invoice.buyer.electronic_address {
+                address.content = "  ".to_owned();
+            }
+        }),
+        ("BT-125", |invoice| {
+            for document in &mut invoice.supporting_documents {
+                if let Some(file) = &mut document.attachment {
+                    file.content.clear();
+                }
+            }
+        }),
+        ("BT-125", |invoice| {
+            for document in &mut invoice.supporting_documents {
+                if let Some(file) = &mut document.attachment {
+                    file.filename = String::new();
+                }
+            }
+        }),
+        ("BT-157", |invoice| {
+            change_line(invoice, |line| {
+                if let Some(standard) = &mut line.item.standard_identifier {
+                    standard.scheme = " ".to_owned();
+                }
+            });
+        }),
+        ("BT-158", |invoice| {
+            change_line(invoice, |line| {
+                for classification in &mut line.item.classifications {
+                    classification.content = String::new();
+                }
+            });
+        }),
+    ];
+    for (term, change) in cases {
+        let mut invoice = complete(Payment::CreditTransfer, EN16931);
+        change(&mut invoice);
+        let expected = Gap::BlankRequiredValue(term);
+        assert_eq!(
+            gap_of(write_ubl(&invoice, UblDocument::Invoice)),
+            Some((Syntax::Ubl, expected)),
+            "{term}"
+        );
+        assert_eq!(
+            gap_of(write_cii(&invoice)),
+            Some((Syntax::Cii, expected)),
+            "{term}"
+        );
+    }
+}
+
+#[test]
+fn a_blank_optional_scheme_is_left_out() {
+    let mut invoice = complete(Payment::CreditTransfer, EN16931);
+    for identifier in &mut invoice.seller.identifiers {
+        identifier.scheme = Some("  ".to_owned());
+    }
+    for document in [ubl(&invoice, UblDocument::Invoice), cii(&invoice)] {
+        assert_clean(&document, Profile::En16931);
+        let text = String::from_utf8_lossy(&document);
+        assert!(
+            !text.contains("schemeID=\"  \"") && !text.contains("schemeID=\"\""),
+            "{text}"
+        );
+    }
+}
