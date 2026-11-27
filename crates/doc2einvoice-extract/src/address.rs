@@ -41,6 +41,24 @@ const COUNTRY_WORDS: [(&str, &str); 7] = [
 ];
 const COUNTRY_JOINER: char = '-';
 
+/// The names a country is written out with on a line of its own below the
+/// place of an address, in German, English and French, as
+/// [`labels::normalized`] gives them, and the code of each. They are those
+/// of the countries whose postal codes are read.
+const COUNTRY_NAMES: [(&str, &str); 11] = [
+    ("deutschland", "DE"),
+    ("germany", "DE"),
+    ("allemagne", "DE"),
+    ("frankreich", "FR"),
+    ("france", "FR"),
+    ("österreich", "AT"),
+    ("austria", "AT"),
+    ("autriche", "AT"),
+    ("schweiz", "CH"),
+    ("switzerland", "CH"),
+    ("suisse", "CH"),
+];
+
 /// How many digits a postal code of the countries read has: four in
 /// Austria and Switzerland, five in Germany and France.
 const POSTCODE_DIGITS: RangeInclusive<usize> = 4..=5;
@@ -113,6 +131,28 @@ pub struct Address<'a> {
     pub postcode: Span<'a>,
     pub postcode_digits: String,
     pub place: Span<'a>,
+    /// The country written before the postal code, if one is.
+    pub country: Option<Country<'a>>,
+}
+
+/// The country of an address, as it is written before the postal code.
+pub struct Country<'a> {
+    /// The code of the country.
+    pub code: &'static str,
+    /// The word it is written in.
+    pub word: Span<'a>,
+    /// Whether the word holds the code itself, as "DE", or something that
+    /// stands for it: an older mark of the country, as the "D" of "D-80333",
+    /// or its name written out.
+    pub as_code: bool,
+}
+
+/// The country written before a postal code: its code, and whether the
+/// code itself is what is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Written {
+    code: &'static str,
+    as_code: bool,
 }
 
 /// A postal code that starts a line: its digits, the country written before
@@ -120,7 +160,7 @@ pub struct Address<'a> {
 #[derive(Debug, PartialEq, Eq)]
 struct Postcode {
     digits: String,
-    country: Option<&'static str>,
+    country: Option<Written>,
     taken: usize,
 }
 
@@ -130,9 +170,10 @@ struct Postcode {
 /// | Words                         | Postal code | Country | Taken |
 /// |-------------------------------|-------------|---------|-------|
 /// | `80333` `München`             | `80333`     | none    | 1     |
-/// | `DE` `80333` `München`        | `80333`     | DE      | 2     |
-/// | `D-80333` `München`           | `80333`     | DE      | 1     |
-/// | `A-1010` `Wien`               | `1010`      | AT      | 1     |
+/// | `DE` `80333` `München`        | `80333`     | DE, as its code | 2 |
+/// | `DE-80333` `München`          | `80333`     | DE, as its code | 1 |
+/// | `D-80333` `München`           | `80333`     | DE, by an older mark | 1 |
+/// | `A-1010` `Wien`               | `1010`      | AT, by an older mark | 1 |
 /// | `1010` `Wien`                 | `1010`      | none    | 1     |
 /// | `80333`                       | none (no place) |     |       |
 /// | `12345678` `Stadt`            | none (too many digits) | | |
@@ -144,7 +185,10 @@ fn postcode_starting(words: &[&str]) -> Option<Postcode> {
         COUNTRY_WORDS
             .iter()
             .find(|(written, _)| *written == word)
-            .map(|(_, country)| *country)
+            .map(|(written, code)| Written {
+                code,
+                as_code: written == code,
+            })
     };
     let (code, country, taken) = if let Some(country) = country_of(first) {
         (*rest.first()?, Some(country), 2)
@@ -164,6 +208,28 @@ fn postcode_starting(words: &[&str]) -> Option<Postcode> {
         country,
         taken,
     })
+}
+
+/// The country a line names that holds nothing else.
+///
+/// | Line               | Country |
+/// |--------------------|---------|
+/// | `Deutschland`      | DE      |
+/// | `GERMANY`          | DE      |
+/// | `France`           | FR      |
+/// | `Schweiz`          | CH      |
+/// | `Deutschland` `GmbH` | none (more than the name) |
+/// | `Bayern`           | none    |
+/// | nothing            | none    |
+fn country_named(words: &[&str]) -> Option<&'static str> {
+    let [word] = words else {
+        return None;
+    };
+    let name = labels::normalized(word);
+    COUNTRY_NAMES
+        .iter()
+        .find(|(written, _)| *written == name)
+        .map(|(_, code)| *code)
 }
 
 /// The address that ends in `region`, lines of one page in reading order:
@@ -232,6 +298,25 @@ pub fn in_region<'a>(
     }
     above.reverse();
     let mut spans = above.iter().map(|line| whole(line));
+    // The country may be written out on the line below the place, in its
+    // column: the name stands for the code.
+    let named = region
+        .iter()
+        .map(|index| &lines[*index])
+        .filter(|line| {
+            line.words.first().is_some_and(|word| {
+                let below = word.baseline - head.baseline;
+                (word.left - head.left).abs() <= slack && below > 0.0 && below <= reach
+            })
+        })
+        .min_by(|a, b| a.words[0].baseline.total_cmp(&b.words[0].baseline))
+        .and_then(|line| {
+            country_named(&line.texts()).map(|code| Country {
+                code,
+                word: whole(line),
+                as_code: false,
+            })
+        });
     Some(Address {
         name: spans.next(),
         lines: spans.collect(),
@@ -244,6 +329,19 @@ pub fn in_region<'a>(
             page: place_line.page,
             words: place_line.words[postcode.taken..].iter().collect(),
         },
+        country: postcode
+            .country
+            .and_then(|written| {
+                Some(Country {
+                    code: written.code,
+                    word: Span {
+                        page: place_line.page,
+                        words: vec![place_line.words.first()?],
+                    },
+                    as_code: written.as_code,
+                })
+            })
+            .or(named),
     })
 }
 
@@ -354,8 +452,12 @@ pub fn return_address<'a>(lines: &[Line<'a>]) -> Option<Address<'a>> {
             let texts: Vec<&str> = part.iter().map(|word| word.text.as_str()).collect();
             let postcode = postcode_starting(&texts)?;
             let place = texts[postcode.taken..].join(" ");
-            postcodes::confirms(postcode.country, &postcode.digits, &place)
-                .then_some((index, postcode))
+            postcodes::confirms(
+                postcode.country.map(|written| written.code),
+                &postcode.digits,
+                &place,
+            )
+            .then_some((index, postcode))
         });
         if let Some((index, postcode)) = found {
             let part = |at: usize| Span {
@@ -374,6 +476,16 @@ pub fn return_address<'a>(lines: &[Line<'a>]) -> Option<Address<'a>> {
                     page: WINDOW_PAGE,
                     words: parts[index][postcode.taken..].to_vec(),
                 },
+                country: postcode.country.and_then(|written| {
+                    Some(Country {
+                        code: written.code,
+                        word: Span {
+                            page: WINDOW_PAGE,
+                            words: vec![*parts[index].first()?],
+                        },
+                        as_code: written.as_code,
+                    })
+                }),
             });
         }
     }
@@ -382,22 +494,51 @@ pub fn return_address<'a>(lines: &[Line<'a>]) -> Option<Address<'a>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ADDRESS_ZONE_MM, Postcode, RETURN_ZONE_MM, postcode_starting};
+    use super::{
+        ADDRESS_ZONE_MM, Postcode, RETURN_ZONE_MM, Written, country_named, postcode_starting,
+    };
 
     /// Words, and the postal code that starts them: its digits, the country
-    /// written before it and the words both take.
+    /// written before it with whether its code is what is written, and the
+    /// words both take.
     type Row = (
         &'static [&'static str],
-        Option<(&'static str, Option<&'static str>, usize)>,
+        Option<(&'static str, Option<(&'static str, bool)>, usize)>,
     );
 
     #[test]
+    fn named_countries_follow_their_table() {
+        let table: [(&[&str], Option<&str>); 7] = [
+            (&["Deutschland"], Some("DE")),
+            (&["GERMANY"], Some("DE")),
+            (&["France"], Some("FR")),
+            (&["Schweiz"], Some("CH")),
+            (&["Deutschland", "GmbH"], None),
+            (&["Bayern"], None),
+            (&[], None),
+        ];
+        for (words, expected) in table {
+            assert_eq!(country_named(words), expected, "{words:?}");
+        }
+    }
+
+    #[test]
     fn postcodes_start_lines_after_their_table() {
-        let rows: [Row; 9] = [
+        let rows: [Row; 10] = [
             (&["80333", "München"], Some(("80333", None, 1))),
-            (&["DE", "80333", "München"], Some(("80333", Some("DE"), 2))),
-            (&["D-80333", "München"], Some(("80333", Some("DE"), 1))),
-            (&["A-1010", "Wien"], Some(("1010", Some("AT"), 1))),
+            (
+                &["DE", "80333", "München"],
+                Some(("80333", Some(("DE", true)), 2)),
+            ),
+            (
+                &["DE-80333", "München"],
+                Some(("80333", Some(("DE", true)), 1)),
+            ),
+            (
+                &["D-80333", "München"],
+                Some(("80333", Some(("DE", false)), 1)),
+            ),
+            (&["A-1010", "Wien"], Some(("1010", Some(("AT", false)), 1))),
             (&["1010", "Wien"], Some(("1010", None, 1))),
             (&["80333"], None),
             (&["12345678", "Stadt"], None),
@@ -407,7 +548,7 @@ mod tests {
         for (words, expected) in rows {
             let expected = expected.map(|(digits, country, taken)| Postcode {
                 digits: digits.to_owned(),
-                country,
+                country: country.map(|(code, as_code)| Written { code, as_code }),
                 taken,
             });
             assert_eq!(postcode_starting(words), expected, "{words:?}");

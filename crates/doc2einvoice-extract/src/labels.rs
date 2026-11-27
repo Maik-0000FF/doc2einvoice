@@ -84,6 +84,7 @@ pub struct Label {
 
 /// The business terms of the labels.
 pub const INVOICE_NUMBER: u16 = 1;
+pub const INVOICE_TYPE: u16 = 3;
 pub const ISSUE_DATE: u16 = 2;
 pub const CURRENCY: u16 = 5;
 pub const DUE_DATE: u16 = 9;
@@ -529,11 +530,13 @@ pub const SELLER_VAT_IDENTIFIER: u16 = 31;
 pub const SELLER_ADDRESS_LINES: [u16; 3] = [35, 36, 162];
 pub const SELLER_CITY: u16 = 37;
 pub const SELLER_POST_CODE: u16 = 38;
+pub const SELLER_COUNTRY: u16 = 40;
 pub const BUYER_NAME: u16 = 44;
 pub const BUYER_VAT_IDENTIFIER: u16 = 48;
 pub const BUYER_ADDRESS_LINES: [u16; 3] = [50, 51, 163];
 pub const BUYER_CITY: u16 = 52;
 pub const BUYER_POST_CODE: u16 = 53;
+pub const BUYER_COUNTRY: u16 = 55;
 const PAYEE_NAME: u16 = 59;
 const TAX_REPRESENTATIVE_NAME: u16 = 62;
 const TAX_REPRESENTATIVE_VAT_IDENTIFIER: u16 = 63;

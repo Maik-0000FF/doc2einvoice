@@ -13,6 +13,7 @@
 
 mod address;
 mod breakdown;
+mod kinds;
 mod labels;
 mod lines;
 mod page;

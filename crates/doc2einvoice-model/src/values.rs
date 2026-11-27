@@ -156,6 +156,18 @@ impl<const N: usize> LetterCode<N> {
     }
 }
 
+/// The codes a kind of invoice or of credit note may have (rule BR-CL-01):
+/// the part of UNTDID 1001 the standard allows, in the order of the rule as
+/// the CII syntax lists it. The UBL syntax lists the same codes in two
+/// parts, those of invoices and those of credit notes.
+pub const INVOICE_TYPE_CODES: [&str; 62] = [
+    "71", "80", "81", "82", "83", "84", "102", "130", "202", "203", "204", "211", "218", "219",
+    "261", "262", "295", "296", "308", "325", "326", "331", "380", "381", "382", "383", "384",
+    "385", "386", "387", "388", "389", "390", "393", "394", "395", "396", "420", "456", "457",
+    "458", "471", "472", "473", "500", "501", "502", "503", "527", "532", "553", "575", "623",
+    "633", "751", "780", "817", "870", "875", "876", "877", "935",
+];
+
 /// The currency codes the standard allows (rule BR-CL-04): the alphabetic
 /// codes of ISO 4217, in the order of the rule.
 pub const CURRENCY_CODES: [&str; 178] = [

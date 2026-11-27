@@ -30,15 +30,16 @@ use doc2einvoice_pdf::{PageLayout, Word};
 
 use crate::address::{self, Address};
 use crate::breakdown::{self, Breakdown};
+use crate::kinds;
 use crate::labels::{
-    self, ALLOWANCES, AMOUNT_DUE, BUYER_ADDRESS_LINES, BUYER_CITY, BUYER_NAME, BUYER_POST_CODE,
-    BUYER_VAT_IDENTIFIER, CHARGES, CURRENCY, DELIVERY_DATE, DUE_DATE, Found, INVOICE_NUMBER,
-    ISSUE_DATE, ITEM_GROSS_PRICE, ITEM_NAME, ITEM_NET_PRICE, ITEM_PRICE_BASE, ITEM_PRICE_BASE_UNIT,
-    ITEM_VAT_CATEGORY, ITEM_VAT_RATE, LINE_IDENTIFIER, LINE_NET_AMOUNT, LINE_QUANTITY,
-    LINE_QUANTITY_UNIT, LINE_TOTAL, Names, PAID, PAYMENT_ACCOUNT, PURCHASE_ORDER, Party,
-    SELLER_ADDRESS_LINES, SELLER_CITY, SELLER_NAME, SELLER_POST_CODE, SELLER_VAT_IDENTIFIER, Scope,
-    Section, TOTAL_WITH_VAT, TOTAL_WITHOUT_VAT, VAT_CATEGORY, VAT_RATE, VAT_TAX_AMOUNT,
-    VAT_TAXABLE_AMOUNT, VAT_TOTAL, Weight,
+    self, ALLOWANCES, AMOUNT_DUE, BUYER_ADDRESS_LINES, BUYER_CITY, BUYER_COUNTRY, BUYER_NAME,
+    BUYER_POST_CODE, BUYER_VAT_IDENTIFIER, CHARGES, CURRENCY, DELIVERY_DATE, DUE_DATE, Found,
+    INVOICE_NUMBER, INVOICE_TYPE, ISSUE_DATE, ITEM_GROSS_PRICE, ITEM_NAME, ITEM_NET_PRICE,
+    ITEM_PRICE_BASE, ITEM_PRICE_BASE_UNIT, ITEM_VAT_CATEGORY, ITEM_VAT_RATE, LINE_IDENTIFIER,
+    LINE_NET_AMOUNT, LINE_QUANTITY, LINE_QUANTITY_UNIT, LINE_TOTAL, Names, PAID, PAYMENT_ACCOUNT,
+    PURCHASE_ORDER, Party, SELLER_ADDRESS_LINES, SELLER_CITY, SELLER_COUNTRY, SELLER_NAME,
+    SELLER_POST_CODE, SELLER_VAT_IDENTIFIER, Scope, Section, TOTAL_WITH_VAT, TOTAL_WITHOUT_VAT,
+    VAT_CATEGORY, VAT_RATE, VAT_TAX_AMOUNT, VAT_TAXABLE_AMOUNT, VAT_TOTAL, Weight,
 };
 use crate::lines::{self, Line as InvoiceLine};
 use crate::page::{self, Line, Span};
@@ -228,11 +229,13 @@ pub fn draft(pages: &[PageLayout]) -> Draft {
     let labelled = labelled(&lines);
     let mut draft = Draft::default();
     let mut number: Option<(usize, usize)> = None;
+    let mut number_line: Option<usize> = None;
     for rule in &RULES {
         let chosen = chosen(rule, &lines, &labelled, number);
         if let Some(candidate) = chosen {
             if rule.term == INVOICE_NUMBER {
                 number = candidate.end_in_line.map(|end| (candidate.line, end));
+                number_line = Some(candidate.line);
             }
             draft.entries.push(candidate.entry);
         } else if rule.term == CURRENCY
@@ -240,6 +243,9 @@ pub fn draft(pages: &[PageLayout]) -> Draft {
         {
             draft.entries.push(entry);
         }
+    }
+    if let Some(entry) = invoice_type(&lines, &labelled, number_line) {
+        draft.entries.push(entry);
     }
     // Each party takes its address from the first place that has one: an
     // address made of the parts of two is no address.
@@ -271,6 +277,68 @@ pub fn draft(pages: &[PageLayout]) -> Draft {
         add_line(&mut draft, index, line);
     }
     draft
+}
+
+/// The kind of invoice: the code printed in brackets in a line of an
+/// invoice number, as in "Handelsrechnung (380) Nr. 471102", the first such
+/// line; or else the commercial invoice the plain title tells of the line
+/// `number_line`, the one the invoice number was read from, marked as worked
+/// out. A plain title in another line names another invoice, as the one a
+/// credit note refers to.
+///
+/// | Lines, the number read from the first        | Kind                |
+/// |----------------------------------------------|---------------------|
+/// | `Handelsrechnung` `(380)` `Nr.` `471102`     | `380`, read         |
+/// | `Rechnungskorrektur` `(384)` `Nr.` `RK21012345` | `384`, read      |
+/// | `Rechnung` `Nr.` `471102`                    | `380`, worked out   |
+/// | `Rechnung` `Nr.` `1`, further down `Gutschrift` `(381)` `Nr.` `2` | `381`, read |
+/// | `Gutschrift` `Nr.` `2`, further down `Rechnung` `Nr.` `1` | none (the title of the invoice referred to) |
+/// | `Rechnungskorrektur` `Nr.` `RK1`, further down `Rechnung` `471102` | none |
+/// | `Gutschrift` `Nr.` `471102`                  | none                |
+/// | `phone` `(555)` `123456`                     | none (no invoice number, no code of a kind) |
+/// | `Bau` `(877)` beside no number               | none (no invoice number in the line) |
+fn invoice_type(
+    lines: &[Line],
+    labelled: &[Labelled],
+    number_line: Option<usize>,
+) -> Option<Entry> {
+    let entry = |word: &Word, page: usize, code: &str, origin: Origin| Entry {
+        term: INVOICE_TYPE,
+        within: Vec::new(),
+        text: code.to_owned(),
+        origin,
+        location: Span {
+            page,
+            words: vec![word],
+        }
+        .location(0, 1),
+    };
+    let printed = labelled
+        .iter()
+        .filter(|line| {
+            line.found
+                .iter()
+                .any(|found| found.names == Names::Term(INVOICE_NUMBER))
+        })
+        .find_map(|line| {
+            let printed = lines.get(line.line)?;
+            printed.words.iter().find_map(|word| {
+                kinds::printed(&word.text).map(|code| entry(word, printed.page, code, Origin::Rule))
+            })
+        });
+    printed.or_else(|| {
+        let line = labelled
+            .iter()
+            .find(|line| Some(line.line) == number_line)?;
+        let printed = lines.get(line.line)?;
+        let code = kinds::told_by_title(&line.words)?;
+        Some(entry(
+            printed.words.first()?,
+            printed.page,
+            code,
+            Origin::Derived,
+        ))
+    })
 }
 
 /// The values of `row` as the entries of the row of the VAT breakdown at
@@ -336,15 +404,16 @@ fn add_occurrence(
 /// The terms of the parts of the address of a party whose address is read:
 /// its name, its three address lines, its place and its postal code.
 ///
-/// | Party  | Name  | Lines                 | Place | Postal code |
-/// |--------|-------|-----------------------|-------|-------------|
-/// | seller | BT-27 | BT-35, BT-36, BT-162  | BT-37 | BT-38       |
-/// | buyer  | BT-44 | BT-50, BT-51, BT-163  | BT-52 | BT-53       |
+/// | Party  | Name  | Lines                 | Place | Postal code | Country |
+/// |--------|-------|-----------------------|-------|-------------|---------|
+/// | seller | BT-27 | BT-35, BT-36, BT-162  | BT-37 | BT-38       | BT-40   |
+/// | buyer  | BT-44 | BT-50, BT-51, BT-163  | BT-52 | BT-53       | BT-55   |
 struct AddressTerms {
     name: u16,
     lines: [u16; 3],
     place: u16,
     postcode: u16,
+    country: u16,
 }
 
 const SELLER_ADDRESS: AddressTerms = AddressTerms {
@@ -352,6 +421,7 @@ const SELLER_ADDRESS: AddressTerms = AddressTerms {
     lines: SELLER_ADDRESS_LINES,
     place: SELLER_CITY,
     postcode: SELLER_POST_CODE,
+    country: SELLER_COUNTRY,
 };
 
 const BUYER_ADDRESS: AddressTerms = AddressTerms {
@@ -359,6 +429,7 @@ const BUYER_ADDRESS: AddressTerms = AddressTerms {
     lines: BUYER_ADDRESS_LINES,
     place: BUYER_CITY,
     postcode: BUYER_POST_CODE,
+    country: BUYER_COUNTRY,
 };
 
 fn address_terms(party: Party) -> Option<&'static AddressTerms> {
@@ -448,6 +519,24 @@ fn add_address(draft: &mut Draft, party: Party, found: &Address) {
             text,
             origin: Origin::Rule,
             location: span.location(0, span.words.len()),
+        });
+    }
+    // The code of the country is read where it is written itself; an older
+    // mark of the country, as the "D" of "D-80333", stands for the code,
+    // which is then worked out and marked so.
+    if let Some(country) = &found.country
+        && draft.values_of(terms.country).next().is_none()
+    {
+        draft.entries.push(Entry {
+            term: terms.country,
+            within: Vec::new(),
+            text: country.code.to_owned(),
+            origin: if country.as_code {
+                Origin::Rule
+            } else {
+                Origin::Derived
+            },
+            location: country.word.location(0, country.word.words.len()),
         });
     }
 }
@@ -750,13 +839,14 @@ mod tests {
 
     use super::draft;
     use crate::labels::{
-        ALLOWANCES, AMOUNT_DUE, BUYER_ADDRESS_LINES, BUYER_CITY, BUYER_NAME, BUYER_POST_CODE,
-        BUYER_VAT_IDENTIFIER, CHARGES, CURRENCY, DELIVERY_DATE, DUE_DATE, INVOICE_NUMBER,
-        ISSUE_DATE, ITEM_NAME, ITEM_NET_PRICE, ITEM_PRICE_BASE, ITEM_PRICE_BASE_UNIT,
-        ITEM_VAT_RATE, LINE_IDENTIFIER, LINE_NET_AMOUNT, LINE_QUANTITY, LINE_QUANTITY_UNIT,
-        LINE_TOTAL, PAID, PAYMENT_ACCOUNT, PURCHASE_ORDER, SELLER_ADDRESS_LINES, SELLER_CITY,
-        SELLER_NAME, SELLER_POST_CODE, SELLER_VAT_IDENTIFIER, TOTAL_WITH_VAT, TOTAL_WITHOUT_VAT,
-        VAT_CATEGORY, VAT_RATE, VAT_TAX_AMOUNT, VAT_TAXABLE_AMOUNT, VAT_TOTAL,
+        ALLOWANCES, AMOUNT_DUE, BUYER_ADDRESS_LINES, BUYER_CITY, BUYER_COUNTRY, BUYER_NAME,
+        BUYER_POST_CODE, BUYER_VAT_IDENTIFIER, CHARGES, CURRENCY, DELIVERY_DATE, DUE_DATE,
+        INVOICE_NUMBER, INVOICE_TYPE, ISSUE_DATE, ITEM_NAME, ITEM_NET_PRICE, ITEM_PRICE_BASE,
+        ITEM_PRICE_BASE_UNIT, ITEM_VAT_RATE, LINE_IDENTIFIER, LINE_NET_AMOUNT, LINE_QUANTITY,
+        LINE_QUANTITY_UNIT, LINE_TOTAL, PAID, PAYMENT_ACCOUNT, PURCHASE_ORDER,
+        SELLER_ADDRESS_LINES, SELLER_CITY, SELLER_COUNTRY, SELLER_NAME, SELLER_POST_CODE,
+        SELLER_VAT_IDENTIFIER, TOTAL_WITH_VAT, TOTAL_WITHOUT_VAT, VAT_CATEGORY, VAT_RATE,
+        VAT_TAX_AMOUNT, VAT_TAXABLE_AMOUNT, VAT_TOTAL,
     };
 
     /// The font size of every word, and the width of one character.
@@ -1331,6 +1421,132 @@ mod tests {
                 Some("99199".to_owned()),
             ]
         );
+    }
+
+    /// The seller of a section, the last line of whose address is `place`.
+    fn seller_in(place: &[&str]) -> [PageLayout; 1] {
+        [page(vec![wrapped_block(
+            50.0,
+            100.0,
+            &[
+                &["Verkäufer:"],
+                &["Lieferant", "GmbH"],
+                &["Lieferantenstraße", "20"],
+                place,
+            ],
+        )])]
+    }
+
+    #[test]
+    fn the_country_before_a_postal_code_is_read_and_an_older_mark_of_it_worked_out() {
+        let read = |text: &str| vec![(text.to_owned(), Origin::Rule)];
+        let worked_out = |text: &str| vec![(text.to_owned(), Origin::Derived)];
+        let as_code = seller_in(&["DE", "99199", "Musterhausen"]);
+        assert_eq!(origins(&as_code, SELLER_COUNTRY), read("DE"));
+        assert_eq!(origins(&as_code, SELLER_POST_CODE), read("99199"));
+        let place = draft(&as_code)
+            .values_of(SELLER_COUNTRY)
+            .next()
+            .and_then(|entry| entry.location)
+            .map(|at| (at.left, at.right));
+        assert_eq!(place, Some((50.0, 50.0 + 2.0 * CHARACTER)));
+        let joined = seller_in(&["DE-99199", "Musterhausen"]);
+        assert_eq!(origins(&joined, SELLER_COUNTRY), read("DE"));
+        let older_mark = seller_in(&["D-99199", "Musterhausen"]);
+        assert_eq!(origins(&older_mark, SELLER_COUNTRY), worked_out("DE"));
+        assert_eq!(origins(&older_mark, SELLER_POST_CODE), read("99199"));
+        let none = seller_in(&["99199", "Musterhausen"]);
+        assert_eq!(origins(&none, SELLER_COUNTRY), []);
+        assert_eq!(origins(&none, BUYER_COUNTRY), []);
+        // The name of the country on the line below the place stands for
+        // its code; written before the postal code, the code itself counts.
+        let named = |place: &[&str], below: &[&str]| {
+            [page(vec![wrapped_block(
+                50.0,
+                100.0,
+                &[
+                    &["Verkäufer:"],
+                    &["Lieferant", "GmbH"],
+                    &["Lieferantenstraße", "20"],
+                    place,
+                    below,
+                ],
+            )])]
+        };
+        let written_out = named(&["99199", "Musterhausen"], &["Deutschland"]);
+        assert_eq!(origins(&written_out, SELLER_COUNTRY), worked_out("DE"));
+        assert_eq!(origins(&written_out, SELLER_CITY), read("Musterhausen"));
+        let both = named(&["FR", "75001", "Paris"], &["Deutschland"]);
+        assert_eq!(origins(&both, SELLER_COUNTRY), read("FR"));
+        let no_country = named(&["99199", "Musterhausen"], &["Bayern"]);
+        assert_eq!(origins(&no_country, SELLER_COUNTRY), []);
+    }
+
+    #[test]
+    fn the_kind_of_invoice_is_read_where_its_code_is_printed() {
+        let kind = |title: &[&str]| {
+            let pages = [page(vec![
+                block(50.0, 80.0, &["phone", "(555)", "123456"]),
+                block(50.0, 100.0, title),
+            ])];
+            origins(&pages, INVOICE_TYPE)
+        };
+        let read = |text: &str| vec![(text.to_owned(), Origin::Rule)];
+        assert_eq!(
+            kind(&["Handelsrechnung", "(380)", "Nr.", "471102"]),
+            read("380")
+        );
+        assert_eq!(
+            kind(&["Rechnungskorrektur", "(384)", "Nr.", "RK21012345"]),
+            read("384")
+        );
+        let worked_out = |text: &str| vec![(text.to_owned(), Origin::Derived)];
+        assert_eq!(kind(&["Rechnung", "Nr.", "471102"]), worked_out("380"));
+        assert_eq!(kind(&["Invoice", "FA-2017-0010"]), worked_out("380"));
+        assert_eq!(kind(&["Gutschrift", "Nr.", "471102"]), []);
+        assert_eq!(
+            kind(&["Rechnung", "des", "Versicherers", "Nr.", "4711"]),
+            []
+        );
+        // A plain title in another line than that of the number read is the
+        // title of the invoice referred to.
+        let referred = |title: &[&str], reference: &[&str]| {
+            let pages = [page(vec![
+                block(50.0, 100.0, title),
+                block(50.0, 120.0, reference),
+            ])];
+            (value(&pages, INVOICE_NUMBER), origins(&pages, INVOICE_TYPE))
+        };
+        assert_eq!(
+            referred(&["Gutschrift", "Nr.", "2"], &["Rechnung", "Nr.", "1"]),
+            (Some("2".to_owned()), Vec::new())
+        );
+        assert_eq!(
+            referred(
+                &["Stornorechnung", "Nr.", "5"],
+                &["Rechnung", "Nr.", "4", "vom", "01.02.2026"]
+            ),
+            (Some("5".to_owned()), Vec::new())
+        );
+        assert_eq!(
+            referred(
+                &["Rechnungskorrektur", "Nr.", "RK1"],
+                &["Rechnung", "471102"]
+            ),
+            (Some("RK1".to_owned()), Vec::new())
+        );
+        let printed_later = [page(vec![
+            block(50.0, 100.0, &["Rechnung", "Nr.", "1"]),
+            block(50.0, 120.0, &["Gutschrift", "(381)", "Nr.", "2"]),
+        ])];
+        assert_eq!(origins(&printed_later, INVOICE_TYPE), read("381"));
+        assert_eq!(kind(&["Bau", "(877)"]), []);
+        let number = [page(vec![block(
+            50.0,
+            100.0,
+            &["Handelsrechnung", "(380)", "Nr.", "471102"],
+        )])];
+        assert_eq!(value(&number, INVOICE_NUMBER).as_deref(), Some("471102"));
     }
 
     #[test]
