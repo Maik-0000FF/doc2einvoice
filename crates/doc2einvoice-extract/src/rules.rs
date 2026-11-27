@@ -1419,6 +1419,35 @@ mod tests {
             ),
         ])];
         assert_eq!(value(&debit, PAYMENT_ACCOUNT), None);
+        // A statement that denies the debit leaves the account after it the
+        // one to transfer to.
+        let denied = [page(vec![
+            block(
+                50.0,
+                100.0,
+                &["Der", "Betrag", "wird", "nicht", "abgebucht."],
+            ),
+            block(
+                50.0,
+                100.0 + LINE_PITCH,
+                &["IBAN:", "DE02120300000000202051"],
+            ),
+        ])];
+        assert_eq!(
+            value(&denied, PAYMENT_ACCOUNT).as_deref(),
+            Some("DE02120300000000202051")
+        );
+        // A mandate mentioned above an account hides it, whoever's it is:
+        // nothing tells the seller's from the one debited there.
+        let mandate = [page(vec![
+            block(50.0, 100.0, &["Mandatsreferenz:", "M-17"]),
+            block(
+                50.0,
+                100.0 + LINE_PITCH,
+                &["IBAN:", "DE02120300000000202051"],
+            ),
+        ])];
+        assert_eq!(value(&mandate, PAYMENT_ACCOUNT), None);
         let buyer = [page(vec![
             block(50.0, 100.0, &["Käufer"]),
             block(

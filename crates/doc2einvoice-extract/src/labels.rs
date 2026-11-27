@@ -695,6 +695,12 @@ pub fn unsectioned_term(field: PartyField) -> Option<u16> {
 /// or the mandate it is taken under. The mere name of the means, as
 /// "Lastschrift", is not among them: "Zahlbar per Überweisung oder
 /// SEPA-Lastschrift" offers it, and the IBAN after it is the seller's.
+///
+/// A mandate reference counts wherever it is printed, also where a footer
+/// mentions it above the account of the seller. Nothing on the page tells
+/// that from a mandate printed above the account debited, and an account
+/// left out is the lesser fault than the buyer's account taken for the one
+/// to transfer to. That is decided, not left open.
 const DIRECT_DEBIT_WORDS: &[Word] = &[
     Is("abgebucht"),
     Is("abbuchen"),
@@ -704,24 +710,45 @@ const DIRECT_DEBIT_WORDS: &[Word] = &[
     Is("prélevé"),
 ];
 
+/// Words that say something is not so, in German, English and French, as
+/// [`normalized`] gives them.
+const NEGATIONS: [&str; 7] = ["nicht", "kein", "keine", "keinen", "not", "no", "pas"];
+
+/// How many words before a word a negation of it may stand: directly
+/// before it, or with one word between, as in "not be debited" and "kein
+/// Betrag abgebucht". A negation further away denies something else, as in
+/// "Bitte nicht überweisen, der Betrag wird abgebucht".
+const NEGATION_REACH: usize = 2;
+
 /// Whether a line says that the amount is taken by direct debit, which
-/// opens a section of the account debited.
+/// opens a section of the account debited. A line that denies it says the
+/// opposite: the account after it is the one to transfer to.
 ///
 /// | Words                                               | Direct debit |
 /// |-----------------------------------------------------|--------------|
 /// | `Der` `Betrag` `wird` `abgebucht` `von:`           | yes          |
 /// | `Mandatsreferenz:` `M-17`                          | yes          |
 /// | `The` `amount` `will` `be` `debited`               | yes          |
+/// | `Der` `Betrag` `wird` `nicht` `abgebucht.`         | no (denied)  |
+/// | `Es` `wird` `kein` `Betrag` `eingezogen`           | no (denied)  |
+/// | `The` `amount` `will` `not` `be` `debited`         | no (denied)  |
+/// | `Le` `montant` `n'est` `pas` `prélevé`             | no (denied)  |
+/// | `Bitte` `nicht` `überweisen,` `der` `Betrag` `wird` `abgebucht` | yes (the transfer is denied, not the debit) |
+/// | `Nicht` `vergessen:` `der` `Betrag` `wird` `am` `1.` `abgebucht` | yes |
 /// | `Zahlbar` `per` `Überweisung` `oder` `SEPA-Lastschrift` | no (offered, not taken) |
 /// | `Eine` `Lastschrift` `ist` `nicht` `möglich.`      | no           |
 /// | `Payment` `by` `direct` `debit`                    | no (the means only) |
 /// | `Bitte` `überweisen` `Sie`                         | no           |
 pub fn says_direct_debit(words: &[&str]) -> bool {
-    words.iter().any(|word| {
-        let normal = normalized(word);
-        DIRECT_DEBIT_WORDS
+    let normal: Vec<String> = words.iter().map(|word| normalized(word)).collect();
+    normal.iter().enumerate().any(|(at, word)| {
+        let taken = DIRECT_DEBIT_WORDS
             .iter()
-            .any(|pattern| matches(*pattern, &normal))
+            .any(|pattern| matches(*pattern, word));
+        let denied = normal[at.saturating_sub(NEGATION_REACH)..at]
+            .iter()
+            .any(|before| NEGATIONS.contains(&before.as_str()));
+        taken && !denied
     })
 }
 
@@ -988,7 +1015,36 @@ mod tests {
 
     #[test]
     fn direct_debit_is_said_after_its_table() {
-        let rows: [(&[&str], bool); 7] = [
+        let rows: [(&[&str], bool); 13] = [
+            (&["Der", "Betrag", "wird", "nicht", "abgebucht."], false),
+            (&["Es", "wird", "kein", "Betrag", "eingezogen"], false),
+            (&["The", "amount", "will", "not", "be", "debited"], false),
+            (&["Le", "montant", "n'est", "pas", "prélevé"], false),
+            (
+                &[
+                    "Bitte",
+                    "nicht",
+                    "überweisen,",
+                    "der",
+                    "Betrag",
+                    "wird",
+                    "abgebucht",
+                ],
+                true,
+            ),
+            (
+                &[
+                    "Nicht",
+                    "vergessen:",
+                    "der",
+                    "Betrag",
+                    "wird",
+                    "am",
+                    "1.",
+                    "abgebucht",
+                ],
+                true,
+            ),
             (&["Der", "Betrag", "wird", "abgebucht", "von:"], true),
             (&["Mandatsreferenz:", "M-17"], true),
             (&["The", "amount", "will", "be", "debited"], true),
