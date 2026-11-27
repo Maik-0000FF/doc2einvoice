@@ -91,6 +91,69 @@ pub fn lines(pages: &[PageLayout]) -> Vec<Line<'_>> {
         .collect()
 }
 
+/// The words of one page that stand on one baseline, from left to right,
+/// whichever lines and blocks they belong to: a row of a table, whose cells
+/// are lines of their own.
+pub struct Row<'a> {
+    pub page: usize,
+    pub words: Vec<&'a Word>,
+}
+
+impl<'a> Row<'a> {
+    /// The words from `first` on, `count` of them, as a span.
+    pub fn span(&self, first: usize, count: usize) -> Option<Span<'a>> {
+        Some(Span {
+            page: self.page,
+            words: self.words.get(first..first + count)?.to_vec(),
+        })
+    }
+}
+
+/// The rows of `lines`, page by page from top to bottom. Two lines stand in
+/// one row if their baselines are one at the smaller of their font sizes:
+/// small print set beside a larger line, slightly off its baseline, is a
+/// row of its own.
+///
+/// | Lines of a page (baseline, size)            | Rows                 |
+/// |---------------------------------------------|----------------------|
+/// | `7%` (100, 10), `160,00` (100.5, 10)        | one                  |
+/// | `7%` (100, 10), `19%` (112, 10)             | two, the upper first |
+/// | `Base` (100, 7), `Total` (102.9, 10)        | two                  |
+/// | `7%` (100, 10) on two pages                 | two                  |
+pub fn rows<'a>(lines: &[Line<'a>]) -> Vec<Row<'a>> {
+    let mut heads: Vec<(&Line<'a>, &'a Word)> = lines
+        .iter()
+        .filter_map(|line| line.words.first().map(|head| (line, head)))
+        .collect();
+    heads.sort_by(|(a, first), (b, second)| {
+        a.page
+            .cmp(&b.page)
+            .then(first.baseline.total_cmp(&second.baseline))
+    });
+    let mut rows: Vec<Row<'a>> = Vec::new();
+    let mut open: Option<&'a Word> = None;
+    for (line, head) in heads {
+        let joins = rows.last().zip(open).is_some_and(|(row, first)| {
+            let font_size = first.font_size.min(head.font_size);
+            row.page == line.page && same_baseline(first.baseline, head.baseline, font_size)
+        });
+        if !joins {
+            rows.push(Row {
+                page: line.page,
+                words: Vec::new(),
+            });
+            open = Some(head);
+        }
+        if let Some(row) = rows.last_mut() {
+            row.words.extend(line.words);
+        }
+    }
+    for row in &mut rows {
+        row.words.sort_by(|a, b| a.left.total_cmp(&b.left));
+    }
+    rows
+}
+
 /// The words of the line after `line` if it continues the same block below
 /// it: where a sentence that ends with a label wraps, its value starts that
 /// line. A line of the block on the same baseline is a cell beside it.
@@ -261,7 +324,7 @@ pub fn below<'a>(lines: &[Line<'a>], line: usize, first: &Word, last: &Word) -> 
 mod tests {
     use doc2einvoice_pdf::{Block, Line as Printed, PageLayout, Word};
 
-    use super::{cell_right_of, lines, wrapped};
+    use super::{cell_right_of, lines, rows, wrapped};
 
     /// The font size of every word, and the distance of two baselines.
     const FONT: f64 = 10.0;
@@ -282,6 +345,46 @@ mod tests {
     fn texts(pages: &[PageLayout], at: usize) -> Option<Vec<String>> {
         let all = lines(pages);
         wrapped(&all, at).map(|span| span.texts().iter().map(|text| (*text).to_owned()).collect())
+    }
+
+    /// One line of one word in a block of its own, at a font size.
+    fn sized(left: f64, baseline: f64, font_size: f64, text: &str) -> Block {
+        let mut printed = line(left, baseline, text);
+        for word in &mut printed.words {
+            word.font_size = font_size;
+        }
+        Block {
+            lines: vec![printed],
+        }
+    }
+
+    fn row_texts(pages: &[PageLayout]) -> Vec<Vec<String>> {
+        rows(&lines(pages))
+            .iter()
+            .map(|row| row.words.iter().map(|word| word.text.clone()).collect())
+            .collect()
+    }
+
+    #[test]
+    fn rows_follow_their_table() {
+        let one = layout(vec![
+            sized(200.0, 100.5, FONT, "160,00"),
+            sized(50.0, 100.0, FONT, "7%"),
+        ]);
+        assert_eq!(row_texts(&one), [["7%", "160,00"]]);
+        let two = layout(vec![
+            sized(50.0, 100.0 + PITCH, FONT, "19%"),
+            sized(50.0, 100.0, FONT, "7%"),
+        ]);
+        assert_eq!(row_texts(&two), [["7%"], ["19%"]]);
+        let small_print = layout(vec![
+            sized(50.0, 100.0, 7.0, "Base"),
+            sized(300.0, 102.9, FONT, "Total"),
+        ]);
+        assert_eq!(row_texts(&small_print), [["Base"], ["Total"]]);
+        let [page] = layout(vec![sized(50.0, 100.0, FONT, "7%")]);
+        let pages = [page.clone(), page];
+        assert_eq!(row_texts(&pages), [["7%"], ["7%"]]);
     }
 
     #[test]

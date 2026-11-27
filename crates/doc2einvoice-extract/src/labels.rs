@@ -90,13 +90,13 @@ pub const DUE_DATE: u16 = 9;
 pub const PURCHASE_ORDER: u16 = 13;
 const PRECEDING_INVOICE: u16 = 25;
 pub const DELIVERY_DATE: u16 = 72;
-const LINE_TOTAL: u16 = 106;
-const ALLOWANCES: u16 = 107;
-const CHARGES: u16 = 108;
+pub const LINE_TOTAL: u16 = 106;
+pub const ALLOWANCES: u16 = 107;
+pub const CHARGES: u16 = 108;
 pub const TOTAL_WITHOUT_VAT: u16 = 109;
 pub const VAT_TOTAL: u16 = 110;
 pub const TOTAL_WITH_VAT: u16 = 112;
-const PAID: u16 = 113;
+pub const PAID: u16 = 113;
 /// The account to transfer to (BT-84), and the account a direct debit
 /// takes from (BT-91), which only keeps its words from the other.
 pub const PAYMENT_ACCOUNT: u16 = 84;
@@ -367,8 +367,10 @@ pub const LABELS: &[Label] = &[
     party(&[Is("iban")], PartyField::Account),
     label(&[Is("verkäufer-iban")], PAYMENT_ACCOUNT, Anywhere),
     label(&[Is("käufer-iban")], DEBITED_ACCOUNT, Anywhere),
-    // Terms not read yet, which keep their words from shorter labels.
+    // A term not read yet, which keeps its words from shorter labels.
     label(&[Is("facture"), Is("liée")], PRECEDING_INVOICE, Anywhere),
+    // The sums of the lines, of the allowances and of the charges, and what
+    // is paid already.
     label(&[Is("positionssumme")], LINE_TOTAL, Anywhere),
     label(&[Is("summe"), Is("positionen")], LINE_TOTAL, Anywhere),
     label(

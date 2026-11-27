@@ -12,6 +12,7 @@
 //! that carry their data as XML (`examples/measure`).
 
 mod address;
+mod breakdown;
 mod labels;
 mod page;
 mod postcodes;

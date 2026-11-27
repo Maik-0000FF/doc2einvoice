@@ -111,6 +111,13 @@ const PERCENT: char = '%';
 /// words in brackets.
 const MARKER_REACH: usize = 3;
 
+/// The highest rate of a tax: the whole of what it is charged on.
+const RATE_MOST: Decimal = Decimal::ONE_HUNDRED;
+
+/// The brackets a rate may stand in, as in `USt. (19 %)`.
+const OPENING_BRACKET: char = '(';
+const CLOSING_BRACKET: char = ')';
+
 /// The identifier the words stand for: the first word, or the word after a
 /// number marker among the first few, if it holds a digit and is no date.
 ///
@@ -311,6 +318,54 @@ fn number_after_marks(words: &[&str]) -> Option<(usize, Decimal)> {
             return Some((skipped, number(strip_currency(word))?));
         }
     }
+}
+
+/// A rate with its sign, joined to it or as the next word, in brackets or
+/// not.
+///
+/// | Words               | Read                 |
+/// |---------------------|----------------------|
+/// | `19%`               | `19`                 |
+/// | `19` `%`            | `19`, two words      |
+/// | `19,00` `%`         | `19`, two words      |
+/// | `20,0%`, `5.5%`     | `20`, `5.5`          |
+/// | `(19` `%)`          | `19`, two words      |
+/// | `(19%)`, `19%,`     | `19`                 |
+/// | `0%`, `100%`        | `0`, `100`           |
+/// | `19`, `19` `EUR`    | none (no sign)       |
+/// | `%`, `(%)`          | none (no number)     |
+/// | `%` `19`            | none (the sign first) |
+/// | `-5%`, `5-%`        | none (below nothing) |
+/// | `119%`              | none (above the whole) |
+/// | `1.234%`            | none (thousands or decimals) |
+/// | `MwSt%`             | none                 |
+/// | nothing             | none                 |
+pub fn rate(words: &[&str]) -> Option<Read> {
+    let closed = |word: &str| -> String {
+        word.trim_end_matches(TRAILING)
+            .trim_end_matches(CLOSING_BRACKET)
+            .to_owned()
+    };
+    let head = closed(words.first()?.trim_start_matches(OPENING_BRACKET));
+    let sign_follows = words
+        .get(1)
+        .is_some_and(|next| closed(next) == PERCENT.to_string());
+    let (digits, used) = match head.strip_suffix(PERCENT) {
+        Some(digits) => (digits, 1),
+        None if sign_follows => (head.as_str(), 2),
+        None => return None,
+    };
+    let value = number(digits).filter(|value| may_be_rate(*value))?;
+    Some(Read {
+        text: value.normalize().to_string(),
+        skipped: 0,
+        used,
+    })
+}
+
+/// Whether a number can be the rate of a tax: from nothing to the whole.
+pub fn may_be_rate(value: Decimal) -> bool {
+    (Decimal::ZERO..=RATE_MOST).contains(&value)
 }
 
 /// Whether a word is a rate with its sign joined, as `19%` or `19,00%`.
@@ -543,9 +598,11 @@ pub fn currency(words: &[&str]) -> Option<Read> {
 
 #[cfg(test)]
 mod tests {
+    use rust_decimal::Decimal;
+
     use super::{
         amount, currency, currency_mark, date, has_decimals, iban, identifier, joined_symbol,
-        monetary, text as text_of, vat_identifier,
+        may_be_rate, monetary, rate, text as text_of, vat_identifier,
     };
 
     fn text(read: Option<super::Read>) -> Option<String> {
@@ -737,6 +794,42 @@ mod tests {
         assert_eq!(text(currency(&["EUR"])).as_deref(), Some("EUR"));
         assert_eq!(text(currency(&["€"])).as_deref(), Some("EUR"));
         assert_eq!(currency(&["Euro"]), None);
+    }
+
+    #[test]
+    fn rates_follow_their_table() {
+        let rows: [Row; 21] = [
+            (&["19%"], Some(("19", 1))),
+            (&["19", "%"], Some(("19", 2))),
+            (&["19,00", "%"], Some(("19", 2))),
+            (&["20,0%"], Some(("20", 1))),
+            (&["5.5%"], Some(("5.5", 1))),
+            (&["(19", "%)"], Some(("19", 2))),
+            (&["(19%)"], Some(("19", 1))),
+            (&["19%,"], Some(("19", 1))),
+            (&["0%"], Some(("0", 1))),
+            (&["100%"], Some(("100", 1))),
+            (&["19"], None),
+            (&["19", "EUR"], None),
+            (&["%"], None),
+            (&["(%)"], None),
+            (&["%", "19"], None),
+            (&["-5%"], None),
+            (&["5-%"], None),
+            (&["119%"], None),
+            (&["1.234%"], None),
+            (&["MwSt%"], None),
+            (&[], None),
+        ];
+        for (words, expected) in rows {
+            let read = rate(words);
+            let got = read.as_ref().map(|read| (read.text.as_str(), read.used));
+            assert_eq!(got, expected, "{words:?}");
+        }
+        assert!(may_be_rate(Decimal::ZERO));
+        assert!(may_be_rate(Decimal::ONE_HUNDRED));
+        assert!(!may_be_rate(Decimal::NEGATIVE_ONE));
+        assert!(!may_be_rate(Decimal::ONE_THOUSAND));
     }
 
     #[test]
