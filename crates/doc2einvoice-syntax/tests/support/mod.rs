@@ -580,6 +580,14 @@ pub mod named {
         format!("BT-{number}")
     }
 
+    /// What goes with the value of the term `number` without being a
+    /// term of its own, as the scheme of an identifier: a text that tells
+    /// its `role` and does not name the term, as `scheme-BT-27`. Written
+    /// in the place of the value, it is found out.
+    pub fn beside(role: &str, number: u16) -> String {
+        format!("{role}-{}", text(number))
+    }
+
     /// The number of the term `number`, as `27.5`.
     pub fn number(number: u16) -> Decimal {
         decimal(&format!("{number}{DECIMALS}"))
@@ -618,6 +626,7 @@ pub mod named {
     /// | `20270101`   | 27   | yes      |
     /// | `BT-28`      | 27   | no       |
     /// | `BT-270`     | 27   | no       |
+    /// | `scheme-BT-27` | 27 | no       |
     /// | `28.5`       | 27   | no       |
     /// | `27`         | 27   | no       |
     /// | `2028-01-01` | 27   | no       |
@@ -687,15 +696,23 @@ fn named_category(term: u16) -> VatCategory {
         )
 }
 
-/// An identifier that names the term, in a scheme of the same name.
+/// What tells the scheme of an identifier from its content.
+const SCHEME: &str = "scheme";
+/// What tells the version of a scheme from the scheme and the content.
+const SCHEME_VERSION: &str = "version";
+/// What tells the type and the name of an attached file from its content.
+const MIME: &str = "mime";
+const FILENAME: &str = "filename";
+
+/// An identifier that names the term, in a scheme of its own.
 fn named_scheme(term: u16) -> OptionalSchemeIdentifier {
-    scheme(&named::text(term), &named::text(term))
+    scheme(&named::text(term), &named::beside(SCHEME, term))
 }
 
 fn named_required_scheme(term: u16) -> RequiredSchemeIdentifier {
     RequiredSchemeIdentifier {
         content: named::text(term),
-        scheme: named::text(term),
+        scheme: named::beside(SCHEME, term),
     }
 }
 
@@ -802,8 +819,8 @@ fn named_line() -> InvoiceLine {
             standard_identifier: Some(named_required_scheme(157)),
             classifications: vec![ItemClassification {
                 content: named::text(158),
-                scheme: named::text(158),
-                scheme_version: Some(named::text(158)),
+                scheme: named::beside(SCHEME, 158),
+                scheme_version: Some(named::beside(SCHEME_VERSION, 158)),
             }],
             country_of_origin: Some(named_country(159)),
             attributes: vec![ItemAttribute {
@@ -977,8 +994,8 @@ pub fn named_invoice(kind: NamedPayment) -> Invoice {
             external_location: Some(named::text(124)),
             attachment: Some(BinaryObject {
                 content: named_attachment(),
-                mime_code: named::text(125),
-                filename: named::text(125),
+                mime_code: named::beside(MIME, 125),
+                filename: named::beside(FILENAME, 125),
             }),
         }],
         lines: NonEmpty::one(named_line()),

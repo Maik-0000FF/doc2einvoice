@@ -181,27 +181,35 @@ impl Parsed {
 
 /// The subject code of a note (BT-21) and its text (BT-22), which UBL writes
 /// into one element, as `#AAI#the text`.
-const UBL_NOTE_TERMS: [u16; 2] = [21, 22];
-/// What UBL puts around the subject code of a note.
+const UBL_NOTE_SUBJECT: u16 = 21;
+const UBL_NOTE_TEXT: u16 = 22;
+/// What UBL puts before and after the subject code of a note.
 const UBL_NOTE_MARK: char = '#';
 
-/// What a UBL document writes for the term `term` in `written`: the parts
-/// of a note for the two terms that share it, and the whole otherwise.
+/// What a UBL document writes for the term `term` in `written`: of a note,
+/// the subject code between its marks for the one term and the text after
+/// them for the other, and the whole otherwise.
 ///
-/// | Term  | Written        | Parts            |
-/// |-------|----------------|------------------|
-/// | BT-21 | `#BT-21#BT-22` | `BT-21`, `BT-22` |
-/// | BT-22 | `#BT-21#BT-22` | `BT-21`, `BT-22` |
-/// | BT-22 | `BT-22`        | `BT-22`          |
-/// | BT-1  | `BT-1#x`       | `BT-1#x`         |
+/// | Term  | Written        | Part     |
+/// |-------|----------------|----------|
+/// | BT-21 | `#BT-21#BT-22` | `BT-21`  |
+/// | BT-22 | `#BT-21#BT-22` | `BT-22`  |
+/// | BT-21 | `#BT-22#BT-21` | `BT-22` (swapped, and found out) |
+/// | BT-22 | `#BT-22#BT-21` | `BT-21` (the same) |
+/// | BT-21 | `BT-22`        | none (a note without a subject code) |
+/// | BT-22 | `BT-22`        | `BT-22`  |
+/// | BT-21 | `#BT-21`       | none (the mark is not closed) |
+/// | BT-22 | `#BT-21`       | `#BT-21` |
+/// | BT-1  | `BT-1#x`       | `BT-1#x` |
 fn ubl_parts(term: u16, written: &str) -> Vec<&str> {
-    if UBL_NOTE_TERMS.contains(&term) {
-        written
-            .split(UBL_NOTE_MARK)
-            .filter(|part| !part.is_empty())
-            .collect()
-    } else {
-        vec![written]
+    let coded = written
+        .strip_prefix(UBL_NOTE_MARK)
+        .and_then(|rest| rest.split_once(UBL_NOTE_MARK));
+    match (term, coded) {
+        (UBL_NOTE_SUBJECT, Some((subject, _))) => vec![subject],
+        (UBL_NOTE_SUBJECT, None) => Vec::new(),
+        (UBL_NOTE_TEXT, Some((_, text))) => vec![text],
+        _ => vec![written],
     }
 }
 
@@ -279,6 +287,7 @@ fn values_name_their_terms_as_their_table_says() {
         ("20270101", 27, true),
         ("BT-28", 27, false),
         ("BT-270", 27, false),
+        ("scheme-BT-27", 27, false),
         ("28.5", 27, false),
         ("27", 27, false),
         ("2028-01-01", 27, false),
@@ -291,10 +300,15 @@ fn values_name_their_terms_as_their_table_says() {
 
 #[test]
 fn the_parts_of_a_ubl_value_follow_their_table() {
-    let table: [(u16, &str, &[&str]); 4] = [
-        (21, "#BT-21#BT-22", &["BT-21", "BT-22"]),
-        (22, "#BT-21#BT-22", &["BT-21", "BT-22"]),
+    let table: [(u16, &str, &[&str]); 9] = [
+        (21, "#BT-21#BT-22", &["BT-21"]),
+        (22, "#BT-21#BT-22", &["BT-22"]),
+        (21, "#BT-22#BT-21", &["BT-22"]),
+        (22, "#BT-22#BT-21", &["BT-21"]),
+        (21, "BT-22", &[]),
         (22, "BT-22", &["BT-22"]),
+        (21, "#BT-21", &[]),
+        (22, "#BT-21", &["#BT-21"]),
         (1, "BT-1#x", &["BT-1#x"]),
     ];
     for (term, written, expected) in table {
