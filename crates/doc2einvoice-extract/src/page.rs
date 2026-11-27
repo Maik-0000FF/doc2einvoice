@@ -368,6 +368,9 @@ mod tests {
         assert_eq!(of_page(&[], 0), 0..0);
     }
 
+    /// Only a build that checks itself refuses them: the test is left out
+    /// of any other.
+    #[cfg(debug_assertions)]
     #[test]
     #[should_panic(expected = "page after page")]
     fn lines_out_of_order_are_refused() {
