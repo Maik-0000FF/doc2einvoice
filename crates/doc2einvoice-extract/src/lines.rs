@@ -388,9 +388,8 @@ fn price_base(quantity: Decimal, price: Decimal, net: Decimal) -> Option<Decimal
 /// as they stand, with one of the printed rates taken off as a discount, or,
 /// where the sum of the lines is to bear them out, with the price being one
 /// for a hundred or a thousand and the quantity having its unit after it.
-/// What stands
-/// after them is another column, as the tax or the amount with it, and
-/// needs a word of the heading after the name of the amount.
+/// What stands after them is another column, as the tax or the amount with
+/// it, and needs a word of the heading after the name of the amount.
 ///
 /// | Numbers of the row, quantity first | Rates       | The line                          |
 /// |------------------------------------|-------------|-----------------------------------|
