@@ -4,18 +4,22 @@ SPDX-License-Identifier: GPL-3.0-or-later
 -->
 <script lang="ts">
   // What the program is, under which terms it is distributed, which published
-  // files its validation uses and what the author does not answer for.
+  // files its validation uses, which material of other authors it contains
+  // and what the author does not answer for.
   import { formatLegalNotice } from '#lib/app-info/legal-notice.ts';
   import { i18n } from '#lib/i18n/i18n.svelte.ts';
   import type { MessageKey } from '#lib/i18n/translate.ts';
   import type { AppInfo } from '#lib/ipc/bindings/AppInfo.ts';
+  import type { Material } from '#lib/ipc/bindings/Material.ts';
   import type { Publication } from '#lib/ipc/bindings/Publication.ts';
 
   import Dialog from './base/Dialog.svelte';
   import FactList from './base/FactList.svelte';
   import type { Fact } from './base/facts.ts';
+  import FoldedText from './base/FoldedText.svelte';
   import Note from './base/Note.svelte';
   import SectionHeading from './base/SectionHeading.svelte';
+  import SubHeading from './base/SubHeading.svelte';
   import Table from './base/Table.svelte';
   import { byPosition, type TableColumn } from './base/table.ts';
 
@@ -35,6 +39,21 @@ SPDX-License-Identifier: GPL-3.0-or-later
     { term: i18n.t('about.license'), value: info.license },
     { term: i18n.t('about.source'), value: info.repository, long: true, selectable: true },
   ]);
+
+  // What the licence of a material asks to be stated, and what was changed
+  // from the original where something was.
+  function materialFacts(material: Material): readonly Fact[] {
+    const changes: readonly Fact[] =
+      material.changes === null
+        ? []
+        : [{ term: i18n.t('about.materials.changes'), value: material.changes }];
+    return [
+      { term: i18n.t('about.materials.copyright'), value: material.copyright, long: true },
+      { term: i18n.t('about.license'), value: material.license },
+      { term: i18n.t('about.materials.source'), value: material.source, long: true },
+      ...changes,
+    ];
+  }
 
   const columns: readonly TableColumn<Publication>[] = $derived([
     { heading: i18n.t('about.publications.title'), cell: titleCell },
@@ -68,6 +87,16 @@ SPDX-License-Identifier: GPL-3.0-or-later
     <p class="about__text">{i18n.t('about.publications.text')}</p>
     <!-- A rule set and a schema may share a title. -->
     <Table {columns} rows={publications} key={byPosition} />
+  </section>
+
+  <section>
+    <SectionHeading text={i18n.t('about.materials.heading')} />
+    <p class="about__text">{i18n.t('about.materials.text')}</p>
+    {#each info.materials as material (material.title)}
+      <SubHeading text={material.title} />
+      <FactList facts={materialFacts(material)} />
+      <FoldedText summary={i18n.t('about.materials.licenseText')} text={material.licenseText} />
+    {/each}
   </section>
 
   <section>

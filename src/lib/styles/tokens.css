@@ -43,6 +43,8 @@
   --radius-lg: 0.75rem;
 
   --dialog-width: 40rem;
+  /* How much of a folded text is shown at once; the rest scrolls. */
+  --folded-text-height: 16rem;
   --content-width: 60rem;
 }
 
