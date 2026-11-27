@@ -90,13 +90,13 @@ pub const DUE_DATE: u16 = 9;
 pub const PURCHASE_ORDER: u16 = 13;
 const PRECEDING_INVOICE: u16 = 25;
 pub const DELIVERY_DATE: u16 = 72;
-const LINE_TOTAL: u16 = 106;
-const ALLOWANCES: u16 = 107;
-const CHARGES: u16 = 108;
+pub const LINE_TOTAL: u16 = 106;
+pub const ALLOWANCES: u16 = 107;
+pub const CHARGES: u16 = 108;
 pub const TOTAL_WITHOUT_VAT: u16 = 109;
 pub const VAT_TOTAL: u16 = 110;
 pub const TOTAL_WITH_VAT: u16 = 112;
-const PAID: u16 = 113;
+pub const PAID: u16 = 113;
 /// The account to transfer to (BT-84), and the account a direct debit
 /// takes from (BT-91), which only keeps its words from the other.
 pub const PAYMENT_ACCOUNT: u16 = 84;
@@ -107,6 +107,12 @@ const SELLER_TAX_NUMBER: u16 = 32;
 const DESPATCH_ADVICE: u16 = 16;
 const SALES_ORDER: u16 = 14;
 pub const AMOUNT_DUE: u16 = 115;
+/// The terms of a row of the VAT breakdown: the amount the tax is charged
+/// on, the tax, the category and the rate.
+pub const VAT_TAXABLE_AMOUNT: u16 = 116;
+pub const VAT_TAX_AMOUNT: u16 = 117;
+pub const VAT_CATEGORY: u16 = 118;
+pub const VAT_RATE: u16 = 119;
 
 const fn label(words: &'static [Word], term: u16, scope: Scope) -> Label {
     Label {
@@ -367,8 +373,10 @@ pub const LABELS: &[Label] = &[
     party(&[Is("iban")], PartyField::Account),
     label(&[Is("verkäufer-iban")], PAYMENT_ACCOUNT, Anywhere),
     label(&[Is("käufer-iban")], DEBITED_ACCOUNT, Anywhere),
-    // Terms not read yet, which keep their words from shorter labels.
+    // A term not read yet, which keeps its words from shorter labels.
     label(&[Is("facture"), Is("liée")], PRECEDING_INVOICE, Anywhere),
+    // The sums of the lines, of the allowances and of the charges, and what
+    // is paid already.
     label(&[Is("positionssumme")], LINE_TOTAL, Anywhere),
     label(&[Is("summe"), Is("positionen")], LINE_TOTAL, Anywhere),
     label(
@@ -768,12 +776,28 @@ pub fn normalized(word: &str) -> String {
     word.trim_end_matches(LABEL_ENDINGS).to_lowercase()
 }
 
+/// The brackets a printed word may stand in, as the code in `(380)` or the
+/// rate in `(19 %)`.
+pub const OPENING_BRACKET: char = '(';
+pub const CLOSING_BRACKET: char = ')';
+
+/// What a word in brackets holds, as `380` in `(380)`.
+///
+/// | Word            | Held  |
+/// |-----------------|-------|
+/// | `(380)`, `(S)`  | `380`, `S` |
+/// | `()`            | nothing, but in brackets |
+/// | `(380`, `380)`  | none  |
+/// | `(`, `380`      | none  |
+pub fn bracketed(word: &str) -> Option<&str> {
+    word.strip_prefix(OPENING_BRACKET)?
+        .strip_suffix(CLOSING_BRACKET)
+}
+
 /// Whether a printed word is a code in brackets, as the `(380)` in
 /// "Handelsrechnung (380) Nr.", which a label passes over.
 fn is_bracketed_code(word: &str) -> bool {
-    word.strip_prefix('(')
-        .and_then(|rest| rest.strip_suffix(')'))
-        .is_some_and(|code| !code.is_empty() && code.chars().all(|c| c.is_ascii_digit()))
+    bracketed(word).is_some_and(|code| !code.is_empty() && code.chars().all(|c| c.is_ascii_digit()))
 }
 
 fn matches(pattern: Word, word: &str) -> bool {
@@ -853,9 +877,25 @@ fn covered(label: &Label, words: &[&str], normal: &[String], at: usize) -> Optio
 #[cfg(test)]
 mod tests {
     use super::{
-        CHARGES, INVOICE_NUMBER, ISSUE_DATE, Names, Party, Section, TOTAL_WITH_VAT, find, heading,
-        is_window_note, says_direct_debit,
+        CHARGES, INVOICE_NUMBER, ISSUE_DATE, Names, Party, Section, TOTAL_WITH_VAT, bracketed,
+        find, heading, is_window_note, says_direct_debit,
     };
+
+    #[test]
+    fn words_in_brackets_follow_their_table() {
+        let table = [
+            ("(380)", Some("380")),
+            ("(S)", Some("S")),
+            ("()", Some("")),
+            ("(380", None),
+            ("380)", None),
+            ("(", None),
+            ("380", None),
+        ];
+        for (word, held) in table {
+            assert_eq!(bracketed(word), held, "{word}");
+        }
+    }
 
     fn found(words: &[&str]) -> Vec<(u16, usize, usize)> {
         find(words)

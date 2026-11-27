@@ -22,7 +22,7 @@ pub type Date = chrono::NaiveDate;
 pub type DocumentReference = String;
 
 /// Monetary amounts are stated with at most this many decimal places.
-const AMOUNT_DECIMAL_PLACES: u32 = 2;
+pub const AMOUNT_DECIMAL_PLACES: u32 = 2;
 
 /// Number of letters of an ISO 4217 alphabetic currency code.
 const CURRENCY_CODE_LENGTH: usize = 3;

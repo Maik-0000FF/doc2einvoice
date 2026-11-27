@@ -29,12 +29,14 @@ use doc2einvoice_model::{Draft, Entry, Occurrence, Origin};
 use doc2einvoice_pdf::{PageLayout, Word};
 
 use crate::address::{self, Address};
+use crate::breakdown::{self, Breakdown};
 use crate::labels::{
-    self, AMOUNT_DUE, BUYER_ADDRESS_LINES, BUYER_CITY, BUYER_NAME, BUYER_POST_CODE,
-    BUYER_VAT_IDENTIFIER, CURRENCY, DELIVERY_DATE, DUE_DATE, Found, INVOICE_NUMBER, ISSUE_DATE,
-    Names, PAYMENT_ACCOUNT, PURCHASE_ORDER, Party, SELLER_ADDRESS_LINES, SELLER_CITY, SELLER_NAME,
-    SELLER_POST_CODE, SELLER_VAT_IDENTIFIER, Scope, Section, TOTAL_WITH_VAT, TOTAL_WITHOUT_VAT,
-    VAT_TOTAL, Weight,
+    self, ALLOWANCES, AMOUNT_DUE, BUYER_ADDRESS_LINES, BUYER_CITY, BUYER_NAME, BUYER_POST_CODE,
+    BUYER_VAT_IDENTIFIER, CHARGES, CURRENCY, DELIVERY_DATE, DUE_DATE, Found, INVOICE_NUMBER,
+    ISSUE_DATE, LINE_TOTAL, Names, PAID, PAYMENT_ACCOUNT, PURCHASE_ORDER, Party,
+    SELLER_ADDRESS_LINES, SELLER_CITY, SELLER_NAME, SELLER_POST_CODE, SELLER_VAT_IDENTIFIER, Scope,
+    Section, TOTAL_WITH_VAT, TOTAL_WITHOUT_VAT, VAT_CATEGORY, VAT_RATE, VAT_TAX_AMOUNT,
+    VAT_TAXABLE_AMOUNT, VAT_TOTAL, Weight,
 };
 use crate::page::{self, Line, Span};
 use crate::values::{self, Read};
@@ -113,8 +115,11 @@ struct Rule {
 /// The repeated group of a credit transfer (BG-17).
 const CREDIT_TRANSFER: u16 = 17;
 
+/// The repeated group of a row of the VAT breakdown (BG-23).
+const VAT_BREAKDOWN: u16 = 23;
+
 /// The terms read, the invoice number first: the issue date may follow it.
-const RULES: [Rule; 15] = [
+const RULES: [Rule; 19] = [
     header(INVOICE_NUMBER, values::identifier),
     header(ISSUE_DATE, values::date),
     header(CURRENCY, values::currency),
@@ -126,9 +131,13 @@ const RULES: [Rule; 15] = [
     header(SELLER_VAT_IDENTIFIER, values::vat_identifier),
     header(BUYER_VAT_IDENTIFIER, values::vat_identifier),
     header_in(PAYMENT_ACCOUNT, values::iban, CREDIT_TRANSFER),
+    total(LINE_TOTAL),
+    total(ALLOWANCES),
+    total(CHARGES),
     total(TOTAL_WITHOUT_VAT),
     total(VAT_TOTAL),
     total(TOTAL_WITH_VAT),
+    total(PAID),
     total(AMOUNT_DUE),
 ];
 
@@ -234,7 +243,50 @@ pub fn draft(pages: &[PageLayout]) -> Draft {
             addressed.push(party);
         }
     }
+    let rows = breakdown::borne_out(
+        breakdown::read(&page::rows(&lines)),
+        draft.values_of(TOTAL_WITHOUT_VAT).next(),
+        draft.values_of(VAT_TOTAL).next(),
+    );
+    for (index, row) in rows.iter().enumerate() {
+        add_breakdown(&mut draft, index, row);
+    }
     draft
+}
+
+/// The values of `row` as the entries of the row of the VAT breakdown at
+/// `index`: the amount the tax is charged on, the tax, the category and the
+/// rate, each where the row has it.
+fn add_breakdown(draft: &mut Draft, index: usize, row: &Breakdown) {
+    let parts = [
+        (
+            VAT_TAXABLE_AMOUNT,
+            row.base
+                .as_ref()
+                .map(|base| (base.text.clone(), base.location)),
+        ),
+        (
+            VAT_TAX_AMOUNT,
+            Some((row.tax.text.clone(), row.tax.location)),
+        ),
+        (VAT_CATEGORY, row.category.clone()),
+        (VAT_RATE, Some((row.rate.text.clone(), row.rate.location))),
+    ];
+    for (term, part) in parts {
+        let Some((text, location)) = part else {
+            continue;
+        };
+        draft.entries.push(Entry {
+            term,
+            within: vec![Occurrence {
+                group: VAT_BREAKDOWN,
+                index,
+            }],
+            text,
+            origin: Origin::Rule,
+            location,
+        });
+    }
 }
 
 /// The terms of the parts of the address of a party whose address is read:
@@ -653,10 +705,11 @@ mod tests {
 
     use super::draft;
     use crate::labels::{
-        AMOUNT_DUE, BUYER_ADDRESS_LINES, BUYER_CITY, BUYER_NAME, BUYER_POST_CODE,
-        BUYER_VAT_IDENTIFIER, CURRENCY, DELIVERY_DATE, DUE_DATE, INVOICE_NUMBER, ISSUE_DATE,
-        PAYMENT_ACCOUNT, PURCHASE_ORDER, SELLER_ADDRESS_LINES, SELLER_CITY, SELLER_NAME,
-        SELLER_POST_CODE, SELLER_VAT_IDENTIFIER, TOTAL_WITH_VAT, TOTAL_WITHOUT_VAT, VAT_TOTAL,
+        ALLOWANCES, AMOUNT_DUE, BUYER_ADDRESS_LINES, BUYER_CITY, BUYER_NAME, BUYER_POST_CODE,
+        BUYER_VAT_IDENTIFIER, CHARGES, CURRENCY, DELIVERY_DATE, DUE_DATE, INVOICE_NUMBER,
+        ISSUE_DATE, LINE_TOTAL, PAID, PAYMENT_ACCOUNT, PURCHASE_ORDER, SELLER_ADDRESS_LINES,
+        SELLER_CITY, SELLER_NAME, SELLER_POST_CODE, SELLER_VAT_IDENTIFIER, TOTAL_WITH_VAT,
+        TOTAL_WITHOUT_VAT, VAT_CATEGORY, VAT_RATE, VAT_TAX_AMOUNT, VAT_TAXABLE_AMOUNT, VAT_TOTAL,
     };
 
     /// The font size of every word, and the width of one character.
@@ -718,6 +771,112 @@ mod tests {
             .and_then(|entry| entry.location);
         let place = location.map(|at| (at.page, at.top, at.bottom));
         assert_eq!(place, Some((0, 100.0 - FONT, 100.0)));
+    }
+
+    /// The values of `term` with the row of the VAT breakdown each stands in.
+    fn breakdown_values(pages: &[PageLayout], term: u16) -> Vec<(usize, String)> {
+        draft(pages)
+            .values_of(term)
+            .map(|entry| {
+                let row = entry.within.first().map(|occurrence| {
+                    assert_eq!(occurrence.group, super::VAT_BREAKDOWN);
+                    occurrence.index
+                });
+                (row.unwrap_or(usize::MAX), entry.text.clone())
+            })
+            .collect()
+    }
+
+    fn numbered(values: &[&str]) -> Vec<(usize, String)> {
+        values
+            .iter()
+            .enumerate()
+            .map(|(index, value)| (index, (*value).to_owned()))
+            .collect()
+    }
+
+    #[test]
+    fn the_rows_of_a_breakdown_table_are_read_with_their_place() {
+        let pages = [page(vec![
+            block(50.0, 100.0, &["VAT"]),
+            block(150.0, 100.0, &["Net", "amount"]),
+            block(250.0, 100.0, &["VAT", "amount"]),
+            block(50.0, 112.0, &["7%"]),
+            block(150.0, 112.0, &["160,00", "€"]),
+            block(250.0, 112.0, &["11,20", "€"]),
+            block(50.0, 124.0, &["19%"]),
+            block(150.0, 124.0, &["336,00", "€"]),
+            block(250.0, 124.0, &["63,84", "€"]),
+        ])];
+        assert_eq!(
+            breakdown_values(&pages, VAT_TAXABLE_AMOUNT),
+            numbered(&["160", "336"])
+        );
+        assert_eq!(
+            breakdown_values(&pages, VAT_TAX_AMOUNT),
+            numbered(&["11.2", "63.84"])
+        );
+        assert_eq!(breakdown_values(&pages, VAT_RATE), numbered(&["7", "19"]));
+        assert_eq!(
+            breakdown_values(&pages, VAT_CATEGORY),
+            numbered(&["S", "S"])
+        );
+        let found = draft(&pages);
+        let place = found
+            .values_of(VAT_TAX_AMOUNT)
+            .next()
+            .and_then(|entry| entry.location)
+            .map(|at| (at.page, at.left, at.bottom));
+        assert_eq!(place, Some((0, 250.0, 112.0)));
+    }
+
+    #[test]
+    fn a_row_with_the_tax_alone_is_charged_on_the_total_without_vat() {
+        let pages = [page(vec![
+            block(50.0, 100.0, &["Summe", "netto"]),
+            block(300.0, 100.0, &["87,39", "€"]),
+            block(50.0, 112.0, &["USt.", "(19", "%)"]),
+            block(300.0, 112.0, &["16,61", "€"]),
+            block(50.0, 124.0, &["Rechnungsbetrag"]),
+            block(300.0, 124.0, &["104,00", "€"]),
+        ])];
+        assert_eq!(
+            breakdown_values(&pages, VAT_TAXABLE_AMOUNT),
+            numbered(&["87.39"])
+        );
+        assert_eq!(
+            breakdown_values(&pages, VAT_TAX_AMOUNT),
+            numbered(&["16.61"])
+        );
+        assert_eq!(breakdown_values(&pages, VAT_RATE), numbered(&["19"]));
+        let unconfirmed = [page(vec![
+            block(50.0, 112.0, &["USt.", "(19", "%)"]),
+            block(300.0, 112.0, &["16,61", "€"]),
+        ])];
+        assert_eq!(breakdown_values(&unconfirmed, VAT_RATE), []);
+    }
+
+    #[test]
+    fn the_sums_of_lines_allowances_and_charges_and_what_is_paid_are_read() {
+        let pages = [page(vec![
+            block(50.0, 100.0, &["Positionssumme"]),
+            block(300.0, 100.0, &["220,00"]),
+            block(50.0, 112.0, &["Gesamtbetrag", "der", "Zuschläge"]),
+            block(300.0, 112.0, &["5,80"]),
+            block(50.0, 124.0, &["Gesamtbetrag", "der", "Abschläge"]),
+            block(300.0, 124.0, &["-14,73"]),
+            block(50.0, 136.0, &["Bereits", "gezahlt"]),
+            block(300.0, 136.0, &["50,00"]),
+        ])];
+        assert_eq!(
+            values(&pages, &[LINE_TOTAL, CHARGES, ALLOWANCES, PAID]),
+            [
+                Some("220".to_owned()),
+                Some("5.8".to_owned()),
+                Some("-14.73".to_owned()),
+                Some("50".to_owned()),
+            ]
+        );
     }
 
     #[test]
