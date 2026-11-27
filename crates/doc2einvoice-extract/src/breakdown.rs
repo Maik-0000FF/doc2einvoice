@@ -12,17 +12,20 @@
 //!
 //! A row of the totals that gives the tax alone, as `USt. 19 % 16,61`, is
 //! read where the totals of the invoice confirm it.
+//!
+//! A value the page does not print itself, as the category a rate tells, is
+//! marked as worked out, never passed off as printed.
 
 use std::str::FromStr;
 
-use doc2einvoice_model::Entry;
+use doc2einvoice_model::{Entry, Origin};
 use doc2einvoice_pdf::Word;
 use rust_decimal::Decimal;
 
 use crate::labels::normalized;
 use crate::page::Row;
 use crate::table::{
-    self, Figure, Part, Printed, comes_to, figures, part, printed_category, told_by_rate,
+    self, Figure, Part, Stated, comes_to, figures, part, printed_category, told_by_rate,
 };
 use crate::values;
 
@@ -33,9 +36,9 @@ pub struct Breakdown {
     pub base: Option<Part>,
     pub rate: Part,
     pub tax: Part,
-    /// The code of the category and where it is printed, or where the rate
-    /// is that tells it.
-    pub category: Option<Printed>,
+    /// The code of the category: as printed, or worked out from the rate
+    /// and marked so.
+    pub category: Option<Stated>,
 }
 
 /// A column of a breakdown table.
@@ -245,7 +248,7 @@ fn table_rows(rows: &[Row], at: usize, table: &Table) -> Vec<Breakdown> {
             break;
         }
     }
-    let code = |breakdown: &Breakdown| breakdown.category.as_ref().map(|(code, _)| code.clone());
+    let code = |breakdown: &Breakdown| breakdown.category.as_ref().map(|code| code.text.clone());
     let repeats = found.iter().enumerate().any(|(index, row)| {
         found[..index]
             .iter()
@@ -330,7 +333,7 @@ fn same_values(a: &Breakdown, b: &Breakdown) -> bool {
     a.rate.value == b.rate.value
         && a.tax.value == b.tax.value
         && a.base.as_ref().map(value) == b.base.as_ref().map(value)
-        && a.category.as_ref().map(|(code, _)| code) == b.category.as_ref().map(|(code, _)| code)
+        && a.category.as_ref().map(|code| &code.text) == b.category.as_ref().map(|code| &code.text)
 }
 
 /// The rows the totals of the invoice bear out. A row that prints the amount
@@ -341,13 +344,17 @@ fn same_values(a: &Breakdown, b: &Breakdown) -> bool {
 /// amount, a total of VAT that differs does not count against them: it may
 /// be the one misread.
 ///
+/// A single row with the tax alone is charged on the total without VAT if
+/// the two agree. The row does not print that amount: it is marked as
+/// worked out, at the place of the total.
+///
 /// | Rows                               | Totals                                        | Read                       |
 /// |------------------------------------|-----------------------------------------------|----------------------------|
 /// | all with the amount charged on     | any                                           | them                       |
 /// | some with it, some the tax alone   | the taxes of all add up to the total of VAT   | all                        |
 /// | some with it, some the tax alone   | no total of VAT, or the taxes of those with it add up to it | those with it |
 /// | some with it, some the tax alone   | a total of VAT that neither sum comes to      | none                       |
-/// | one, the tax alone                 | the total without VAT agrees with it          | it, charged on that total  |
+/// | one, the tax alone                 | the total without VAT agrees with it          | it, the total worked out as the amount charged on |
 /// | only the tax alone                 | their taxes add up to the total of VAT        | them, no amount charged on |
 /// | only the tax alone                 | neither                                       | none                       |
 /// | none                               | any                                           | none                       |
@@ -379,6 +386,7 @@ pub fn borne_out(
             text: total.text.clone(),
             location: total.location,
             value,
+            origin: Origin::Derived,
         };
         return vec![Breakdown {
             base: Some(base),
@@ -423,7 +431,7 @@ mod tests {
             breakdown.base.as_ref().map(|base| base.text.clone()),
             breakdown.rate.text.clone(),
             breakdown.tax.text.clone(),
-            breakdown.category.as_ref().map(|(code, _)| code.clone()),
+            breakdown.category.as_ref().map(|code| code.text.clone()),
         )
     }
 
@@ -742,15 +750,23 @@ mod tests {
         }
     }
 
+    fn borne_out_rows(
+        rows: &[&[&str]],
+        without_vat: Option<&str>,
+        vat_total: Option<&str>,
+    ) -> Vec<Breakdown> {
+        let printed = stacked(rows);
+        let rows: Vec<Row> = printed.iter().map(|words| row(words)).collect();
+        let (without_vat, vat_total) = (without_vat.map(total), vat_total.map(total));
+        borne_out(read(&rows), without_vat.as_ref(), vat_total.as_ref())
+    }
+
     fn borne_out_values(
         rows: &[&[&str]],
         without_vat: Option<&str>,
         vat_total: Option<&str>,
     ) -> Vec<Values> {
-        let printed = stacked(rows);
-        let rows: Vec<Row> = printed.iter().map(|words| row(words)).collect();
-        let (without_vat, vat_total) = (without_vat.map(total), vat_total.map(total));
-        borne_out(read(&rows), without_vat.as_ref(), vat_total.as_ref())
+        borne_out_rows(rows, without_vat, vat_total)
             .iter()
             .map(values)
             .collect()
@@ -758,27 +774,22 @@ mod tests {
 
     #[test]
     fn rows_are_borne_out_as_their_table_says() {
-        let whole: &[&[&str]] = &[&["USt.", "19%", "100,00", "19,00"], &["USt.", "7%", "7,00"]];
+        let mixed: &[&[&str]] = &[&["USt.", "19%", "100,00", "19,00"], &["USt.", "7%", "7,00"]];
+        let with_amount = [expected(Some("100"), "19", "19", Some("S"))];
+        assert_eq!(borne_out_values(mixed, None, None), with_amount);
         assert_eq!(
-            borne_out_values(whole, None, None),
-            [expected(Some("100"), "19", "19", Some("S"))]
-        );
-        assert_eq!(
-            borne_out_values(whole, None, Some("26.00")),
+            borne_out_values(mixed, None, Some("26.00")),
             [
                 expected(Some("100"), "19", "19", Some("S")),
                 expected(None, "7", "7", Some("S")),
             ]
         );
+        assert_eq!(borne_out_values(mixed, None, Some("19.00")), with_amount);
+        assert_eq!(borne_out_values(mixed, None, Some("30.00")), []);
+        let all_with_amount: &[&[&str]] = &[&["USt.", "19%", "100,00", "19,00"]];
         assert_eq!(
-            borne_out_values(whole, None, Some("19.00")),
-            [expected(Some("100"), "19", "19", Some("S"))]
-        );
-        assert_eq!(borne_out_values(whole, None, Some("30.00")), []);
-        let all_whole: &[&[&str]] = &[&["USt.", "19%", "100,00", "19,00"]];
-        assert_eq!(
-            borne_out_values(all_whole, None, Some("30.00")),
-            [expected(Some("100"), "19", "19", Some("S"))]
+            borne_out_values(all_with_amount, None, Some("30.00")),
+            with_amount
         );
         let one: &[&[&str]] = &[&["USt.", "(19", "%)", "16,61"]];
         assert_eq!(
@@ -801,5 +812,29 @@ mod tests {
         );
         assert_eq!(borne_out_values(two, Some("200.00"), Some("19")), []);
         assert_eq!(borne_out_values(&[], Some("200.00"), Some("0")), []);
+    }
+
+    #[test]
+    fn what_is_worked_out_is_marked_and_what_is_printed_is_not() {
+        let origins = |row: &Breakdown| {
+            (
+                row.base.as_ref().map(|base| base.origin),
+                row.rate.origin,
+                row.tax.origin,
+                row.category.as_ref().map(|code| code.origin),
+            )
+        };
+        let read = Some(Origin::Rule);
+        let worked_out = Some(Origin::Derived);
+        let tax_alone = borne_out_rows(&[&["USt.", "(19", "%)", "16,61"]], Some("87.39"), None);
+        assert_eq!(
+            tax_alone.iter().map(origins).collect::<Vec<_>>(),
+            [(worked_out, Origin::Rule, Origin::Rule, worked_out)]
+        );
+        let printed = borne_out_rows(&[&["USt.", "(S)", "19%", "100,00", "19,00"]], None, None);
+        assert_eq!(
+            printed.iter().map(origins).collect::<Vec<_>>(),
+            [(read, Origin::Rule, Origin::Rule, read)]
+        );
     }
 }

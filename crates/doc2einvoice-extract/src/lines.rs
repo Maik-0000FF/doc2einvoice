@@ -9,13 +9,14 @@
 //! between the lines, as the number of an item, are passed over; the lines
 //! a name runs on over are read with it.
 
+use doc2einvoice_model::{AMOUNT_DECIMAL_PLACES, Origin};
 use doc2einvoice_pdf::Word;
-use rust_decimal::Decimal;
+use rust_decimal::{Decimal, RoundingStrategy};
 
 use crate::breakdown;
 use crate::labels::{self, Names, TOTALS};
 use crate::page::{self, Row, Span};
-use crate::table::{self, Figure, Part, Printed, comes_to, figures, part};
+use crate::table::{self, Figure, Part, Stated, comes_to, figures, part};
 use crate::values;
 
 /// One line of an invoice.
@@ -24,17 +25,20 @@ pub struct Line {
     /// The number of the line, where the row starts with one.
     pub identifier: Option<Part>,
     /// The name of the item.
-    pub name: Option<Printed>,
+    pub name: Option<Stated>,
     pub quantity: Part,
-    /// The price of one, where no discount is taken off it.
+    /// The net price of one: as printed, or, where a discount is taken off
+    /// the price printed, worked out from the two and marked so.
     pub price: Option<Part>,
+    /// The gross price of one, where a discount is taken off it.
+    pub gross_price: Option<Part>,
     /// The amount of the line.
     pub net: Part,
     /// The rate of VAT, where the table has a column for it.
     pub rate: Option<Part>,
-    /// The code of the VAT category and where it is printed, or where the
-    /// rate is that tells it.
-    pub category: Option<Printed>,
+    /// The code of the VAT category: as printed, or worked out from the
+    /// rate and marked so.
+    pub category: Option<Stated>,
 }
 
 /// A column of a table of lines.
@@ -226,8 +230,8 @@ struct Found<'a> {
 /// |---------------------------|-----------------------------------------------------|----------------------------------------|
 /// | `Pos` `Produkt` `Menge` `Preis` `Netto` | `02` `IP` `Server` `57811` `1` `0,8403` `€` `0,84` `€` | line 02, 1 at 0.8403, 0.84, "IP Server 57811" |
 /// | `Pos` `Beschreibung` `Nettopreis` `Menge` `Steuersatz` `Nettobetrag` | `1` `Trennblätter` `9,99` `20` `Stk` `19` `%` `VAT` `(S)` `199,80` | line 1, 20 at 9.99, 199.80, 19 %, `S`, "Trennblätter" |
-/// | `Amount` `Product` `VAT` `Price` `Total` | `1.00` `Design` `(hours)` `7%` `160.00` `€` `160.00` `€` | 1 at 160, 160, 7 %, `S`, "Design (hours)" |
-/// | `Description` `Quantité` `Rem.` `Prix` `HT` | `Nougat` `250g` `20` `Unit(s)` `4,55` `€` `10%` `81,90` `€` | 20, 81.90, "Nougat 250g", no price |
+/// | `Amount` `Product` `VAT` `Price` `Total` | `1.00` `Design` `(hours)` `7%` `160.00` `€` `160.00` `€` | 1 at 160, 160, 7 %, `S` worked out, "Design (hours)" |
+/// | `Description` `Quantité` `Rem.` `Prix` `HT` | `Nougat` `250g` `20` `Unit(s)` `4,55` `€` `10%` `81,90` `€` | 20 at a gross price of 4.55, net 4.10 worked out, 81.90, "Nougat 250g" |
 /// | `Description` `Quantité` `Rem.` `Prix` `HT` | `Biscuits` `15` `Unit(s)` `3,20` `€` `48,00` `€` | 15 at 3.20, 48, "Biscuits" |
 /// | `Text` `Menge` `Preis` `Betrag` | `Nougat` `20` `4,55` `10%` `81,90`            | none (no column for a discount)        |
 /// | `Text` `Menge` `Preis` `Betrag` | `Miete` `1` `100,00` `120,00`                 | none (do not agree)                    |
@@ -298,20 +302,53 @@ fn line<'a>(row: &'a Row<'a>, table: &Table) -> Option<Found<'a>> {
             text: row.words[head.first].text.clone(),
             ..part(row, head)
         }),
-        name: (!name.is_empty()).then(|| {
-            (
-                named.texts().join(" "),
-                named.location(0, named.words.len()),
-            )
+        name: (!name.is_empty()).then(|| Stated {
+            text: named.texts().join(" "),
+            location: named.location(0, named.words.len()),
+            origin: Origin::Rule,
         }),
         quantity: part(row, quantity),
-        price: discount.is_none().then(|| part(row, price)),
+        price: match discount {
+            None => Some(part(row, price)),
+            Some(discount) => after_discount(&part(row, price), discount),
+        },
+        gross_price: discount.is_some().then(|| part(row, price)),
         net: part(row, net),
         category: table::printed_category(row.page, &row.words)
             .or_else(|| rate.as_ref().and_then(table::told_by_rate)),
         rate,
     };
     Some(Found { line, row, name })
+}
+
+/// The net price that is left of a gross price with a discount taken off,
+/// rounded to the decimal places of an amount, marked as worked out and
+/// placed at the gross price. The page prints the gross price and the
+/// discount; that they come to the amount of the line is checked before.
+///
+/// | Gross price | Discount | Net price                   |
+/// |-------------|----------|-----------------------------|
+/// | 4.55        | 10 %     | 4.10 (4.095), worked out    |
+/// | 3.33        | 5 %      | 3.16 (3.1635), worked out   |
+/// | 100         | 0 %      | 100, worked out             |
+/// | 100         | 100 %    | 0, worked out               |
+/// | too large to multiply |  | none                      |
+fn after_discount(gross: &Part, discount: &Figure) -> Option<Part> {
+    let share = Decimal::ONE_HUNDRED.checked_sub(discount.value)?;
+    let value = gross
+        .value
+        .checked_mul(share)?
+        .checked_div(Decimal::ONE_HUNDRED)?
+        .round_dp_with_strategy(
+            AMOUNT_DECIMAL_PLACES,
+            RoundingStrategy::MidpointAwayFromZero,
+        );
+    Some(Part {
+        text: value.normalize().to_string(),
+        value,
+        origin: Origin::Derived,
+        ..gross.clone()
+    })
 }
 
 /// The words of a row that are the name of the item of its line: the words
@@ -463,9 +500,9 @@ fn table_lines(rows: &[Row], at: usize, table: &Table, printed: &[page::Line]) -
                 .name
                 .first()
                 .and_then(|start| line.row.words.get(*start));
-            if let (Some(first), Some((name, _))) = (first, line.line.name.as_mut()) {
+            if let (Some(first), Some(name)) = (first, line.line.name.as_mut()) {
                 for more in runs_on(printed, first, next) {
-                    *name = joined(name, more);
+                    name.text = joined(&name.text, more);
                 }
             }
             line.line
@@ -487,11 +524,15 @@ pub fn read(rows: &[Row], printed: &[page::Line]) -> Vec<Line> {
 
 #[cfg(test)]
 mod tests {
+    use doc2einvoice_model::Origin;
     use doc2einvoice_pdf::Word;
 
-    use super::{Column, Line, Table, ends_table, heading, joined, line, read, runs_on};
+    use super::{
+        Column, Line, Table, after_discount, ends_table, heading, joined, line, read, runs_on,
+    };
     use crate::page::{self, Row};
     use crate::table::printed::{LEFT, PITCH, TOP, row, stacked, words};
+    use crate::table::{Part, figures, part};
 
     /// The table `texts` head.
     fn heads(texts: &[&str]) -> Option<Table> {
@@ -579,12 +620,12 @@ mod tests {
     fn values(line: &Line) -> Values {
         [
             line.identifier.as_ref().map(|part| part.text.clone()),
-            line.name.as_ref().map(|(name, _)| name.clone()),
+            line.name.as_ref().map(|name| name.text.clone()),
             Some(line.quantity.text.clone()),
             line.price.as_ref().map(|part| part.text.clone()),
             Some(line.net.text.clone()),
             line.rate.as_ref().map(|part| part.text.clone()),
-            line.category.as_ref().map(|(code, _)| code.clone()),
+            line.category.as_ref().map(|code| code.text.clone()),
         ]
     }
 
@@ -690,7 +731,7 @@ mod tests {
                 None,
                 Some("Nougat 250g"),
                 Some("20"),
-                None,
+                Some("4.1"),
                 Some("81.9"),
                 None,
                 None
@@ -710,6 +751,25 @@ mod tests {
                 None,
                 None
             ]))
+        );
+        let discounted = heads(FRENCH).and_then(|table| {
+            let printed = words(
+                LEFT,
+                TOP,
+                &["Nougat", "20", "4,55", "€", "10%", "81,90", "€"],
+            );
+            line(&row(&printed), &table).map(|found| found.line)
+        });
+        let prices = discounted.map(|line| {
+            let origin = |price: Option<Part>| price.map(|price| (price.text, price.origin));
+            (origin(line.gross_price), origin(line.price))
+        });
+        assert_eq!(
+            prices,
+            Some((
+                Some(("4.55".to_owned(), Origin::Rule)),
+                Some(("4.1".to_owned(), Origin::Derived)),
+            ))
         );
         assert_eq!(
             read_line(PLAIN, &["Nougat", "20", "4,55", "10%", "81,90"]),
@@ -733,6 +793,24 @@ mod tests {
                 None
             ]))
         );
+    }
+
+    #[test]
+    fn a_net_price_after_a_discount_follows_its_table() {
+        let net = |gross: &str, discount: &str| {
+            let printed = words(LEFT, TOP, &[gross, discount]);
+            let printed = row(&printed);
+            let figures = figures(&printed.words);
+            let [gross, discount] = figures.as_slice() else {
+                return None;
+            };
+            after_discount(&part(&printed, gross), discount).map(|net| (net.text, net.origin))
+        };
+        let worked_out = |text: &str| Some((text.to_owned(), Origin::Derived));
+        assert_eq!(net("4,55", "10%"), worked_out("4.1"));
+        assert_eq!(net("3,33", "5%"), worked_out("3.16"));
+        assert_eq!(net("100,00", "0%"), worked_out("100"));
+        assert_eq!(net("100,00", "100%"), worked_out("0"));
     }
 
     #[test]
@@ -796,7 +874,7 @@ mod tests {
         let found = table
             .and_then(|table| line(&row(&line_words), &table).and_then(|found| found.line.name));
         assert_eq!(
-            found.map(|(name, _)| name).as_deref(),
+            found.map(|name| name.text).as_deref(),
             Some("Kunstrasen grün")
         );
     }
@@ -907,7 +985,7 @@ mod tests {
             .collect();
         read(&rows, &lines)
             .into_iter()
-            .map(|line| line.name.map(|(name, _)| name))
+            .map(|line| line.name.map(|name| name.text))
             .collect()
     }
 

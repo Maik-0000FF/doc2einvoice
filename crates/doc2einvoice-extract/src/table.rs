@@ -8,7 +8,7 @@
 use std::ops::Range;
 use std::str::FromStr;
 
-use doc2einvoice_model::{AMOUNT_DECIMAL_PLACES, Location, VatCategory};
+use doc2einvoice_model::{AMOUNT_DECIMAL_PLACES, Location, Origin, VatCategory};
 use doc2einvoice_pdf::Word;
 use rust_decimal::{Decimal, RoundingStrategy};
 
@@ -16,25 +16,38 @@ use crate::labels::{self, Scope, bracketed, normalized};
 use crate::page::{Row, Span};
 use crate::values;
 
-/// One value of a row: its text in the form of the draft, the number it
-/// stands for, and where it is printed.
+/// One number of a row: its text in the form of the draft, the number it
+/// stands for, where it is printed, and whether it was read there or worked
+/// out from what is printed there.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Part {
     pub text: String,
     pub location: Option<Location>,
     pub value: Decimal,
+    pub origin: Origin,
 }
 
 impl Part {
-    /// The text of the value and its place.
-    pub fn printed(&self) -> Printed {
-        (self.text.clone(), self.location)
+    /// The value as the draft takes it.
+    pub fn stated(&self) -> Stated {
+        Stated {
+            text: self.text.clone(),
+            location: self.location,
+            origin: self.origin,
+        }
     }
 }
 
-/// A text of a row that is no number, as the code of a category or the name
-/// of an item, and where it is printed.
-pub type Printed = (String, Option<Location>);
+/// A value of a row as the draft takes it: its text, where it is printed,
+/// and whether it was read there or worked out from what is printed there.
+/// A value that is worked out is never passed off as printed: the user is
+/// shown which values the page does not state itself.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Stated {
+    pub text: String,
+    pub location: Option<Location>,
+    pub origin: Origin,
+}
 
 /// A number of a row.
 pub struct Figure {
@@ -94,6 +107,7 @@ pub fn part(row: &Row, figure: &Figure) -> Part {
             .span(figure.first, figure.count)
             .and_then(|span| span.location(0, figure.count)),
         value: figure.value,
+        origin: Origin::Rule,
     }
 }
 
@@ -189,30 +203,38 @@ pub fn comes_to(calculated: Option<Decimal>, printed: Decimal) -> bool {
 /// | `(s)`, `(X)`    | none (no code of the list) |
 /// | `S`, `(S`       | none (not in brackets) |
 /// | `(380)`         | none |
-pub fn printed_category(page: usize, words: &[&Word]) -> Option<Printed> {
+pub fn printed_category(page: usize, words: &[&Word]) -> Option<Stated> {
     words.iter().find_map(|word| {
         let category = VatCategory::from_code(bracketed(&word.text)?).ok()?;
         let printed = Span {
             page,
             words: vec![*word],
         };
-        Some((category.code().to_owned(), printed.location(0, 1)))
+        Some(Stated {
+            text: category.code().to_owned(),
+            location: printed.location(0, 1),
+            origin: Origin::Rule,
+        })
     })
 }
 
-/// The VAT category a rate tells where none is printed: a rate above
-/// nothing is the standard rate, which the standard also files reduced
-/// rates under. Without tax the category is open: exempt, zero rated,
-/// reverse charge and others all print 0 %.
+/// The VAT category a rate tells where none is printed, marked as worked
+/// out and placed at the rate: a rate above nothing is the standard rate,
+/// which the standard also files reduced rates under. Without tax the
+/// category is open: exempt, zero rated, reverse charge and others all
+/// print 0 %.
 ///
-/// | Rate | Category |
-/// |------|----------|
-/// | 19   | `S`      |
-/// | 7    | `S`      |
-/// | 0    | none     |
-pub fn told_by_rate(rate: &Part) -> Option<Printed> {
-    (rate.value > Decimal::ZERO)
-        .then(|| (VatCategory::StandardRate.code().to_owned(), rate.location))
+/// | Rate | Category             |
+/// |------|----------------------|
+/// | 19   | `S`, worked out      |
+/// | 7    | `S`, worked out      |
+/// | 0    | none                 |
+pub fn told_by_rate(rate: &Part) -> Option<Stated> {
+    (rate.value > Decimal::ZERO).then(|| Stated {
+        text: VatCategory::StandardRate.code().to_owned(),
+        location: rate.location,
+        origin: Origin::Derived,
+    })
 }
 
 /// Rows built from texts, for the tests of the tables.
@@ -281,7 +303,9 @@ mod tests {
     use rust_decimal::Decimal;
 
     use super::printed::{LEFT, TOP, row, words};
-    use super::{comes_to, ends, figures, named, printed_category};
+    use doc2einvoice_model::Origin;
+
+    use super::{Part, comes_to, ends, figures, named, printed_category, told_by_rate};
 
     fn number(text: &str) -> Decimal {
         Decimal::from_str(text).unwrap_or_default()
@@ -393,6 +417,21 @@ mod tests {
     }
 
     #[test]
+    fn a_rate_tells_the_category_as_its_table_says() {
+        let rate = |text: &str| Part {
+            text: text.to_owned(),
+            location: None,
+            value: number(text),
+            origin: Origin::Rule,
+        };
+        for (text, expected) in [("19", Some("S")), ("7", Some("S")), ("0", None)] {
+            let told = told_by_rate(&rate(text));
+            assert_eq!(told.as_ref().map(|code| code.text.as_str()), expected);
+            assert!(told.is_none_or(|code| code.origin == Origin::Derived));
+        }
+    }
+
+    #[test]
     fn codes_of_categories_follow_their_table() {
         let table: [(&str, Option<&str>); 8] = [
             ("(S)", Some("S")),
@@ -407,7 +446,7 @@ mod tests {
         for (text, expected) in table {
             let printed = words(LEFT, TOP, &[text]);
             let found = printed_category(0, &printed.iter().collect::<Vec<_>>());
-            assert_eq!(found.map(|(code, _)| code).as_deref(), expected, "{text}");
+            assert_eq!(found.map(|code| code.text).as_deref(), expected, "{text}");
         }
     }
 }
