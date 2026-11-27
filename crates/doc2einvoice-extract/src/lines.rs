@@ -12,9 +12,9 @@
 
 use std::str::FromStr;
 
-use doc2einvoice_model::{Entry, Location, Origin};
+use doc2einvoice_model::{AMOUNT_DECIMAL_PLACES, Entry, Location, Origin};
 use doc2einvoice_pdf::Word;
-use rust_decimal::Decimal;
+use rust_decimal::{Decimal, RoundingStrategy};
 
 use crate::breakdown;
 use crate::labels::{self, Names, TOTALS};
@@ -30,11 +30,16 @@ pub struct Line {
     /// The name of the item.
     pub name: Option<Stated>,
     pub quantity: Part,
-    /// The net price of one: as printed, or, where a discount is taken off
-    /// the price printed, worked out from the two and marked so.
+    /// The net price: as printed; where a discount is taken off the price
+    /// printed, worked out from the two; where no price is printed, worked
+    /// out from the amount and the quantity. What is worked out is marked so.
     pub price: Option<Part>,
     /// The gross price of one, where a discount is taken off it.
     pub gross_price: Option<Part>,
+    /// The quantity the price is for, where the numbers of the line agree
+    /// only with a price for ten, a hundred or a thousand: worked out and
+    /// marked so, as the page does not print it.
+    pub price_base: Option<Part>,
     /// The amount of the line.
     pub net: Part,
     /// The rate of VAT, where the table has a column for it.
@@ -114,6 +119,14 @@ const COLUMN_NAMES: &[(&[&str], Column)] = &[
 
 /// How many numbers make a line: the quantity, the price and the amount.
 const LINE_FIGURES: usize = 3;
+
+/// The quantities a price may be for without the page saying so: by the
+/// ten, the hundred or the thousand.
+const PRICE_BASES: [u32; 3] = [10, 100, 1000];
+
+/// How many decimal places a price is printed with at most, as `0,8403`: a
+/// price worked out that needs more is none a page would print.
+const PRICE_PLACES_MOST: u32 = 4;
 
 /// How far left of the heading of its column the name of an item may
 /// start, as a multiple of the font size of the heading.
@@ -271,32 +284,92 @@ struct Found<'a> {
 /// | `Text` `Menge` `Preis` `Betrag` | `Gas` `1.000` `kWh` `52,00` `52,00` | 1 at 52, 52                |
 /// | `Text` `Menge` `Preis` `Betrag` | `Gas` `1.000` `0,00` `0,00`        | none (both readings agree)  |
 /// | `Text` `Menge` `Preis` `Betrag` | `Gas` `1.000` `5,00` `70,00`       | none (neither agrees)       |
+/// | `Text` `Menge` `Preis` `Betrag` | `Gas` `1.000` `kWh` `52,00` `52,00`, read as a thousand at a price for a thousand | not that reading: it needs a price base besides |
 fn line<'a>(row: &'a Row<'a>, table: &Table) -> Option<Found<'a>> {
-    line_of(row, table, &figures(&row.words)).or_else(|| {
-        let thousands = line_of(row, table, &figures_as(&row.words, Reading::Thousands));
-        let decimals = line_of(row, table, &figures_as(&row.words, Reading::Decimals));
-        match (thousands, decimals) {
+    let strict = figures(&row.words);
+    let as_printed = line_of(row, table, &strict, Printed::WithPrice);
+    let either_way = || {
+        let read = |open: Reading| {
+            line_of(
+                row,
+                table,
+                &figures_as(&row.words, open),
+                Printed::WithPrice,
+            )
+        };
+        // A reading that needs a price for a hundred besides is one guess
+        // on another: only a reading that agrees as it stands counts.
+        let as_it_stands =
+            |open: Reading| read(open).filter(|found| found.line.price_base.is_none());
+        match (
+            as_it_stands(Reading::Thousands),
+            as_it_stands(Reading::Decimals),
+        ) {
             (Some(line), None) | (None, Some(line)) => Some(line),
             (Some(_), Some(_)) | (None, None) => None,
         }
-    })
+    };
+    as_printed
+        .or_else(either_way)
+        .or_else(|| line_of(row, table, &strict, Printed::WithoutPrice))
+}
+
+/// Whether a row is read as a line that prints its price, whose numbers
+/// bear each other out, or as one without, which is tried last.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Printed {
+    WithPrice,
+    WithoutPrice,
 }
 
 /// The numbers of a row that make a line.
 struct Numbers<'f> {
     quantity: &'f Figure,
-    price: &'f Figure,
+    /// The price, where the row prints one.
+    price: Option<&'f Figure>,
     net: &'f Figure,
     /// The discount taken off, if the numbers agree only with it.
     discount: Option<&'f Figure>,
+    /// The quantity the price is for, if the numbers agree only with it.
+    base: Option<Decimal>,
+}
+
+/// The quantity a price is for if `quantity` at `price` comes to `net` only
+/// so: ten, a hundred or a thousand, as screws are priced by the hundred.
+/// The page does not print it. An amount of nothing tells nothing.
+///
+/// | Quantity | Price | Amount | The price is for          |
+/// |----------|-------|--------|---------------------------|
+/// | 400      | 32.76 | 131.04 | 100                       |
+/// | -150     | 60.76 | -91.14 | 100                       |
+/// | 150      | 49.29 | 73.94  | 100 (73.935, rounded)     |
+/// | 1000     | 0.052 | 5.20   | 10                        |
+/// | 400      | 32.76 | 131.05 | none (not to the cent)    |
+/// | 400      | 32.76 | 262.08 | none (a price for 50)     |
+/// | 1        | 2.00  | 0.00   | none (an amount of nothing) |
+fn price_base(quantity: Decimal, price: Decimal, net: Decimal) -> Option<Decimal> {
+    if net.is_zero() {
+        return None;
+    }
+    let gross = quantity.checked_mul(price)?;
+    PRICE_BASES.into_iter().map(Decimal::from).find(|base| {
+        gross.checked_div(*base).is_some_and(|shared| {
+            let rounded = shared.round_dp_with_strategy(
+                AMOUNT_DECIMAL_PLACES,
+                RoundingStrategy::MidpointAwayFromZero,
+            );
+            rounded == net
+        })
+    })
 }
 
 /// The numbers among those of a row that make a line: the last three
 /// standing together, none with the sign of a rate, that are the quantity
-/// and the price, in the order of the heading, and the amount, and agree,
-/// with one of the printed rates taken off as a discount or without. What
-/// stands after them is another column, as the tax or the amount with it,
-/// and needs a word of the heading after the name of the amount.
+/// and the price, in the order of the heading, and the amount, and agree:
+/// as they stand, with one of the printed rates taken off as a discount, or
+/// with the price being one for ten, a hundred or a thousand. What stands
+/// after them is another column, as the tax or the amount with it, and
+/// needs a word of the heading after the name of the amount.
 ///
 /// | Numbers of the row, quantity first | Rates       | The line                          |
 /// |------------------------------------|-------------|-----------------------------------|
@@ -307,6 +380,7 @@ struct Numbers<'f> {
 /// | 5, 1, 5.00, 7.00, one column after the amount | 19 % after them | none (two numbers for one column) |
 /// | 20, 4.55, 81.90                    | 10 %, a column for discounts | 20 at 4.55, 81.90, less 10 % |
 /// | 20, 4.55, 81.90                    | 10 %, no such column | none                     |
+/// | 400, 32.76, 131.04                 | none        | 400 at 32.76 for 100, 131.04      |
 /// | 1, 100, 120                        | none        | none (do not agree)               |
 /// | 100, 100                           | none        | none (two numbers)                |
 /// | 1, 100, 0.025 (no amount of money) | none        | none                              |
@@ -335,25 +409,109 @@ fn numbers<'f>(plain: &[&'f Figure], marked: &[&'f Figure], table: &Table) -> Op
             let share = Decimal::ONE_HUNDRED.checked_sub(rate.value)?;
             gross?.checked_mul(share)?.checked_div(Decimal::ONE_HUNDRED)
         };
-        let discount = if comes_to(gross, net.value) {
-            None
-        } else {
-            let printed = marked
-                .iter()
-                .find(|rate| table.has(Column::Discount) && comes_to(taken_off(rate), net.value))?;
-            Some(*printed)
-        };
-        Some(Numbers {
+        let as_they_stand = comes_to(gross, net.value);
+        let discount = marked
+            .iter()
+            .copied()
+            .filter(|_| !as_they_stand && table.has(Column::Discount))
+            .find(|rate| comes_to(taken_off(rate), net.value));
+        let base = (!as_they_stand && discount.is_none())
+            .then(|| price_base(quantity.value, price.value, net.value))
+            .flatten();
+        (as_they_stand || discount.is_some() || base.is_some()).then_some(Numbers {
             quantity,
-            price,
+            price: Some(price),
             net,
             discount,
+            base,
         })
     })
 }
 
-/// The line the numbers `figures` of a row make, if they agree.
-fn line_of<'a>(row: &'a Row<'a>, table: &Table, figures: &[Figure]) -> Option<Found<'a>> {
+/// The numbers of a row that prints a line without its price: a quantity,
+/// its unit, then nothing but a rate or the mark of a currency, and the
+/// amount, printed with decimals, as the last word of the row; and no other
+/// number but the number of the line. Nothing in such a row bears its
+/// numbers out: they count only as the amounts of the lines add up to a
+/// total of the invoice.
+///
+/// | Row, the heading with positions                | The line                     |
+/// |------------------------------------------------|------------------------------|
+/// | `1` `Stahlcoil` `1` `Stk` `0%` `1.000,00`      | line 1, 1, 1000              |
+/// | `Stahlcoil` `10` `Stk` `19%` `850,00` `€`      | 10, 850                      |
+/// | `Stahlcoil` `10` `Stk` `EUR` `850,00`          | 10, 850                      |
+/// | `2` `Inklusiv-Kilometer` `waren:` `873`        | none (a word after the unit, an amount without decimals) |
+/// | `2` `Kilometer` `gefahren` `873,00`            | none (a word after the unit) |
+/// | `2` `Kilometer` `873`                          | none (an amount without decimals) |
+/// | `3` `Monteur` `10,50` `28` `Std` `288,75`      | none (a price that does not agree) |
+/// | `77777777777` `200`                            | none (no unit)               |
+/// | `Strom` `0,0520` `1.000` `kWh` `52,00`         | none (`1.000` is a number, no unit) |
+/// | `4260331811362` `(GLN)` `1250032` `D.` `Muster` | none (the amount not last)  |
+/// | `Stahlcoil` `0` `Stk` `850,00`                 | none (a quantity of nothing) |
+/// | `Stahlcoil` `10` `Stk` `0,025`                 | none (no amount of money)    |
+fn without_price<'f>(row: &Row, figures: &'f [Figure], table: &Table) -> Option<Numbers<'f>> {
+    let plain: Vec<&Figure> = figures.iter().filter(|figure| !figure.marked).collect();
+    let numbered = table.has(Column::Position)
+        && plain
+            .first()
+            .is_some_and(|head| head.first == 0 && head.value.fract().is_zero());
+    let (quantity, net) = match plain.as_slice() {
+        [quantity, net] => (*quantity, *net),
+        [_, quantity, net] if numbered => (*quantity, *net),
+        _ => return None,
+    };
+    let unit = quantity.first + quantity.count;
+    let covered = |word: usize| {
+        figures
+            .iter()
+            .any(|figure| (figure.first..figure.first + figure.count).contains(&word))
+    };
+    let is_mark = |word: usize| values::currency_mark(&row.words[word].text).is_some();
+    let unit_follows =
+        unit < net.first && !covered(unit) && values::open_number(&row.words[unit].text).is_none();
+    let only_rates_between = (unit + 1..net.first).all(|word| covered(word) || is_mark(word));
+    let last_word = (net.first + net.count..row.words.len()).all(is_mark);
+    let amount = net.monetary && values::has_decimals(&row.words[net.first].text);
+    let fits = unit_follows && only_rates_between && last_word && amount;
+    (fits && !quantity.value.is_zero()).then_some(Numbers {
+        quantity,
+        price: None,
+        net,
+        discount: None,
+        base: None,
+    })
+}
+
+/// The price of one that an amount for a quantity comes to, marked as
+/// worked out and placed at the amount, if it is a number that times the
+/// quantity is the amount again. The page prints neither it nor another.
+///
+/// | Quantity | Amount | Price                           |
+/// |----------|--------|---------------------------------|
+/// | 10       | 850    | 85, worked out                  |
+/// | 4        | 10     | 2.5, worked out                 |
+/// | 3        | 10     | none (3.33… has no end)         |
+/// | 3        | 0.0001 | none (more decimal places than a price is printed with) |
+/// | 0        | 10     | none                            |
+fn price_of_one(quantity: &Part, net: &Part) -> Option<Part> {
+    let value = net.value.checked_div(quantity.value)?;
+    let printable = value.round_dp(PRICE_PLACES_MOST) == value;
+    (printable && value.checked_mul(quantity.value) == Some(net.value)).then(|| Part {
+        text: value.normalize().to_string(),
+        value,
+        origin: Origin::Derived,
+        ..net.clone()
+    })
+}
+
+/// The line the numbers `figures` of a row make: those of a line with its
+/// price, if they agree, or those of a line printed without it.
+fn line_of<'a>(
+    row: &'a Row<'a>,
+    table: &Table,
+    figures: &[Figure],
+    printed: Printed,
+) -> Option<Found<'a>> {
     let (plain, marked): (Vec<&Figure>, Vec<&Figure>) =
         figures.iter().partition(|figure| !figure.marked);
     let Numbers {
@@ -361,7 +519,11 @@ fn line_of<'a>(row: &'a Row<'a>, table: &Table, figures: &[Figure]) -> Option<Fo
         price,
         net,
         discount,
-    } = numbers(&plain, &marked, table)?;
+        base,
+    } = match printed {
+        Printed::WithPrice => numbers(&plain, &marked, table)?,
+        Printed::WithoutPrice => without_price(row, figures, table)?,
+    };
     let rates: Vec<&Figure> = marked
         .iter()
         .copied()
@@ -371,23 +533,29 @@ fn line_of<'a>(row: &'a Row<'a>, table: &Table, figures: &[Figure]) -> Option<Fo
         [rate] if table.has(Column::Rate) => Some(part(row, rate)),
         _ => None,
     };
+    let mut taken: Vec<&Figure> = vec![quantity, net];
+    taken.extend(price);
     let identifier = figures.first().filter(|head| {
         table.has(Column::Position)
             && head.first == 0
             && !head.marked
             && head.value.fract().is_zero()
-            && [quantity, price, net]
-                .iter()
-                .all(|taken| taken.first != head.first)
+            && taken.iter().all(|taken| taken.first != head.first)
     });
-    let mut taken: Vec<&Figure> = vec![quantity, price, net];
     taken.extend(identifier);
     taken.extend(marked.iter().copied());
     let after_quantity = quantity.first + quantity.count;
     let unit = (!table.name_after_quantity()
         && !figures.iter().any(|figure| figure.first == after_quantity))
     .then_some(after_quantity);
-    let name = name(row, &taken, unit, price.first.min(net.first), table);
+    // The name stands before the price and the amount; where no price is
+    // printed, before the quantity too, unless the heading has it after.
+    let before = match price {
+        Some(price) => price.first.min(net.first),
+        None if table.name_after_quantity() => net.first,
+        None => quantity.first.min(net.first),
+    };
+    let name = name(row, &taken, unit, before, table);
     let named = Span {
         page: row.page,
         words: name
@@ -404,6 +572,8 @@ fn line_of<'a>(row: &'a Row<'a>, table: &Table, figures: &[Figure]) -> Option<Fo
         .filter(|(word, _)| !name.contains(word))
         .map(|(_, word)| *word)
         .collect();
+    let (quantity, net) = (part(row, quantity), part(row, net));
+    let printed_price = price.map(|price| part(row, price));
     let line = Line {
         identifier: identifier.map(|head| Part {
             text: row.words[head.first].text.clone(),
@@ -414,13 +584,20 @@ fn line_of<'a>(row: &'a Row<'a>, table: &Table, figures: &[Figure]) -> Option<Fo
             location: named.location(0, named.words.len()),
             origin: Origin::Rule,
         }),
-        quantity: part(row, quantity),
-        price: match discount {
-            None => Some(part(row, price)),
-            Some(discount) => after_discount(&part(row, price), discount),
+        price: match (&printed_price, discount) {
+            (Some(price), None) => Some(price.clone()),
+            (Some(price), Some(discount)) => after_discount(price, discount),
+            (None, _) => price_of_one(&quantity, &net),
         },
-        gross_price: discount.is_some().then(|| part(row, price)),
-        net: part(row, net),
+        gross_price: printed_price.clone().filter(|_| discount.is_some()),
+        price_base: base.zip(printed_price).map(|(base, price)| Part {
+            text: base.normalize().to_string(),
+            value: base,
+            origin: Origin::Derived,
+            ..price
+        }),
+        quantity,
+        net,
         category: table::printed_category(row.page, &beside_name)
             .or_else(|| rate.as_ref().and_then(table::told_by_rate)),
         rate,
@@ -716,7 +893,7 @@ mod tests {
 
     use super::{
         Column, Line, Table, after_discount, around, ends_table, heading, joined, line,
-        names_total, read, runs_on,
+        names_total, price_base, price_of_one, read, runs_on,
     };
     use crate::page::{self, Row};
     use crate::table::printed::{LEFT, PITCH, TOP, row, stacked, words};
@@ -1029,6 +1206,168 @@ mod tests {
         assert_eq!(numbers(PLAIN, &["Miete", "1", "100,00", "120,00"]), None);
         assert_eq!(numbers(PLAIN, &["Miete", "100,00", "100,00"]), None);
         assert_eq!(numbers(PLAIN, &["Miete", "1", "100,00", "0,025"]), None);
+    }
+
+    #[test]
+    fn a_price_base_follows_its_table() {
+        let number = |text: &str| Decimal::from_str_exact(text).unwrap_or_default();
+        let base = |quantity: &str, price: &str, net: &str| {
+            price_base(number(quantity), number(price), number(net)).map(|base| base.to_string())
+        };
+        assert_eq!(base("400", "32.76", "131.04").as_deref(), Some("100"));
+        assert_eq!(base("-150", "60.76", "-91.14").as_deref(), Some("100"));
+        assert_eq!(base("150", "49.29", "73.94").as_deref(), Some("100"));
+        assert_eq!(base("1000", "0.052", "5.20").as_deref(), Some("10"));
+        assert_eq!(base("400", "32.76", "131.05"), None);
+        assert_eq!(base("400", "32.76", "262.08"), None);
+        assert_eq!(base("1", "2.00", "0.00"), None);
+    }
+
+    /// The quantity, the net price, the quantity the price is for and the
+    /// amount of the line `texts` are, each with whether it is worked out.
+    fn worked_out(heading: &[&str], texts: &[&str]) -> Option<[Option<(String, bool)>; 4]> {
+        let table = Table {
+            name_from: None,
+            name_until: None,
+            ..heads(heading)?
+        };
+        let printed = words(LEFT, TOP, texts);
+        let found = line(&row(&printed), &table)?.line;
+        let mark = |part: &Part| (part.text.clone(), part.origin == Origin::Derived);
+        Some([
+            Some(mark(&found.quantity)),
+            found.price.as_ref().map(mark),
+            found.price_base.as_ref().map(mark),
+            Some(mark(&found.net)),
+        ])
+    }
+
+    /// A value with whether it is worked out.
+    fn marked(text: &str, worked_out: bool) -> (String, bool) {
+        (text.to_owned(), worked_out)
+    }
+
+    #[test]
+    fn a_price_for_a_hundred_is_worked_out_and_marked() {
+        const HEADING: &[&str] = &["Pos", "Text", "Preis", "Menge", "Betrag"];
+        assert_eq!(
+            worked_out(
+                HEADING,
+                &["000003", "Schraube", "32,76", "400", "Stk", "131,04"]
+            ),
+            Some([
+                Some(marked("400", false)),
+                Some(marked("32.76", false)),
+                Some(marked("100", true)),
+                Some(marked("131.04", false)),
+            ])
+        );
+        assert_eq!(
+            worked_out(HEADING, &["1", "Papier", "9,99", "20", "Stk", "199,80"]),
+            Some([
+                Some(marked("20", false)),
+                Some(marked("9.99", false)),
+                None,
+                Some(marked("199.8", false))
+            ])
+        );
+        assert_eq!(
+            worked_out(HEADING, &["1", "Papier", "9,99", "20", "Stk", "250,00"]),
+            None
+        );
+    }
+
+    #[test]
+    fn lines_without_a_price_follow_their_table() {
+        const HEADING: &[&str] = &["Pos", "Text", "Preis", "Menge", "USt.", "Betrag"];
+        assert_eq!(
+            worked_out(HEADING, &["1", "Stahlcoil", "1", "Stk", "0%", "1.000,00"]),
+            Some([
+                Some(marked("1", false)),
+                Some(marked("1000", true)),
+                None,
+                Some(marked("1000", false))
+            ])
+        );
+        assert_eq!(
+            worked_out(HEADING, &["Stahlcoil", "10", "Stk", "19%", "850,00", "€"]),
+            Some([
+                Some(marked("10", false)),
+                Some(marked("85", true)),
+                None,
+                Some(marked("850", false))
+            ])
+        );
+        assert_eq!(
+            worked_out(HEADING, &["3", "Monteur", "10,50", "28", "Std", "288,75"]),
+            None
+        );
+        assert_eq!(worked_out(HEADING, &["77777777777", "200"]), None);
+        assert_eq!(
+            worked_out(HEADING, &["Strom", "0,0520", "1.000", "kWh", "52,00"]),
+            Some([
+                Some(marked("1000", false)),
+                Some(marked("0.052", false)),
+                None,
+                Some(marked("52", false))
+            ])
+        );
+        assert_eq!(
+            worked_out(
+                HEADING,
+                &["4260331811362", "(GLN)", "1250032", "D.", "Muster"]
+            ),
+            None
+        );
+        assert_eq!(
+            worked_out(HEADING, &["Stahlcoil", "0", "Stk", "850,00"]),
+            None
+        );
+        assert_eq!(
+            worked_out(HEADING, &["Stahlcoil", "10", "Stk", "EUR", "850,00"]),
+            Some([
+                Some(marked("10", false)),
+                Some(marked("85", true)),
+                None,
+                Some(marked("850", false)),
+            ])
+        );
+        assert_eq!(
+            worked_out(HEADING, &["2", "Inklusiv-Kilometer", "waren:", "873"]),
+            None
+        );
+        assert_eq!(
+            worked_out(HEADING, &["2", "Kilometer", "gefahren", "873,00"]),
+            None
+        );
+        assert_eq!(worked_out(HEADING, &["2", "Kilometer", "873"]), None);
+        assert_eq!(
+            worked_out(HEADING, &["Stahlcoil", "10", "Stk", "0,025"]),
+            None
+        );
+        let named = read_line(HEADING, &["1", "Stahlcoil", "1", "Stk", "0%", "1.000,00"]);
+        assert_eq!(
+            named.map(|[number, name, ..]| (number, name)),
+            Some((Some("1".to_owned()), Some("Stahlcoil".to_owned())))
+        );
+    }
+
+    #[test]
+    fn a_price_of_one_follows_its_table() {
+        let part = |text: &str| Part {
+            text: text.to_owned(),
+            location: None,
+            value: Decimal::from_str_exact(text).unwrap_or_default(),
+            origin: Origin::Rule,
+        };
+        let price = |quantity: &str, net: &str| {
+            price_of_one(&part(quantity), &part(net)).map(|price| (price.text, price.origin))
+        };
+        assert_eq!(price("10", "850"), Some(("85".to_owned(), Origin::Derived)));
+        assert_eq!(price("4", "10"), Some(("2.5".to_owned(), Origin::Derived)));
+        assert_eq!(price("3", "10"), None);
+        assert_eq!(price("3", "0.0001"), None);
+        assert_eq!(price("0", "10"), None);
     }
 
     #[test]
