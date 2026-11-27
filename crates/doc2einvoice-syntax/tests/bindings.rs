@@ -156,6 +156,7 @@ impl Parsed {
         path: fn(&Binding) -> &str,
         skipped: &[&str],
         parts: fn(u16, &str) -> Vec<&str>,
+        coded: &[(u16, String)],
     ) -> Vec<String> {
         let mut misplaced = Vec::new();
         for binding in bindings() {
@@ -169,7 +170,7 @@ impl Parsed {
             let held = written
                 .iter()
                 .flat_map(|value| parts(term, value))
-                .any(|part| holds(part, term));
+                .any(|part| holds(part, term, coded));
             if !held {
                 misplaced.push(format!("{}: {written:?}", binding.id));
             }
@@ -215,12 +216,17 @@ fn term_of(id: &str) -> Option<u16> {
     id.strip_prefix("BT-")?.parse().ok()
 }
 
+/// The code CII writes for the VAT point of the invoice that names its
+/// terms, the date of the delivery: of UNTDID 2475, where the standard and
+/// UBL take UNTDID 2005.
+const NAMED_VAT_POINT_IN_CII: &str = "29";
+
 /// The terms that carry a code and cannot name themselves, with the code
-/// each is written as.
-fn coded() -> Vec<(u16, String)> {
+/// each is written as; the VAT point (BT-8) as `vat_point`.
+fn coded(vat_point: &str) -> Vec<(u16, String)> {
     let mut coded = vec![
         (3, NAMED_TYPE.to_owned()),
-        (8, NAMED_VAT_POINT.to_owned()),
+        (8, vat_point.to_owned()),
         (125, STANDARD.encode(named_attachment())),
     ];
     coded.extend(
@@ -242,10 +248,10 @@ fn coded() -> Vec<(u16, String)> {
 }
 
 /// Whether `written` is the value of the term `term` in the invoice that
-/// names its terms: the code of a coded term, and what names the term
-/// otherwise.
-fn holds(written: &str, term: u16) -> bool {
-    match coded().iter().find(|(coded, _)| *coded == term) {
+/// names its terms: the code of a coded term, as `coded` lists them, and
+/// what names the term otherwise.
+fn holds(written: &str, term: u16, coded: &[(u16, String)]) -> bool {
+    match coded.iter().find(|(coded, _)| *coded == term) {
         Some((_, code)) => written == code,
         None => named::names(written, term),
     }
@@ -302,6 +308,7 @@ fn every_term_holds_its_value_in_a_ubl_invoice() {
         |binding| binding.ubl,
         &NOT_IN_UBL,
         ubl_parts,
+        &coded(NAMED_VAT_POINT),
     );
     assert!(misplaced.is_empty(), "not their value: {misplaced:#?}");
 }
@@ -312,14 +319,19 @@ fn every_term_holds_its_value_in_a_ubl_credit_note() {
         |binding| binding.ubl_credit_note,
         &NOT_IN_UBL,
         ubl_parts,
+        &coded(NAMED_VAT_POINT),
     );
     assert!(misplaced.is_empty(), "not their value: {misplaced:#?}");
 }
 
 #[test]
 fn every_term_holds_its_value_in_cii() {
-    let misplaced =
-        Parsed::new(&cii(&named_invoices())).misplaced(|binding| binding.cii, &[], whole);
+    let misplaced = Parsed::new(&cii(&named_invoices())).misplaced(
+        |binding| binding.cii,
+        &[],
+        whole,
+        &coded(NAMED_VAT_POINT_IN_CII),
+    );
     assert!(misplaced.is_empty(), "not their value: {misplaced:#?}");
 }
 
