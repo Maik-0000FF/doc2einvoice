@@ -476,9 +476,10 @@ fn numbers<'f>(
 /// The numbers of a row that prints a line without its price: a quantity,
 /// its unit, then nothing but a rate or the mark of a currency, and the
 /// amount, printed with decimals, as the last word of the row; and no other
-/// number but the number of the line. Nothing in such a row bears its
-/// numbers out: they count only as the amounts of the lines add up to a
-/// total of the invoice. No price is worked out for it: the page may print
+/// number but the number of the line. The sum of the lines bears the amount
+/// out, and the unit the quantity: the word after it must be a unit of
+/// measure the table of units knows, or the number before it is no
+/// quantity. No price is worked out for it: the page may print
 /// one elsewhere, with allowances taken off the line, and the amount by the
 /// quantity would speak against it.
 ///
@@ -487,6 +488,8 @@ fn numbers<'f>(
 /// | `1` `Stahlcoil` `1` `Stk` `0%` `1.000,00`      | line 1, 1, 1000              |
 /// | `Stahlcoil` `10` `Stk` `19%` `850,00` `€`      | 10, 850                      |
 /// | `Stahlcoil` `10` `Stk` `EUR` `850,00`          | 10, 850                      |
+/// | `Stahlcoil` `10` `Rollen` `850,00`             | none (no unit the table knows: nothing bears the quantity out) |
+/// | `Bauteil` `2026` `Version` `850,00`            | none (the same)              |
 /// | `2` `Inklusiv-Kilometer` `waren:` `873`        | none (a word after the unit, an amount without decimals) |
 /// | `2` `Kilometer` `gefahren` `873,00`            | none (a word after the unit) |
 /// | `2` `Kilometer` `873`                          | none (an amount without decimals) |
@@ -516,8 +519,10 @@ fn without_price<'f>(row: &Row, figures: &'f [Figure], table: &Table) -> Option<
             .any(|figure| (figure.first..figure.first + figure.count).contains(&word))
     };
     let is_mark = |word: usize| values::currency_mark(&row.words[word].text).is_some();
-    let unit_follows =
-        unit < net.first && !covered(unit) && values::open_number(&row.words[unit].text).is_none();
+    let unit_follows = unit < net.first
+        && !covered(unit)
+        && values::open_number(&row.words[unit].text).is_none()
+        && units::code(&row.words[unit].text).is_some();
     let only_rates_between = (unit + 1..net.first).all(|word| covered(word) || is_mark(word));
     let last_word = (net.first + net.count..row.words.len()).all(is_mark);
     let amount = net.monetary && values::has_decimals(&row.words[net.first].text);
@@ -1433,6 +1438,14 @@ mod tests {
         );
         assert_eq!(
             worked_out(HEADING, &["Stahlcoil", "0", "Stk", "850,00"]),
+            None
+        );
+        assert_eq!(
+            worked_out(HEADING, &["Stahlcoil", "10", "Rollen", "850,00"]),
+            None
+        );
+        assert_eq!(
+            worked_out(HEADING, &["Bauteil", "2026", "Version", "850,00"]),
             None
         );
         assert_eq!(
