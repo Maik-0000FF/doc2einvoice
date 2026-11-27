@@ -479,8 +479,8 @@ fn numbers<'f>(
 /// number but the number of the line. The sum of the lines bears the amount
 /// out, and the unit the quantity: the word after it must be a unit of
 /// measure the table of units knows, or the number before it is no
-/// quantity. No price is worked out for it: the page may print
-/// one elsewhere, with allowances taken off the line, and the amount by the
+/// quantity. No price is worked out for it: the page may print one
+/// elsewhere, with allowances taken off the line, and the amount by the
 /// quantity would speak against it.
 ///
 /// | Row, the heading with positions                | The line                     |
