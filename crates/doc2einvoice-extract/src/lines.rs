@@ -5,13 +5,16 @@
 //! line under a heading that names its columns.
 //!
 //! A row counts only if its numbers agree: the quantity times the price,
-//! less a discount where one is printed, is the amount of the line. Rows
+//! less a discount where one is printed, is the amount of the line. The
+//! lines count only if their amounts add up to a total the page prints. Rows
 //! between the lines, as the number of an item, are passed over; the lines
 //! a name runs on over are read with it.
 
-use doc2einvoice_model::{AMOUNT_DECIMAL_PLACES, Origin};
+use std::str::FromStr;
+
+use doc2einvoice_model::{Entry, Location, Origin};
 use doc2einvoice_pdf::Word;
-use rust_decimal::{Decimal, RoundingStrategy};
+use rust_decimal::Decimal;
 
 use crate::breakdown;
 use crate::labels::{self, Names, TOTALS};
@@ -235,7 +238,7 @@ struct Found<'a> {
 /// | `Pos` `Produkt` `Menge` `Preis` `Netto` | `02` `IP` `Server` `57811` `1` `0,8403` `€` `0,84` `€` | line 02, 1 at 0.8403, 0.84, "IP Server 57811" |
 /// | `Pos` `Beschreibung` `Nettopreis` `Menge` `Steuersatz` `Nettobetrag` | `1` `Trennblätter` `9,99` `20` `Stk` `19` `%` `VAT` `(S)` `199,80` | line 1, 20 at 9.99, 199.80, 19 %, `S`, "Trennblätter" |
 /// | `Amount` `Product` `VAT` `Price` `Total` | `1.00` `Design` `(hours)` `7%` `160.00` `€` `160.00` `€` | 1 at 160, 160, 7 %, `S` worked out, "Design (hours)" |
-/// | `Description` `Quantité` `Rem.` `Prix` `HT` | `Nougat` `250g` `20` `Unit(s)` `4,55` `€` `10%` `81,90` `€` | 20 at a gross price of 4.55, net 4.10 worked out, 81.90, "Nougat 250g" |
+/// | `Description` `Quantité` `Rem.` `Prix` `HT` | `Nougat` `250g` `20` `Unit(s)` `4,55` `€` `10%` `81,90` `€` | 20 at a gross price of 4.55, net 4.095 worked out, 81.90, "Nougat 250g" |
 /// | `Description` `Quantité` `Rem.` `Prix` `HT` | `Biscuits` `15` `Unit(s)` `3,20` `€` `48,00` `€` | 15 at 3.20, 48, "Biscuits" |
 /// | `Text` `Menge` `Preis` `Betrag` | `Nougat` `20` `4,55` `10%` `81,90`            | none (no column for a discount)        |
 /// | `Text` `Menge` `Preis` `Betrag` | `Miete` `1` `100,00` `120,00`                 | none (do not agree)                    |
@@ -263,34 +266,76 @@ fn line<'a>(row: &'a Row<'a>, table: &Table) -> Option<Found<'a>> {
     })
 }
 
-/// The line the numbers `figures` of a row make, if they agree.
-fn line_of<'a>(row: &'a Row<'a>, table: &Table, figures: &[Figure]) -> Option<Found<'a>> {
-    let (plain, marked): (Vec<&Figure>, Vec<&Figure>) =
-        figures.iter().partition(|figure| !figure.marked);
-    let [first, second, net] = plain.get(plain.len().checked_sub(LINE_FIGURES)?..)? else {
-        return None;
-    };
-    let (quantity, price) = if table.quantity_first() {
-        (*first, *second)
-    } else {
-        (*second, *first)
-    };
-    if !net.monetary {
-        return None;
-    }
-    let gross = quantity.value.checked_mul(price.value);
-    let discount = if comes_to(gross, net.value) {
-        None
-    } else {
+/// The numbers of a row that make a line.
+struct Numbers<'f> {
+    quantity: &'f Figure,
+    price: &'f Figure,
+    net: &'f Figure,
+    /// The discount taken off, if the numbers agree only with it.
+    discount: Option<&'f Figure>,
+}
+
+/// The numbers among those of a row that make a line: the last three
+/// standing together, none with the sign of a rate, that are the quantity
+/// and the price, in the order of the heading, and the amount, and agree,
+/// with one of the printed rates taken off as a discount or without. What
+/// stands after them is another column, as the tax or the amount with it.
+///
+/// | Numbers of the row, quantity first | Rates       | The line                          |
+/// |------------------------------------|-------------|-----------------------------------|
+/// | 1, 100, 100                        | none        | 1 at 100, 100                     |
+/// | 2, 57811, 1, 0.8403, 0.84          | none        | 1 at 0.8403, 0.84 (the last three) |
+/// | 1, 100, 100, 19, 119               | none        | 1 at 100, 100 (tax and gross amount after) |
+/// | 20, 4.55, 81.90                    | 10 %, a column for discounts | 20 at 4.55, 81.90, less 10 % |
+/// | 20, 4.55, 81.90                    | 10 %, no such column | none                     |
+/// | 1, 100, 120                        | none        | none (do not agree)               |
+/// | 100, 100                           | none        | none (two numbers)                |
+/// | 1, 100, 0.025 (no amount of money) | none        | none                              |
+fn numbers<'f>(plain: &[&'f Figure], marked: &[&'f Figure], table: &Table) -> Option<Numbers<'f>> {
+    plain.windows(LINE_FIGURES).rev().find_map(|window| {
+        let [first, second, net] = window else {
+            return None;
+        };
+        let (quantity, price) = if table.quantity_first() {
+            (*first, *second)
+        } else {
+            (*second, *first)
+        };
+        if !net.monetary {
+            return None;
+        }
+        let gross = quantity.value.checked_mul(price.value);
         let taken_off = |rate: &Figure| {
             let share = Decimal::ONE_HUNDRED.checked_sub(rate.value)?;
             gross?.checked_mul(share)?.checked_div(Decimal::ONE_HUNDRED)
         };
-        let printed = marked
-            .iter()
-            .find(|rate| table.has(Column::Discount) && comes_to(taken_off(rate), net.value))?;
-        Some(*printed)
-    };
+        let discount = if comes_to(gross, net.value) {
+            None
+        } else {
+            let printed = marked
+                .iter()
+                .find(|rate| table.has(Column::Discount) && comes_to(taken_off(rate), net.value))?;
+            Some(*printed)
+        };
+        Some(Numbers {
+            quantity,
+            price,
+            net,
+            discount,
+        })
+    })
+}
+
+/// The line the numbers `figures` of a row make, if they agree.
+fn line_of<'a>(row: &'a Row<'a>, table: &Table, figures: &[Figure]) -> Option<Found<'a>> {
+    let (plain, marked): (Vec<&Figure>, Vec<&Figure>) =
+        figures.iter().partition(|figure| !figure.marked);
+    let Numbers {
+        quantity,
+        price,
+        net,
+        discount,
+    } = numbers(&plain, &marked, table)?;
     let rates: Vec<&Figure> = marked
         .iter()
         .copied()
@@ -305,7 +350,9 @@ fn line_of<'a>(row: &'a Row<'a>, table: &Table, figures: &[Figure]) -> Option<Fo
             && head.first == 0
             && !head.marked
             && head.value.fract().is_zero()
-            && head.first != first.first
+            && [quantity, price, net]
+                .iter()
+                .all(|taken| taken.first != head.first)
     });
     let mut taken: Vec<&Figure> = vec![quantity, price, net];
     taken.extend(identifier);
@@ -322,6 +369,15 @@ fn line_of<'a>(row: &'a Row<'a>, table: &Table, figures: &[Figure]) -> Option<Fo
             .filter_map(|word| row.words.get(*word).copied())
             .collect(),
     };
+    // A code of a category is looked for beside the name, not in it: a size
+    // in brackets, as in "T-Shirt (M)", is none.
+    let beside_name: Vec<&Word> = row
+        .words
+        .iter()
+        .enumerate()
+        .filter(|(word, _)| !name.contains(word))
+        .map(|(_, word)| *word)
+        .collect();
     let line = Line {
         identifier: identifier.map(|head| Part {
             text: row.words[head.first].text.clone(),
@@ -339,7 +395,7 @@ fn line_of<'a>(row: &'a Row<'a>, table: &Table, figures: &[Figure]) -> Option<Fo
         },
         gross_price: discount.is_some().then(|| part(row, price)),
         net: part(row, net),
-        category: table::printed_category(row.page, &row.words)
+        category: table::printed_category(row.page, &beside_name)
             .or_else(|| rate.as_ref().and_then(table::told_by_rate)),
         rate,
     };
@@ -347,27 +403,23 @@ fn line_of<'a>(row: &'a Row<'a>, table: &Table, figures: &[Figure]) -> Option<Fo
 }
 
 /// The net price that is left of a gross price with a discount taken off,
-/// rounded to the decimal places of an amount, marked as worked out and
-/// placed at the gross price. The page prints the gross price and the
-/// discount; that they come to the amount of the line is checked before.
+/// marked as worked out and placed at the gross price. It is not rounded:
+/// only so does the quantity times the net price come to the amount the
+/// page prints, which is what was checked before.
 ///
-/// | Gross price | Discount | Net price                   |
-/// |-------------|----------|-----------------------------|
-/// | 4.55        | 10 %     | 4.10 (4.095), worked out    |
-/// | 3.33        | 5 %      | 3.16 (3.1635), worked out   |
-/// | 100         | 0 %      | 100, worked out             |
-/// | 100         | 100 %    | 0, worked out               |
-/// | too large to multiply |  | none                      |
+/// | Gross price | Discount | Net price           |
+/// |-------------|----------|---------------------|
+/// | 4.55        | 10 %     | 4.095, worked out   |
+/// | 3.33        | 5 %      | 3.1635, worked out  |
+/// | 100         | 0 %      | 100, worked out     |
+/// | 100         | 100 %    | 0, worked out       |
+/// | too large to multiply |  | none              |
 fn after_discount(gross: &Part, discount: &Figure) -> Option<Part> {
     let share = Decimal::ONE_HUNDRED.checked_sub(discount.value)?;
     let value = gross
         .value
         .checked_mul(share)?
-        .checked_div(Decimal::ONE_HUNDRED)?
-        .round_dp_with_strategy(
-            AMOUNT_DECIMAL_PLACES,
-            RoundingStrategy::MidpointAwayFromZero,
-        );
+        .checked_div(Decimal::ONE_HUNDRED)?;
     Some(Part {
         text: value.normalize().to_string(),
         value,
@@ -419,8 +471,9 @@ fn name(
 }
 
 /// The lines a name runs on over below its first word: the lines of its
-/// block that follow, above the row of the next line of the invoice, up to
-/// one that holds a field of its own or ends the table.
+/// block that follow below it, above the row of the next line of the
+/// invoice, up to one that holds a field of its own or ends the table. A
+/// line of the block on the baseline of the name is a cell beside it.
 ///
 /// | Below "Wartung" in its block               | Runs on over        |
 /// |--------------------------------------------|---------------------|
@@ -431,6 +484,7 @@ fn name(
 /// | "Anlagen", "GTIN: 4000050986428"           | "Anlagen"           |
 /// | "Summe netto 120,00"                       | nothing (a total)   |
 /// | "Strom", on the row of the next line       | nothing             |
+/// | "2 Monate" on the baseline of "Wartung", then "Anlagen" | "Anlagen" (the cell beside it passed over) |
 /// | nothing, or a line of another block        | nothing             |
 fn runs_on<'a>(printed: &[page::Line<'a>], first: &Word, next: Option<&Word>) -> Vec<&'a [Word]> {
     let own = printed
@@ -442,6 +496,11 @@ fn runs_on<'a>(printed: &[page::Line<'a>], first: &Word, next: Option<&Word>) ->
     printed[own + 1..]
         .iter()
         .take_while(|line| line.page == printed[own].page && line.block == printed[own].block)
+        .filter(|line| {
+            line.words
+                .first()
+                .is_some_and(|head| page::lies_below(head, first))
+        })
         .take_while(|line| {
             let words: Vec<&Word> = line.words.iter().collect();
             let above_next = words
@@ -549,7 +608,12 @@ fn table_lines(rows: &[Row], at: usize, table: &Table, printed: &[page::Line]) -
                 .and_then(|start| line.row.words.get(*start));
             if let (Some(first), Some(name)) = (first, line.line.name.as_mut()) {
                 for more in runs_on(printed, first, next) {
+                    let span = Span {
+                        page: line.row.page,
+                        words: more.iter().collect(),
+                    };
                     name.text = joined(&name.text, more);
+                    name.location = around(name.location, span.location(0, more.len()));
                 }
             }
             line.line
@@ -557,28 +621,73 @@ fn table_lines(rows: &[Row], at: usize, table: &Table, printed: &[page::Line]) -
         .collect()
 }
 
+/// The place that holds both places, of which either may be missing.
+///
+/// | First                | Second               | Around both           |
+/// |----------------------|----------------------|-----------------------|
+/// | 50 to 90, 90 to 100  | 50 to 120, 102 to 112 | 50 to 120, 90 to 112 |
+/// | a place              | none                 | the first             |
+/// | none                 | a place              | the second            |
+/// | none                 | none                 | none                  |
+fn around(first: Option<Location>, second: Option<Location>) -> Option<Location> {
+    match (first, second) {
+        (Some(first), Some(second)) => Some(Location {
+            page: first.page,
+            left: first.left.min(second.left),
+            top: first.top.min(second.top),
+            right: first.right.max(second.right),
+            bottom: first.bottom.max(second.bottom),
+        }),
+        (place, None) | (None, place) => place,
+    }
+}
+
+/// Whether the amounts of `lines` add up to one of `sums`.
+fn add_up(lines: &[Line], sums: &[Decimal]) -> bool {
+    let sum = lines
+        .iter()
+        .try_fold(Decimal::ZERO, |sum, line| sum.checked_add(line.net.value));
+    sum.is_some_and(|sum| sums.contains(&sum))
+}
+
 /// The lines printed on `rows`, whose words stand in the lines `printed`:
-/// those of the first table that has any.
-pub fn read(rows: &[Row], printed: &[page::Line]) -> Vec<Line> {
+/// those of the first table whose lines add up to one of `totals`, the sum
+/// of the lines or the total without VAT as read from the page. Lines that
+/// add up to neither are not the lines of the invoice: one is missing, or a
+/// row below the table was taken for one.
+///
+/// | Lines found in a table   | Totals read              | Read  |
+/// |--------------------------|--------------------------|-------|
+/// | 100 and 20               | sum of the lines 120     | both  |
+/// | 100 and 20               | total without VAT 120    | both  |
+/// | 100 and 20               | 300 (a line was missed)  | none  |
+/// | 100, 20 and 5 (a row below the totals) | 120        | none  |
+/// | 100 and 20               | none                     | none  |
+/// | none                     | any                      | none  |
+pub fn read(rows: &[Row], printed: &[page::Line], totals: [Option<&Entry>; 2]) -> Vec<Line> {
+    let sums: Vec<Decimal> = totals
+        .iter()
+        .flatten()
+        .filter_map(|total| Decimal::from_str(&total.text).ok())
+        .collect();
     rows.iter()
         .enumerate()
         .filter_map(|(at, row)| {
             heading(&row.words).map(|table| table_lines(rows, at, &table, printed))
         })
-        .find(|found| !found.is_empty())
+        .find(|found| !found.is_empty() && add_up(found, &sums))
         .unwrap_or_default()
 }
 
 #[cfg(test)]
 mod tests {
-    use doc2einvoice_model::Origin;
+    use doc2einvoice_model::{Entry, Location, Origin};
     use doc2einvoice_pdf::Word;
-
     use rust_decimal::Decimal;
 
     use super::{
-        Column, Line, Table, after_discount, ends_table, heading, joined, line, names_total, read,
-        runs_on,
+        Column, Line, Table, after_discount, around, ends_table, heading, joined, line,
+        names_total, read, runs_on,
     };
     use crate::page::{self, Row};
     use crate::table::printed::{LEFT, PITCH, TOP, row, stacked, words};
@@ -786,7 +895,7 @@ mod tests {
                 None,
                 Some("Nougat 250g"),
                 Some("20"),
-                Some("4.1"),
+                Some("4.095"),
                 Some("81.9"),
                 None,
                 None
@@ -823,7 +932,7 @@ mod tests {
             prices,
             Some((
                 Some(("4.55".to_owned(), Origin::Rule)),
-                Some(("4.1".to_owned(), Origin::Derived)),
+                Some(("4.095".to_owned(), Origin::Derived)),
             ))
         );
         assert_eq!(
@@ -851,6 +960,48 @@ mod tests {
     }
 
     #[test]
+    fn the_numbers_of_a_line_follow_their_table() {
+        const PLAIN: &[&str] = &["Text", "Menge", "Preis", "Betrag"];
+        let numbers = |heading: &[&str], texts: &[&str]| {
+            read_line(heading, texts).map(|[_, _, quantity, price, net, ..]| (quantity, price, net))
+        };
+        let some = |text: &str| Some(text.to_owned());
+        let line =
+            |quantity: &str, price: &str, net: &str| Some((some(quantity), some(price), some(net)));
+        assert_eq!(
+            numbers(PLAIN, &["Miete", "1", "100,00", "100,00"]),
+            line("1", "100", "100")
+        );
+        assert_eq!(
+            numbers(PLAIN, &["IP", "2", "57811", "1", "0,8403", "0,84"]),
+            line("1", "0.8403", "0.84")
+        );
+        assert_eq!(
+            numbers(
+                &["Text", "Menge", "Preis", "Betrag", "Steuer", "Brutto"],
+                &["Miete", "1", "100,00", "100,00", "19,00", "119,00"]
+            ),
+            line("1", "100", "100")
+        );
+        assert_eq!(numbers(PLAIN, &["Miete", "1", "100,00", "120,00"]), None);
+        assert_eq!(numbers(PLAIN, &["Miete", "100,00", "100,00"]), None);
+        assert_eq!(numbers(PLAIN, &["Miete", "1", "100,00", "0,025"]), None);
+    }
+
+    #[test]
+    fn a_code_in_the_name_of_an_item_is_no_category() {
+        const HEADING: &[&str] = &["Text", "Menge", "Preis", "Betrag", "USt."];
+        let category =
+            |texts: &[&str]| read_line(HEADING, texts).and_then(|[.., category]| category);
+        assert_eq!(category(&["T-Shirt", "(M)", "2", "10,00", "20,00"]), None);
+        assert_eq!(category(&["Kabel", "(L)", "2", "10,00", "20,00"]), None);
+        assert_eq!(
+            category(&["T-Shirt", "(M)", "2", "10,00", "20,00", "19%", "(S)"]).as_deref(),
+            Some("S")
+        );
+    }
+
+    #[test]
     fn a_net_price_after_a_discount_follows_its_table() {
         let net = |gross: &str, discount: &str| {
             let printed = words(LEFT, TOP, &[gross, discount]);
@@ -862,8 +1013,8 @@ mod tests {
             after_discount(&part(&printed, gross), discount).map(|net| (net.text, net.origin))
         };
         let worked_out = |text: &str| Some((text.to_owned(), Origin::Derived));
-        assert_eq!(net("4,55", "10%"), worked_out("4.1"));
-        assert_eq!(net("3,33", "5%"), worked_out("3.16"));
+        assert_eq!(net("4,55", "10%"), worked_out("4.095"));
+        assert_eq!(net("3,33", "5%"), worked_out("3.1635"));
         assert_eq!(net("100,00", "0%"), worked_out("100"));
         assert_eq!(net("100,00", "100%"), worked_out("0"));
     }
@@ -1003,6 +1154,12 @@ mod tests {
         assert_eq!(texts(&total, None), Vec::<String>::new());
         let then_field = stacked(&[&["Wartung"], &["Anlagen"], &["GTIN:", "4000050986428"]]);
         assert_eq!(texts(&then_field, None), ["Anlagen"]);
+        let beside = [
+            words(LEFT, TOP, &["Wartung"]),
+            words(LEFT + 200.0, TOP, &["2", "Monate"]),
+            words(LEFT, TOP + PITCH, &["Anlagen"]),
+        ];
+        assert_eq!(texts(&beside, None), ["Anlagen"]);
         let next_line = stacked(&[&["Wartung"], &["Strom"]]);
         assert_eq!(
             texts(&next_line, next_line[1].first()),
@@ -1063,7 +1220,19 @@ mod tests {
         assert_eq!(numbers(PLAIN, &["Gas", "1.000", "5,00", "70,00"]), None);
     }
 
-    fn read_names(printed: &[Vec<Word>]) -> Vec<Option<String>> {
+    fn total(text: &str) -> Entry {
+        Entry {
+            term: 0,
+            within: Vec::new(),
+            text: text.to_owned(),
+            origin: Origin::Rule,
+            location: None,
+        }
+    }
+
+    /// The names of the lines read from rows, each a block of its own, with
+    /// the sum of the lines and the total without VAT as read.
+    fn read_names(printed: &[Vec<Word>], totals: [Option<&str>; 2]) -> Vec<Option<String>> {
         let rows: Vec<Row> = printed.iter().map(|words| row(words)).collect();
         let lines: Vec<page::Line> = printed
             .iter()
@@ -1074,7 +1243,8 @@ mod tests {
                 words,
             })
             .collect();
-        read(&rows, &lines)
+        let totals = totals.map(|text| text.map(total));
+        read(&rows, &lines, [totals[0].as_ref(), totals[1].as_ref()])
             .into_iter()
             .map(|line| line.name.map(|name| name.text))
             .collect()
@@ -1091,14 +1261,98 @@ mod tests {
             &["Summe", "netto", "120,00"],
             &["3", "Wasser", "1", "5,00", "5,00"],
         ]);
-        assert_eq!(
-            read_names(&printed),
-            [Some("Miete".to_owned()), Some("Strom".to_owned())]
-        );
+        let both = [Some("Miete".to_owned()), Some("Strom".to_owned())];
+        assert_eq!(read_names(&printed, [Some("120.00"), None]), both);
+        assert_eq!(read_names(&printed, [None, Some("120")]), both);
         let none = stacked(&[
             &["Pos", "Beschreibung", "Menge", "Preis", "Betrag"],
             &["Summe"],
         ]);
-        assert_eq!(read_names(&none), []);
+        assert_eq!(read_names(&none, [Some("0"), None]), []);
+    }
+
+    #[test]
+    fn lines_count_only_if_they_add_up_to_a_total() {
+        let both: &[&[&str]] = &[
+            &["Pos", "Beschreibung", "Menge", "Preis", "Betrag"],
+            &["1", "Miete", "1", "100,00", "100,00"],
+            &["2", "Strom", "2", "10,00", "20,00"],
+        ];
+        assert_eq!(read_names(&stacked(both), [Some("300"), None]), []);
+        assert_eq!(read_names(&stacked(both), [None, None]), []);
+        // A line is missed, the table runs past its totals, and a row below
+        // is taken for a line.
+        let missed = stacked(&[
+            &["Pos", "Beschreibung", "Menge", "Preis", "Betrag"],
+            &["1", "Miete", "1", "100,00", "100,00"],
+            &["2", "Pacht", "1", "200,00", "210,00"],
+            &["Summe", "netto", "300,00"],
+            &["Versand", "1", "5,00", "5,00"],
+        ]);
+        assert_eq!(read_names(&missed, [None, Some("300")]), []);
+    }
+
+    #[test]
+    fn places_are_put_around_each_other_as_their_table_says() {
+        let place = |left: f64, right: f64, top: f64, bottom: f64| Location {
+            page: 0,
+            left,
+            top,
+            right,
+            bottom,
+        };
+        let first = place(50.0, 90.0, 90.0, 100.0);
+        let second = place(50.0, 120.0, 102.0, 112.0);
+        assert_eq!(
+            around(Some(first), Some(second)),
+            Some(place(50.0, 120.0, 90.0, 112.0))
+        );
+        assert_eq!(around(Some(first), None), Some(first));
+        assert_eq!(around(None, Some(second)), Some(second));
+        assert_eq!(around(None, None), None);
+    }
+
+    #[test]
+    fn the_place_of_a_name_holds_the_lines_it_runs_on_over() {
+        let heading = words(
+            LEFT,
+            TOP,
+            &["Pos", "Beschreibung", "Menge", "Preis", "Betrag"],
+        );
+        let line_row: Vec<Word> = [
+            words(LEFT, TOP + PITCH, &["18"]),
+            words(LEFT + 40.0, TOP + PITCH, &["Wartung"]),
+            words(LEFT + 200.0, TOP + PITCH, &["1", "55,49", "55,49"]),
+        ]
+        .concat();
+        let more = words(LEFT + 40.0, TOP + 2.0 * PITCH, &["technischer", "Anlagen"]);
+        let rows = [row(&heading), row(&line_row), row(&more)];
+        // The name and the line it runs on over are one block, the number
+        // of the line and its numbers blocks of their own.
+        let block = |block: usize, words| page::Line {
+            page: 0,
+            block,
+            words,
+        };
+        let lines = [
+            block(0, heading.as_slice()),
+            block(1, &line_row[..1]),
+            block(2, &line_row[1..2]),
+            block(2, more.as_slice()),
+            block(3, &line_row[2..]),
+        ];
+        let sum = total("55.49");
+        let found = read(&rows, &lines, [Some(&sum), None]);
+        let named = found.first().and_then(|line| line.name.clone());
+        assert_eq!(
+            named.as_ref().map(|name| name.text.as_str()),
+            Some("Wartung technischer Anlagen")
+        );
+        let place = named.and_then(|name| name.location);
+        let last = more.last().map(|word| word.right);
+        assert_eq!(
+            place.map(|at| (at.left, at.bottom, Some(at.right))),
+            Some((LEFT + 40.0, TOP + 2.0 * PITCH, last))
+        );
     }
 }

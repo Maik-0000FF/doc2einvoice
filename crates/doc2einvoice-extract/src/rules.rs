@@ -258,7 +258,15 @@ pub fn draft(pages: &[PageLayout]) -> Draft {
     for (index, row) in breakdown.iter().enumerate() {
         add_breakdown(&mut draft, index, row);
     }
-    for (index, line) in lines::read(&rows, &lines).iter().enumerate() {
+    let invoice_lines = lines::read(
+        &rows,
+        &lines,
+        [
+            draft.values_of(LINE_TOTAL).next(),
+            draft.values_of(TOTAL_WITHOUT_VAT).next(),
+        ],
+    );
+    for (index, line) in invoice_lines.iter().enumerate() {
         add_line(&mut draft, index, line);
     }
     draft

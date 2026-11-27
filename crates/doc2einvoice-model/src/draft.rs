@@ -30,8 +30,8 @@ pub enum Origin {
     /// Found on the page by a rule of the extraction.
     Rule,
     /// Worked out by a rule of the extraction from values found on the page,
-    /// which bear it out: the page does not print the value itself, and the
-    /// user is told so.
+    /// which bear it out: the page does not print the value itself. Whatever
+    /// shows a draft has to tell the user so.
     Derived,
     /// Proposed by a language model.
     Model,
