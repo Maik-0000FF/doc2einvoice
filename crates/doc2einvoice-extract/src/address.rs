@@ -615,6 +615,27 @@ pub fn confirmed(address: &Address) -> bool {
     )
 }
 
+/// Whether two addresses are headed by the same name, whatever the case of
+/// its letters: two addresses of one party, as where it is invoiced and
+/// where it is delivered to.
+///
+/// | Name of the one     | Name of the other   | The same |
+/// |---------------------|---------------------|----------|
+/// | `Ma jolie boutique` | `Ma jolie boutique` | yes      |
+/// | `Ma jolie boutique` | `MA JOLIE BOUTIQUE` | yes      |
+/// | `Ma jolie boutique` | `Banque du Sud`     | no       |
+/// | `Ma jolie boutique` | none                | no       |
+/// | none                | none                | no       |
+pub fn same_name(address: &Address, other: &Address) -> bool {
+    let name = |address: &Address| {
+        address
+            .name
+            .as_ref()
+            .map(|name| name.texts().join(" ").to_lowercase())
+    };
+    name(address).is_some() && name(address) == name(other)
+}
+
 /// Whether two words start in one column: no further apart than the slack
 /// of a column at the font size of the second.
 pub fn same_column(word: &Word, other: &Word) -> bool {
@@ -631,9 +652,90 @@ pub fn column_of(word: &Word) -> RangeInclusive<f64> {
 
 #[cfg(test)]
 mod tests {
+    use doc2einvoice_pdf::Word;
+
     use super::{
-        ADDRESS_ZONE_MM, Postcode, RETURN_ZONE_MM, Written, country_named, postcode_starting,
+        ADDRESS_ZONE_MM, Address, Postcode, RETURN_ZONE_MM, Written, confirmed, country_named,
+        postcode_starting, same_name,
     };
+    use crate::page::Span;
+
+    /// Words of `text`, one after the other on one baseline.
+    fn words(text: &str) -> Vec<Word> {
+        text.split_whitespace()
+            .enumerate()
+            .map(|(place, word)| {
+                let left = f64::from(u32::try_from(place).unwrap_or_default());
+                Word {
+                    text: word.to_owned(),
+                    left,
+                    right: left,
+                    baseline: 0.0,
+                    font_size: 1.0,
+                }
+            })
+            .collect()
+    }
+
+    fn span(words: &[Word]) -> Span<'_> {
+        Span {
+            page: 0,
+            words: words.iter().collect(),
+        }
+    }
+
+    /// An address of `name`, whose last line is the postal code `postcode`
+    /// and the place `place`.
+    fn address<'a>(
+        name: Option<&'a [Word]>,
+        postcode: &'a [Word],
+        place: &'a [Word],
+    ) -> Address<'a> {
+        Address {
+            name: name.map(span),
+            lines: Vec::new(),
+            postcode: span(postcode),
+            postcode_digits: postcode
+                .first()
+                .map(|word| word.text.clone())
+                .unwrap_or_default(),
+            place: span(place),
+            country: None,
+        }
+    }
+
+    #[test]
+    fn names_are_the_same_as_their_table_says() {
+        let (postcode, place) = (words("69001"), words("Lyon"));
+        let table = [
+            (Some("Ma jolie boutique"), Some("Ma jolie boutique"), true),
+            (Some("Ma jolie boutique"), Some("MA JOLIE BOUTIQUE"), true),
+            (Some("Ma jolie boutique"), Some("Banque du Sud"), false),
+            (Some("Ma jolie boutique"), None, false),
+            (None, None, false),
+        ];
+        for (one, other, expected) in table {
+            let (one_words, other_words) = (one.map(words), other.map(words));
+            let one = address(one_words.as_deref(), &postcode, &place);
+            let other = address(other_words.as_deref(), &postcode, &place);
+            assert_eq!(same_name(&one, &other), expected);
+        }
+    }
+
+    #[test]
+    fn places_are_confirmed_as_their_table_says() {
+        let table = [
+            ("69001", "Lyon", true),
+            ("80333", "München", true),
+            ("2026", "Lieferung", false),
+            ("41700", "Dos Hermanas", false),
+        ];
+        for (postcode, place, expected) in table {
+            let (postcode_words, place_words) = (words(postcode), words(place));
+            let found = address(None, &postcode_words, &place_words);
+            assert_eq!(confirmed(&found), expected, "{postcode} {place}");
+        }
+    }
 
     /// Words, and the postal code that starts them: its digits, the country
     /// written before it with whether its code is what is written, and the

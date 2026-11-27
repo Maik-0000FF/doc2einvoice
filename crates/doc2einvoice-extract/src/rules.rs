@@ -443,16 +443,18 @@ fn address_terms(party: Party) -> Option<&'static AddressTerms> {
 /// The addresses printed without labels and whose they are: the first in
 /// the section of each party, the one in the address window as the buyer's,
 /// and the return address as the seller's; then an address in one line of
-/// the letterhead as the seller's, and an address that stands beside that
-/// of a section in a column of its own as the buyer's. The last two have no
-/// heading and no window to name them and count only with a place the
-/// table of places confirms. Each party takes the first address found for
-/// it.
+/// the letterhead as the seller's, and an address that stands beside the
+/// one delivered to, in a column of its own and under the same name, as the
+/// buyer's. The last two have no heading and no window to name them and
+/// count only with a place the table of places confirms. Each party takes
+/// the first address found for it.
 ///
 /// | In the section of a party                                  | Whose                         |
 /// |------------------------------------------------------------|-------------------------------|
 /// | one address                                                | that party's                  |
-/// | one under the heading, one beside it in another column     | the party's; the other the buyer's, if the party is not the buyer and the table of places confirms its postal code and place |
+/// | the address delivered to under its heading, beside it one of the same name | the delivery's; the other the buyer's, if the table of places confirms its postal code and place |
+/// | the same, beside it one of another name, as of a bank      | the delivery's; the other no one's |
+/// | the address of the seller under its heading, one beside it | the seller's; the other no one's: nothing says whose it is |
 /// | one under the heading, beside it `Auftrag` above `2026 Lieferung` | the party's; the other no one's |
 /// | two beside each other, neither or both under the heading   | the first, that party's       |
 /// | three or more                                              | the one under the heading, that party's; the others no one's |
@@ -486,14 +488,21 @@ fn addresses<'a>(lines: &[Line<'a>], labelled: &[Labelled]) -> Vec<(Party, Addre
             address::in_region(lines, block, &address::column_of(across))
         };
         if let ([own], true) = (own.as_slice(), blocks.len() > 1) {
-            found.extend(in_column(own).map(|address| (party, address)));
+            let own = in_column(own);
             let others: Vec<&Vec<usize>> = blocks
                 .iter()
                 .filter(|block| !under_heading(block))
                 .collect();
-            if let ([other], true) = (others.as_slice(), party != Party::Buyer) {
-                beside.extend(in_column(other).filter(address::confirmed));
+            // Beside where a party is delivered to stands where it is
+            // invoiced, under the same name: that party is the buyer.
+            if let ([other], Party::DeliverTo, Some(own)) = (others.as_slice(), party, &own) {
+                beside.extend(
+                    in_column(other).filter(|other| {
+                        address::confirmed(other) && address::same_name(own, other)
+                    }),
+                );
             }
+            found.extend(own.map(|address| (party, address)));
         } else if let Some(address) = address::in_region(lines, &region, &address::WHOLE_PAGE) {
             found.push((party, address));
         }
@@ -1953,6 +1962,37 @@ mod tests {
             beside(&[&["Me", "gusta", "olive"], &["41700", "Dos", "Hermanas"]]),
         ])];
         assert_eq!(value(&abroad, BUYER_CITY), None);
+        // Under another name the address beside is not that of the party
+        // delivered to, and nothing says whose it is.
+        let another = [page(vec![
+            delivery.clone(),
+            beside(&[
+                &["Banque", "du", "Sud"],
+                &["1", "rue", "du", "Stade"],
+                &["75001", "Paris"],
+            ]),
+        ])];
+        assert_eq!(value(&another, BUYER_CITY), None);
+        // Nor beside the address of another party than the one delivered to.
+        let seller = [page(vec![
+            wrapped_block(
+                mm(13.0),
+                mm(47.0),
+                &[
+                    &["Verkäufer:"],
+                    &["Ma", "jolie", "boutique"],
+                    &["35", "rue", "de", "la", "République"],
+                    &["69001", "Lyon"],
+                ],
+            ),
+            beside(&[
+                &["Ma", "jolie", "boutique"],
+                &["35", "rue", "de", "la", "République"],
+                &["69001", "Lyon"],
+            ]),
+        ])];
+        assert_eq!(value(&seller, BUYER_CITY), None);
+        assert_eq!(value(&seller, SELLER_CITY).as_deref(), Some("Lyon"));
         // The address under the heading alone is that of the delivery, not
         // of the buyer.
         let alone = [page(vec![delivery])];
