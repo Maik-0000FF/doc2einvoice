@@ -139,7 +139,7 @@ struct Table {
     /// starts there or further right belongs to it.
     name_until: Option<f64>,
     /// How many words the heading holds after the name of the amount: the
-    /// columns that numbers after the amount of a line may stand in. None
+    /// columns that numbers after the amount of a line may stand in. Zero
     /// where the amount is not named.
     after_amount: usize,
 }
