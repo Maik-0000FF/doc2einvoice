@@ -33,11 +33,11 @@ use crate::breakdown::{self, Breakdown};
 use crate::labels::{
     self, ALLOWANCES, AMOUNT_DUE, BUYER_ADDRESS_LINES, BUYER_CITY, BUYER_NAME, BUYER_POST_CODE,
     BUYER_VAT_IDENTIFIER, CHARGES, CURRENCY, DELIVERY_DATE, DUE_DATE, Found, INVOICE_NUMBER,
-    ISSUE_DATE, ITEM_GROSS_PRICE, ITEM_NAME, ITEM_NET_PRICE, ITEM_VAT_CATEGORY, ITEM_VAT_RATE,
-    LINE_IDENTIFIER, LINE_NET_AMOUNT, LINE_QUANTITY, LINE_TOTAL, Names, PAID, PAYMENT_ACCOUNT,
-    PURCHASE_ORDER, Party, SELLER_ADDRESS_LINES, SELLER_CITY, SELLER_NAME, SELLER_POST_CODE,
-    SELLER_VAT_IDENTIFIER, Scope, Section, TOTAL_WITH_VAT, TOTAL_WITHOUT_VAT, VAT_CATEGORY,
-    VAT_RATE, VAT_TAX_AMOUNT, VAT_TAXABLE_AMOUNT, VAT_TOTAL, Weight,
+    ISSUE_DATE, ITEM_GROSS_PRICE, ITEM_NAME, ITEM_NET_PRICE, ITEM_PRICE_BASE, ITEM_VAT_CATEGORY,
+    ITEM_VAT_RATE, LINE_IDENTIFIER, LINE_NET_AMOUNT, LINE_QUANTITY, LINE_TOTAL, Names, PAID,
+    PAYMENT_ACCOUNT, PURCHASE_ORDER, Party, SELLER_ADDRESS_LINES, SELLER_CITY, SELLER_NAME,
+    SELLER_POST_CODE, SELLER_VAT_IDENTIFIER, Scope, Section, TOTAL_WITH_VAT, TOTAL_WITHOUT_VAT,
+    VAT_CATEGORY, VAT_RATE, VAT_TAX_AMOUNT, VAT_TAXABLE_AMOUNT, VAT_TOTAL, Weight,
 };
 use crate::lines::{self, Line as InvoiceLine};
 use crate::page::{self, Line, Span};
@@ -298,6 +298,7 @@ fn add_line(draft: &mut Draft, index: usize, line: &InvoiceLine) {
             ITEM_GROSS_PRICE,
             line.gross_price.as_ref().map(Part::stated),
         ),
+        (ITEM_PRICE_BASE, line.price_base.as_ref().map(Part::stated)),
         (ITEM_VAT_CATEGORY, line.category.clone()),
         (ITEM_VAT_RATE, line.rate.as_ref().map(Part::stated)),
         (ITEM_NAME, line.name.clone()),
@@ -747,10 +748,11 @@ mod tests {
     use crate::labels::{
         ALLOWANCES, AMOUNT_DUE, BUYER_ADDRESS_LINES, BUYER_CITY, BUYER_NAME, BUYER_POST_CODE,
         BUYER_VAT_IDENTIFIER, CHARGES, CURRENCY, DELIVERY_DATE, DUE_DATE, INVOICE_NUMBER,
-        ISSUE_DATE, ITEM_NAME, ITEM_NET_PRICE, ITEM_VAT_RATE, LINE_IDENTIFIER, LINE_NET_AMOUNT,
-        LINE_QUANTITY, LINE_TOTAL, PAID, PAYMENT_ACCOUNT, PURCHASE_ORDER, SELLER_ADDRESS_LINES,
-        SELLER_CITY, SELLER_NAME, SELLER_POST_CODE, SELLER_VAT_IDENTIFIER, TOTAL_WITH_VAT,
-        TOTAL_WITHOUT_VAT, VAT_CATEGORY, VAT_RATE, VAT_TAX_AMOUNT, VAT_TAXABLE_AMOUNT, VAT_TOTAL,
+        ISSUE_DATE, ITEM_NAME, ITEM_NET_PRICE, ITEM_PRICE_BASE, ITEM_VAT_RATE, LINE_IDENTIFIER,
+        LINE_NET_AMOUNT, LINE_QUANTITY, LINE_TOTAL, PAID, PAYMENT_ACCOUNT, PURCHASE_ORDER,
+        SELLER_ADDRESS_LINES, SELLER_CITY, SELLER_NAME, SELLER_POST_CODE, SELLER_VAT_IDENTIFIER,
+        TOTAL_WITH_VAT, TOTAL_WITHOUT_VAT, VAT_CATEGORY, VAT_RATE, VAT_TAX_AMOUNT,
+        VAT_TAXABLE_AMOUNT, VAT_TOTAL,
     };
 
     /// The font size of every word, and the width of one character.
@@ -962,6 +964,32 @@ mod tests {
             .and_then(|entry| entry.location)
             .map(|at| (at.page, at.left, at.bottom));
         assert_eq!(place, Some((0, 90.0, 112.0)));
+    }
+
+    #[test]
+    fn a_price_for_a_hundred_is_marked_as_worked_out_in_the_draft() {
+        let pages = [page(vec![
+            block(50.0, 100.0, &["Pos"]),
+            block(90.0, 100.0, &["Beschreibung"]),
+            block(300.0, 100.0, &["Preis"]),
+            block(380.0, 100.0, &["Menge"]),
+            block(460.0, 100.0, &["Betrag"]),
+            block(50.0, 112.0, &["1"]),
+            block(90.0, 112.0, &["Schraube"]),
+            block(300.0, 112.0, &["32,76"]),
+            block(380.0, 112.0, &["400", "Stk"]),
+            block(460.0, 112.0, &["131,04"]),
+            block(300.0, 136.0, &["Summe", "netto"]),
+            block(460.0, 136.0, &["131,04"]),
+        ])];
+        let read = |text: &str| vec![(text.to_owned(), Origin::Rule)];
+        assert_eq!(
+            origins(&pages, ITEM_PRICE_BASE),
+            [("100".to_owned(), Origin::Derived)]
+        );
+        assert_eq!(origins(&pages, ITEM_NET_PRICE), read("32.76"));
+        assert_eq!(origins(&pages, LINE_QUANTITY), read("400"));
+        assert_eq!(origins(&pages, LINE_NET_AMOUNT), read("131.04"));
     }
 
     #[test]

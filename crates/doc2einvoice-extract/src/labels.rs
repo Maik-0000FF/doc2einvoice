@@ -114,13 +114,14 @@ pub const VAT_TAX_AMOUNT: u16 = 117;
 pub const VAT_CATEGORY: u16 = 118;
 pub const VAT_RATE: u16 = 119;
 /// The terms of an invoice line: its number, its quantity and its amount,
-/// the net price, gross price, VAT category and VAT rate of its item, and
-/// the name of the item.
+/// the net price, gross price, the quantity the price is for, VAT category
+/// and VAT rate of its item, and the name of the item.
 pub const LINE_IDENTIFIER: u16 = 126;
 pub const LINE_QUANTITY: u16 = 129;
 pub const LINE_NET_AMOUNT: u16 = 131;
 pub const ITEM_NET_PRICE: u16 = 146;
 pub const ITEM_GROSS_PRICE: u16 = 148;
+pub const ITEM_PRICE_BASE: u16 = 149;
 pub const ITEM_VAT_CATEGORY: u16 = 151;
 pub const ITEM_VAT_RATE: u16 = 152;
 pub const ITEM_NAME: u16 = 153;
