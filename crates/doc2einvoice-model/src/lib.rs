@@ -26,6 +26,7 @@ mod party;
 mod payment;
 mod terms;
 mod totals;
+mod unit_codes;
 mod values;
 
 pub use delivery::{DeliveryInformation, Period};
@@ -44,8 +45,10 @@ pub use terms::{
     term_by_id, term_by_number,
 };
 pub use totals::{DocumentAdjustment, DocumentTotals, VatBreakdown};
+pub use unit_codes::UNIT_CODES;
 pub use values::{
     AMOUNT_DECIMAL_PLACES, Amount, BinaryObject, CURRENCY_CODES, Code, CountryCode, CurrencyCode,
-    Date, DocumentReference, Identifier, ItemClassification, LetterCode, OptionalSchemeIdentifier,
-    Percentage, Quantity, RequiredSchemeIdentifier, Text, UnitPriceAmount, ValueError, VatCategory,
+    Date, DocumentReference, INVOICE_TYPE_CODES, Identifier, ItemClassification, LetterCode,
+    OptionalSchemeIdentifier, Percentage, Quantity, RequiredSchemeIdentifier, Text,
+    UnitPriceAmount, ValueError, VatCategory,
 };

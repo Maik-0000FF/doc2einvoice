@@ -229,11 +229,13 @@ pub fn draft(pages: &[PageLayout]) -> Draft {
     let labelled = labelled(&lines);
     let mut draft = Draft::default();
     let mut number: Option<(usize, usize)> = None;
+    let mut number_line: Option<usize> = None;
     for rule in &RULES {
         let chosen = chosen(rule, &lines, &labelled, number);
         if let Some(candidate) = chosen {
             if rule.term == INVOICE_NUMBER {
                 number = candidate.end_in_line.map(|end| (candidate.line, end));
+                number_line = Some(candidate.line);
             }
             draft.entries.push(candidate.entry);
         } else if rule.term == CURRENCY
@@ -242,7 +244,7 @@ pub fn draft(pages: &[PageLayout]) -> Draft {
             draft.entries.push(entry);
         }
     }
-    if let Some(entry) = invoice_type(&lines, &labelled) {
+    if let Some(entry) = invoice_type(&lines, &labelled, number_line) {
         draft.entries.push(entry);
     }
     // Each party takes its address from the first place that has one: an
@@ -277,28 +279,29 @@ pub fn draft(pages: &[PageLayout]) -> Draft {
     draft
 }
 
-/// The kind of invoice: the code printed in brackets in a line of the
-/// invoice number, as in "Handelsrechnung (380) Nr. 471102", or else the
-/// commercial invoice a plain title tells, marked as worked out. The first
-/// line of each sort counts, and a printed code before any title.
+/// The kind of invoice: the code printed in brackets in a line of an
+/// invoice number, as in "Handelsrechnung (380) Nr. 471102", the first such
+/// line; or else the commercial invoice the plain title tells of the line
+/// `number_line`, the one the invoice number was read from, marked as worked
+/// out. A plain title in another line names another invoice, as the one a
+/// credit note refers to.
 ///
-/// | Line                                         | Kind                |
+/// | Lines, the number read from the first        | Kind                |
 /// |----------------------------------------------|---------------------|
 /// | `Handelsrechnung` `(380)` `Nr.` `471102`     | `380`, read         |
 /// | `Rechnungskorrektur` `(384)` `Nr.` `RK21012345` | `384`, read      |
 /// | `Rechnung` `Nr.` `471102`                    | `380`, worked out   |
 /// | `Rechnung` `Nr.` `1`, further down `Gutschrift` `(381)` `Nr.` `2` | `381`, read |
+/// | `Gutschrift` `Nr.` `2`, further down `Rechnung` `Nr.` `1` | none (the title of the invoice referred to) |
+/// | `Rechnungskorrektur` `Nr.` `RK1`, further down `Rechnung` `471102` | none |
 /// | `Gutschrift` `Nr.` `471102`                  | none                |
 /// | `phone` `(555)` `123456`                     | none (no invoice number, no code of a kind) |
 /// | `Bau` `(877)` beside no number               | none (no invoice number in the line) |
-fn invoice_type(lines: &[Line], labelled: &[Labelled]) -> Option<Entry> {
-    let numbered = || {
-        labelled.iter().filter(|line| {
-            line.found
-                .iter()
-                .any(|found| found.names == Names::Term(INVOICE_NUMBER))
-        })
-    };
+fn invoice_type(
+    lines: &[Line],
+    labelled: &[Labelled],
+    number_line: Option<usize>,
+) -> Option<Entry> {
     let entry = |word: &Word, page: usize, code: &str, origin: Origin| Entry {
         term: INVOICE_TYPE,
         within: Vec::new(),
@@ -310,23 +313,31 @@ fn invoice_type(lines: &[Line], labelled: &[Labelled]) -> Option<Entry> {
         }
         .location(0, 1),
     };
-    let printed = numbered().find_map(|line| {
-        let printed = lines.get(line.line)?;
-        printed.words.iter().find_map(|word| {
-            kinds::printed(&word.text).map(|code| entry(word, printed.page, code, Origin::Rule))
+    let printed = labelled
+        .iter()
+        .filter(|line| {
+            line.found
+                .iter()
+                .any(|found| found.names == Names::Term(INVOICE_NUMBER))
         })
-    });
-    printed.or_else(|| {
-        numbered().find_map(|line| {
+        .find_map(|line| {
             let printed = lines.get(line.line)?;
-            let code = kinds::told_by_title(&line.words)?;
-            Some(entry(
-                printed.words.first()?,
-                printed.page,
-                code,
-                Origin::Derived,
-            ))
-        })
+            printed.words.iter().find_map(|word| {
+                kinds::printed(&word.text).map(|code| entry(word, printed.page, code, Origin::Rule))
+            })
+        });
+    printed.or_else(|| {
+        let line = labelled
+            .iter()
+            .find(|line| Some(line.line) == number_line)?;
+        let printed = lines.get(line.line)?;
+        let code = kinds::told_by_title(&line.words)?;
+        Some(entry(
+            printed.words.first()?,
+            printed.page,
+            code,
+            Origin::Derived,
+        ))
     })
 }
 
@@ -1496,6 +1507,33 @@ mod tests {
         assert_eq!(
             kind(&["Rechnung", "des", "Versicherers", "Nr.", "4711"]),
             []
+        );
+        // A plain title in another line than that of the number read is the
+        // title of the invoice referred to.
+        let referred = |title: &[&str], reference: &[&str]| {
+            let pages = [page(vec![
+                block(50.0, 100.0, title),
+                block(50.0, 120.0, reference),
+            ])];
+            (value(&pages, INVOICE_NUMBER), origins(&pages, INVOICE_TYPE))
+        };
+        assert_eq!(
+            referred(&["Gutschrift", "Nr.", "2"], &["Rechnung", "Nr.", "1"]),
+            (Some("2".to_owned()), Vec::new())
+        );
+        assert_eq!(
+            referred(
+                &["Stornorechnung", "Nr.", "5"],
+                &["Rechnung", "Nr.", "4", "vom", "01.02.2026"]
+            ),
+            (Some("5".to_owned()), Vec::new())
+        );
+        assert_eq!(
+            referred(
+                &["Rechnungskorrektur", "Nr.", "RK1"],
+                &["Rechnung", "471102"]
+            ),
+            (Some("RK1".to_owned()), Vec::new())
         );
         let printed_later = [page(vec![
             block(50.0, 100.0, &["Rechnung", "Nr.", "1"]),

@@ -111,15 +111,9 @@ pub fn code(word: &str) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
+    use doc2einvoice_model::UNIT_CODES;
+
     use super::{SYMBOLS, WORDS, code};
-
-    /// The rules the invoices are validated with, which hold the list of
-    /// the codes a unit may have (BR-CL-23).
-    const RULES: &str =
-        include_str!("../../../rulesets/en16931/EN16931-CII-validation-preprocessed.sch");
-
-    /// The rule that lists the codes of units.
-    const UNIT_CODES_RULE: &str = "BR-CL-23";
 
     #[test]
     fn units_follow_their_table() {
@@ -165,14 +159,9 @@ mod tests {
     }
 
     #[test]
-    fn every_code_is_one_the_rules_allow() {
-        let listed = RULES
-            .lines()
-            .find(|line| line.contains(UNIT_CODES_RULE))
-            .unwrap_or_default();
-        assert!(!listed.is_empty(), "the rule that lists the codes");
+    fn every_code_is_one_the_standard_allows() {
         for (code, _) in WORDS.iter().chain(SYMBOLS) {
-            assert!(listed.contains(&format!(" {code} ")), "{code}");
+            assert!(UNIT_CODES.contains(code), "{code}");
         }
     }
 
