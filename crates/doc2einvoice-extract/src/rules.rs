@@ -277,43 +277,57 @@ pub fn draft(pages: &[PageLayout]) -> Draft {
     draft
 }
 
-/// The kind of invoice, where its code is printed in brackets in the line of
-/// the invoice number, as in "Handelsrechnung (380) Nr. 471102". The first
-/// such line counts.
+/// The kind of invoice: the code printed in brackets in a line of the
+/// invoice number, as in "Handelsrechnung (380) Nr. 471102", or else the
+/// commercial invoice a plain title tells, marked as worked out. The first
+/// line of each sort counts, and a printed code before any title.
 ///
-/// | Line                                         | Kind  |
-/// |----------------------------------------------|-------|
-/// | `Handelsrechnung` `(380)` `Nr.` `471102`     | `380` |
-/// | `Rechnungskorrektur` `(384)` `Nr.` `RK21012345` | `384` |
-/// | `Rechnung` `Nr.` `471102`                    | none (no code printed) |
+/// | Line                                         | Kind                |
+/// |----------------------------------------------|---------------------|
+/// | `Handelsrechnung` `(380)` `Nr.` `471102`     | `380`, read         |
+/// | `Rechnungskorrektur` `(384)` `Nr.` `RK21012345` | `384`, read      |
+/// | `Rechnung` `Nr.` `471102`                    | `380`, worked out   |
+/// | `Rechnung` `Nr.` `1`, further down `Gutschrift` `(381)` `Nr.` `2` | `381`, read |
+/// | `Gutschrift` `Nr.` `471102`                  | none                |
 /// | `phone` `(555)` `123456`                     | none (no invoice number, no code of a kind) |
 /// | `Bau` `(877)` beside no number               | none (no invoice number in the line) |
 fn invoice_type(lines: &[Line], labelled: &[Labelled]) -> Option<Entry> {
-    labelled
-        .iter()
-        .filter(|line| {
+    let numbered = || {
+        labelled.iter().filter(|line| {
             line.found
                 .iter()
                 .any(|found| found.names == Names::Term(INVOICE_NUMBER))
         })
-        .find_map(|line| {
-            let printed = lines.get(line.line)?;
-            let (word, code) = printed
-                .words
-                .iter()
-                .find_map(|word| kinds::printed(&word.text).map(|code| (word, code)))?;
-            let span = Span {
-                page: printed.page,
-                words: vec![word],
-            };
-            Some(Entry {
-                term: INVOICE_TYPE,
-                within: Vec::new(),
-                text: code.to_owned(),
-                origin: Origin::Rule,
-                location: span.location(0, 1),
-            })
+    };
+    let entry = |word: &Word, page: usize, code: &str, origin: Origin| Entry {
+        term: INVOICE_TYPE,
+        within: Vec::new(),
+        text: code.to_owned(),
+        origin,
+        location: Span {
+            page,
+            words: vec![word],
+        }
+        .location(0, 1),
+    };
+    let printed = numbered().find_map(|line| {
+        let printed = lines.get(line.line)?;
+        printed.words.iter().find_map(|word| {
+            kinds::printed(&word.text).map(|code| entry(word, printed.page, code, Origin::Rule))
         })
+    });
+    printed.or_else(|| {
+        numbered().find_map(|line| {
+            let printed = lines.get(line.line)?;
+            let code = kinds::told_by_title(&line.words)?;
+            Some(entry(
+                printed.words.first()?,
+                printed.page,
+                code,
+                Origin::Derived,
+            ))
+        })
+    })
 }
 
 /// The values of `row` as the entries of the row of the VAT breakdown at
@@ -1433,6 +1447,28 @@ mod tests {
         let none = seller_in(&["99199", "Musterhausen"]);
         assert_eq!(origins(&none, SELLER_COUNTRY), []);
         assert_eq!(origins(&none, BUYER_COUNTRY), []);
+        // The name of the country on the line below the place stands for
+        // its code; written before the postal code, the code itself counts.
+        let named = |place: &[&str], below: &[&str]| {
+            [page(vec![wrapped_block(
+                50.0,
+                100.0,
+                &[
+                    &["Verkäufer:"],
+                    &["Lieferant", "GmbH"],
+                    &["Lieferantenstraße", "20"],
+                    place,
+                    below,
+                ],
+            )])]
+        };
+        let written_out = named(&["99199", "Musterhausen"], &["Deutschland"]);
+        assert_eq!(origins(&written_out, SELLER_COUNTRY), worked_out("DE"));
+        assert_eq!(origins(&written_out, SELLER_CITY), read("Musterhausen"));
+        let both = named(&["FR", "75001", "Paris"], &["Deutschland"]);
+        assert_eq!(origins(&both, SELLER_COUNTRY), read("FR"));
+        let no_country = named(&["99199", "Musterhausen"], &["Bayern"]);
+        assert_eq!(origins(&no_country, SELLER_COUNTRY), []);
     }
 
     #[test]
@@ -1453,7 +1489,19 @@ mod tests {
             kind(&["Rechnungskorrektur", "(384)", "Nr.", "RK21012345"]),
             read("384")
         );
-        assert_eq!(kind(&["Rechnung", "Nr.", "471102"]), []);
+        let worked_out = |text: &str| vec![(text.to_owned(), Origin::Derived)];
+        assert_eq!(kind(&["Rechnung", "Nr.", "471102"]), worked_out("380"));
+        assert_eq!(kind(&["Invoice", "FA-2017-0010"]), worked_out("380"));
+        assert_eq!(kind(&["Gutschrift", "Nr.", "471102"]), []);
+        assert_eq!(
+            kind(&["Rechnung", "des", "Versicherers", "Nr.", "4711"]),
+            []
+        );
+        let printed_later = [page(vec![
+            block(50.0, 100.0, &["Rechnung", "Nr.", "1"]),
+            block(50.0, 120.0, &["Gutschrift", "(381)", "Nr.", "2"]),
+        ])];
+        assert_eq!(origins(&printed_later, INVOICE_TYPE), read("381"));
         assert_eq!(kind(&["Bau", "(877)"]), []);
         let number = [page(vec![block(
             50.0,
