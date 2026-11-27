@@ -270,6 +270,7 @@ fn dated(word: &str, form: &DateForm) -> Option<NaiveDate> {
 /// | `1,234,5.0`, `1.0,5`      | none                       |
 /// | `12,5%`, `19` `%`         | none (only a rate)         |
 /// | `(19` `%)` `11,20`        | `11.2` (a rate in brackets passed over) |
+/// | `119%` `11,20`, `-5%` `11,20` | none (no rate to pass over, and no number) |
 /// | `1` `234,50` (two words)  | `1` (a space may part columns as well as groups) |
 /// | `in` `EUR`                | none                       |
 pub fn amount(words: &[&str]) -> Option<Read> {
@@ -671,8 +672,10 @@ mod tests {
 
     #[test]
     fn amounts_follow_their_table() {
-        let rows: [Row; 29] = [
+        let rows: [Row; 31] = [
             (&["(19", "%)", "11,20"], Some(("11.2", 2))),
+            (&["119%", "11,20"], None),
+            (&["-5%", "11,20"], None),
             (&["19", "%", "11,20"], Some(("11.2", 2))),
             (&["19%", "11,20"], Some(("11.2", 1))),
             (&["EUR", "19,00%", "11,20"], Some(("11.2", 2))),
