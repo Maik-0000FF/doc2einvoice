@@ -114,9 +114,8 @@ pub const VAT_TAX_AMOUNT: u16 = 117;
 pub const VAT_CATEGORY: u16 = 118;
 pub const VAT_RATE: u16 = 119;
 /// The terms of an invoice line: its number, its quantity with the unit of
-/// it and its amount,
-/// the net price, gross price, the quantity the price is for, VAT category
-/// and VAT rate of its item, and the name of the item.
+/// it and its amount, the net price, gross price, the quantity the price is
+/// for, VAT category and VAT rate of its item, and the name of the item.
 pub const LINE_IDENTIFIER: u16 = 126;
 pub const LINE_QUANTITY: u16 = 129;
 pub const LINE_QUANTITY_UNIT: u16 = 130;
@@ -791,7 +790,7 @@ pub fn names_address(words: &[&str]) -> bool {
 
 /// Characters a printed word may end in that do not belong to the word of
 /// a label.
-const LABEL_ENDINGS: [char; 2] = [':', '.'];
+pub const LABEL_ENDINGS: [char; 2] = [':', '.'];
 
 /// Words that say a number follows, as "Nr." in "Bau (877) Nr. 210113",
 /// written as [`normalized`] gives them.

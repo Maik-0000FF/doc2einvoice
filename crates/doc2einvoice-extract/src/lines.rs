@@ -624,8 +624,9 @@ fn line_of<'a>(
         }),
         unit: unit.and_then(|word| {
             let printed = row.span(word, 1)?;
+            let code = units::code(printed.texts().first()?)?;
             Some(Stated {
-                text: units::code(&row.words.get(word)?.text)?.to_owned(),
+                text: code.to_owned(),
                 location: printed.location(0, 1),
                 origin: Origin::Derived,
             })
