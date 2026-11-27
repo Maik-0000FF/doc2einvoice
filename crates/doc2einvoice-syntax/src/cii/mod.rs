@@ -50,6 +50,26 @@ pub fn write(invoice: &Invoice) -> Result<Vec<u8>, WriteError> {
     Ok(xml.finish())
 }
 
+/// The codes of the VAT point (BT-8): as the standard names them, of UNTDID
+/// 2005, and as CII writes them, of UNTDID 2475 (BR-CL-06 of either syntax).
+const VAT_POINT_CODES: [(&str, &str); 3] = [("3", "5"), ("35", "29"), ("432", "72")];
+
+/// The code CII writes for the VAT point `code` of the standard. A code the
+/// standard does not allow is written as it is: the rules refuse it.
+///
+/// | Code of the standard                  | Written |
+/// |---------------------------------------|---------|
+/// | `3`, the date of the invoice          | `5`     |
+/// | `35`, the date of the delivery        | `29`    |
+/// | `432`, the date of the payment        | `72`    |
+/// | `5`, `29`, `72`, `x`, nothing         | as it is |
+fn vat_point_code(code: &str) -> &str {
+    VAT_POINT_CODES
+        .iter()
+        .find(|(standard, _)| *standard == code)
+        .map_or(code, |(_, written)| written)
+}
+
 /// The first thing CII needs that `invoice` does not have, if any.
 fn gap(invoice: &Invoice) -> Option<Gap> {
     if let Some(term) = shared::blank_required_value(invoice) {
@@ -330,7 +350,9 @@ impl CiiWriter<'_> {
                 Some(VatPoint::Date(point)) => {
                     date(xml, n::TAX_POINT_DATE, n::DATE_STRING, *point)?;
                 }
-                Some(VatPoint::Code(code)) => xml.text(n::DUE_DATE_TYPE_CODE, &[], &code.0)?,
+                Some(VatPoint::Code(code)) => {
+                    xml.text(n::DUE_DATE_TYPE_CODE, &[], vat_point_code(&code.0))?;
+                }
                 None => {}
             }
             percentage(xml, n::RATE_APPLICABLE_PERCENT, breakdown.rate)
@@ -860,4 +882,26 @@ fn prices(xml: &mut Xml, price: &PriceDetails) -> io::Result<()> {
         number(xml, n::CHARGE_AMOUNT, price.net_price.0)?;
         base_quantity(xml)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::vat_point_code;
+
+    #[test]
+    fn vat_point_codes_follow_their_table() {
+        let table = [
+            ("3", "5"),
+            ("35", "29"),
+            ("432", "72"),
+            ("5", "5"),
+            ("29", "29"),
+            ("72", "72"),
+            ("x", "x"),
+            ("", ""),
+        ];
+        for (code, expected) in table {
+            assert_eq!(vat_point_code(code), expected, "{code}");
+        }
+    }
 }
