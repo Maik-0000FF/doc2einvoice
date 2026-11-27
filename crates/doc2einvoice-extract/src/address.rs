@@ -452,6 +452,8 @@ impl Parted {
 /// | `Muster GmbH` · `Hauptstr. 1` · `12345 Stadthausen` | none (not a place) |
 /// | `Tel. 0800` · `Fax 0801`                       | none                |
 /// | `80333 München`, no separator                  | none (not one line of an address) |
+/// | `69001 Lyon` - `France`, in the letterhead     | none (no name before the place: the last line of another address) |
+/// | `80333 München` · `Postfach`, as a return address | the place, without a name |
 fn in_one_line<'a>(mut words: Vec<&'a Word>, page: usize, parted: Parted) -> Option<Address<'a>> {
     words.sort_by(|a, b| a.left.total_cmp(&b.left));
     if !words.iter().any(|word| parted.parts(&word.text)) {
@@ -476,6 +478,12 @@ fn in_one_line<'a>(mut words: Vec<&'a Word>, page: usize, parted: Parted) -> Opt
         )
         .then_some((index, postcode))
     })?;
+    // In the letterhead a name stands before the place: a line that starts
+    // with the place is the last line of an address set below each other,
+    // as that of the recipient.
+    if parted == Parted::Letterhead && index == 0 {
+        return None;
+    }
     let part = |at: usize| Span {
         page,
         words: parts[at].clone(),
@@ -586,6 +594,25 @@ pub fn blocks(lines: &[Line], region: &[usize]) -> Vec<Vec<usize>> {
         }
     }
     blocks
+}
+
+/// Whether the table of places confirms the postal code and the place of
+/// `address`, in the country written with it if one is. An address that no
+/// heading and no window names as one needs it: a number of four or five
+/// digits before a word is not always a postal code.
+///
+/// | Line that ends the address | Confirmed |
+/// |----------------------------|-----------|
+/// | `69001 Lyon`               | yes       |
+/// | `DE 80333 München`         | yes       |
+/// | `2026 Lieferung`           | no        |
+/// | `41700 Dos Hermanas`       | no (a country whose places the table does not hold) |
+pub fn confirmed(address: &Address) -> bool {
+    postcodes::confirms(
+        address.country.as_ref().map(|country| country.code),
+        &address.postcode_digits,
+        &address.place.texts().join(" "),
+    )
 }
 
 /// Whether two words start in one column: no further apart than the slack

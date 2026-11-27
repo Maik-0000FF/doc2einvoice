@@ -444,13 +444,16 @@ fn address_terms(party: Party) -> Option<&'static AddressTerms> {
 /// the section of each party, the one in the address window as the buyer's,
 /// and the return address as the seller's; then an address in one line of
 /// the letterhead as the seller's, and an address that stands beside that
-/// of a section in a column of its own as the buyer's. Each party takes the
-/// first address found for it.
+/// of a section in a column of its own as the buyer's. The last two have no
+/// heading and no window to name them and count only with a place the
+/// table of places confirms. Each party takes the first address found for
+/// it.
 ///
 /// | In the section of a party                                  | Whose                         |
 /// |------------------------------------------------------------|-------------------------------|
 /// | one address                                                | that party's                  |
-/// | one under the heading, one beside it in another column     | the party's; the other the buyer's, if the party is not the buyer |
+/// | one under the heading, one beside it in another column     | the party's; the other the buyer's, if the party is not the buyer and the table of places confirms its postal code and place |
+/// | one under the heading, beside it `Auftrag` above `2026 Lieferung` | the party's; the other no one's |
 /// | two beside each other, neither or both under the heading   | the first, that party's       |
 /// | three or more                                              | the one under the heading, that party's; the others no one's |
 fn addresses<'a>(lines: &[Line<'a>], labelled: &[Labelled]) -> Vec<(Party, Address<'a>)> {
@@ -489,7 +492,7 @@ fn addresses<'a>(lines: &[Line<'a>], labelled: &[Labelled]) -> Vec<(Party, Addre
                 .filter(|block| !under_heading(block))
                 .collect();
             if let ([other], true) = (others.as_slice(), party != Party::Buyer) {
-                beside.extend(in_column(other));
+                beside.extend(in_column(other).filter(address::confirmed));
             }
         } else if let Some(address) = address::in_region(lines, &region, &address::WHOLE_PAGE) {
             found.push((party, address));
@@ -1868,6 +1871,16 @@ mod tests {
             sender_line(mm(40.0), mm(280.0), &["75001", "Paris"]),
         ])];
         assert_eq!(value(&footer, SELLER_NAME), None);
+        // A line that starts with the place has no name before it: it ends
+        // an address set below each other, as that of the recipient.
+        let place_first = [page(vec![
+            block(mm(40.0), mm(13.0), &["75001", "Paris", "-", "France"]),
+            title(),
+        ])];
+        assert_eq!(
+            values(&place_first, &SELLER_ADDRESS),
+            [None, None, None, None, None]
+        );
         // Nor on a page on which nothing is labelled.
         let alone = [page(vec![sender_line(
             mm(40.0),
@@ -1925,6 +1938,21 @@ mod tests {
             .and_then(|entry| entry.location)
             .map(|at| at.left);
         assert_eq!(place, Some(mm(115.0) + CHARACTER * 5.0 + GAP));
+        // What only looks like a postal code and a place beside a section is
+        // no address: the table of places does not know it.
+        let no_address = [page(vec![
+            delivery.clone(),
+            beside(&[&["Auftrag"], &["2026", "Lieferung"]]),
+        ])];
+        assert_eq!(
+            values(&no_address, &[BUYER_NAME, BUYER_POST_CODE, BUYER_CITY]),
+            [None, None, None]
+        );
+        let abroad = [page(vec![
+            delivery.clone(),
+            beside(&[&["Me", "gusta", "olive"], &["41700", "Dos", "Hermanas"]]),
+        ])];
+        assert_eq!(value(&abroad, BUYER_CITY), None);
         // The address under the heading alone is that of the delivery, not
         // of the buyer.
         let alone = [page(vec![delivery])];
