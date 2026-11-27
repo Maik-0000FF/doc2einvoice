@@ -15,6 +15,7 @@ const SAMPLE_INFO: AppInfo = {
   repository: 'https://example.org/sample',
   ruleSets: [],
   xmlSchemas: [],
+  materials: [],
 };
 
 describe('formatLegalNotice', () => {
