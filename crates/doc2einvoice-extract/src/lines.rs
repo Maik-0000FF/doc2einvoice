@@ -138,9 +138,19 @@ struct Table {
     /// Where the column right of the names starts, if one is named: what
     /// starts there or further right belongs to it.
     name_until: Option<f64>,
+    /// How many words the heading holds after the name of the amount: the
+    /// columns that numbers after the amount of a line may stand in. None
+    /// where the amount is not named.
+    after_amount: usize,
 }
 
 impl Table {
+    /// Whether `word` starts in the column of the names.
+    fn holds_name(&self, word: &Word) -> bool {
+        self.name_from.is_none_or(|from| word.left >= from)
+            && self.name_until.is_none_or(|until| word.left < until)
+    }
+
     fn has(&self, column: Column) -> bool {
         self.columns.contains(&column)
     }
@@ -213,10 +223,16 @@ fn heading(words: &[&Word]) -> Option<Table> {
         })
         .and_then(head_of)
         .map(|head| head.left);
+    let after_amount = columns
+        .iter()
+        .position(|column| *column == Column::Total)
+        .and_then(|place| named.get(place))
+        .map_or(0, |(_, name)| words.len().saturating_sub(name.end));
     Some(Table {
         columns,
         name_from,
         name_until,
+        after_amount,
     })
 }
 
@@ -279,23 +295,33 @@ struct Numbers<'f> {
 /// standing together, none with the sign of a rate, that are the quantity
 /// and the price, in the order of the heading, and the amount, and agree,
 /// with one of the printed rates taken off as a discount or without. What
-/// stands after them is another column, as the tax or the amount with it.
+/// stands after them is another column, as the tax or the amount with it,
+/// and needs a word of the heading after the name of the amount.
 ///
 /// | Numbers of the row, quantity first | Rates       | The line                          |
 /// |------------------------------------|-------------|-----------------------------------|
 /// | 1, 100, 100                        | none        | 1 at 100, 100                     |
 /// | 2, 57811, 1, 0.8403, 0.84          | none        | 1 at 0.8403, 0.84 (the last three) |
-/// | 1, 100, 100, 19, 119               | none        | 1 at 100, 100 (tax and gross amount after) |
+/// | 1, 100, 100, 19, 119, two columns after the amount | none | 1 at 100, 100 (tax and gross amount after) |
+/// | 5, 1, 5.00, 7.00, no column after the amount | none | none (5, 1 and 5.00 agree, but 7.00 has no column) |
+/// | 5, 1, 5.00, 7.00, one column after the amount | 19 % after them | none (two numbers for one column) |
 /// | 20, 4.55, 81.90                    | 10 %, a column for discounts | 20 at 4.55, 81.90, less 10 % |
 /// | 20, 4.55, 81.90                    | 10 %, no such column | none                     |
 /// | 1, 100, 120                        | none        | none (do not agree)               |
 /// | 100, 100                           | none        | none (two numbers)                |
 /// | 1, 100, 0.025 (no amount of money) | none        | none                              |
 fn numbers<'f>(plain: &[&'f Figure], marked: &[&'f Figure], table: &Table) -> Option<Numbers<'f>> {
-    plain.windows(LINE_FIGURES).rev().find_map(|window| {
+    let windows = plain.windows(LINE_FIGURES).rev().enumerate();
+    windows.into_iter().find_map(|(passed_over, window)| {
         let [first, second, net] = window else {
             return None;
         };
+        // Numbers after the amount need columns of their own: without them
+        // three numbers further left that happen to agree are no line.
+        let rates_after = marked.iter().filter(|rate| rate.first > net.first).count();
+        if passed_over > 0 && passed_over + rates_after > table.after_amount {
+            return None;
+        }
         let (quantity, price) = if table.quantity_first() {
             (*first, *second)
         } else {
@@ -452,16 +478,12 @@ fn name(
 ) -> Vec<usize> {
     let covers =
         |figure: &Figure, word: usize| (figure.first..figure.first + figure.count).contains(&word);
-    let in_column = |word: &Word| {
-        table.name_from.is_none_or(|from| word.left >= from)
-            && table.name_until.is_none_or(|until| word.left < until)
-    };
     let words: Vec<usize> = (0..before.min(row.words.len()))
         .filter(|word| {
             !taken.iter().any(|figure| covers(figure, *word))
                 && unit != Some(*word)
                 && values::currency_mark(&row.words[*word].text).is_none()
-                && in_column(row.words[*word])
+                && table.holds_name(row.words[*word])
         })
         .collect();
     let lettered = words
@@ -471,9 +493,10 @@ fn name(
 }
 
 /// The lines a name runs on over below its first word: the lines of its
-/// block that follow below it, above the row of the next line of the
-/// invoice, up to one that holds a field of its own or ends the table. A
-/// line of the block on the baseline of the name is a cell beside it.
+/// block that follow below it in the column of the names, above the row of
+/// the next line of the invoice, up to one that holds a field of its own or
+/// ends the table. A line of the block on the baseline of the name, or in
+/// another column, belongs to a cell beside it.
 ///
 /// | Below "Wartung" in its block               | Runs on over        |
 /// |--------------------------------------------|---------------------|
@@ -485,8 +508,14 @@ fn name(
 /// | "Summe netto 120,00"                       | nothing (a total)   |
 /// | "Strom", on the row of the next line       | nothing             |
 /// | "2 Monate" on the baseline of "Wartung", then "Anlagen" | "Anlagen" (the cell beside it passed over) |
+/// | "Anlagen", then "Monate" in the column right of the names | "Anlagen" |
 /// | nothing, or a line of another block        | nothing             |
-fn runs_on<'a>(printed: &[page::Line<'a>], first: &Word, next: Option<&Word>) -> Vec<&'a [Word]> {
+fn runs_on<'a>(
+    printed: &[page::Line<'a>],
+    first: &Word,
+    next: Option<&Word>,
+    table: &Table,
+) -> Vec<&'a [Word]> {
     let own = printed
         .iter()
         .position(|line| line.words.iter().any(|word| std::ptr::eq(word, first)));
@@ -499,7 +528,7 @@ fn runs_on<'a>(printed: &[page::Line<'a>], first: &Word, next: Option<&Word>) ->
         .filter(|line| {
             line.words
                 .first()
-                .is_some_and(|head| page::lies_below(head, first))
+                .is_some_and(|head| page::lies_below(head, first) && table.holds_name(head))
         })
         .take_while(|line| {
             let words: Vec<&Word> = line.words.iter().collect();
@@ -607,7 +636,7 @@ fn table_lines(rows: &[Row], at: usize, table: &Table, printed: &[page::Line]) -
                 .first()
                 .and_then(|start| line.row.words.get(*start));
             if let (Some(first), Some(name)) = (first, line.line.name.as_mut()) {
-                for more in runs_on(printed, first, next) {
+                for more in runs_on(printed, first, next, table) {
                     let span = Span {
                         page: line.row.page,
                         words: more.iter().collect(),
@@ -983,6 +1012,20 @@ mod tests {
             ),
             line("1", "100", "100")
         );
+        assert_eq!(
+            numbers(
+                &["Pos", "Text", "Menge", "Preis", "Betrag"],
+                &["5", "Miete", "1", "5,00", "7,00"]
+            ),
+            None
+        );
+        assert_eq!(
+            numbers(
+                &["Pos", "Text", "Menge", "Preis", "Betrag", "USt."],
+                &["5", "Miete", "1", "5,00", "7,00", "19%"]
+            ),
+            None
+        );
         assert_eq!(numbers(PLAIN, &["Miete", "1", "100,00", "120,00"]), None);
         assert_eq!(numbers(PLAIN, &["Miete", "100,00", "100,00"]), None);
         assert_eq!(numbers(PLAIN, &["Miete", "1", "100,00", "0,025"]), None);
@@ -1132,9 +1175,15 @@ mod tests {
     #[test]
     fn a_name_runs_on_as_its_table_says() {
         let other = words(LEFT, TOP + 5.0 * PITCH, &["Summe"]);
-        let texts = |printed: &[Vec<Word>], next: Option<&Word>| -> Vec<String> {
+        let names_until = |name_until: Option<f64>| Table {
+            columns: Vec::new(),
+            name_from: None,
+            name_until,
+            after_amount: 0,
+        };
+        let within = |printed: &[Vec<Word>], next: Option<&Word>, table: &Table| -> Vec<String> {
             let lines = block_lines(printed, &other);
-            runs_on(&lines, &printed[0][0], next)
+            runs_on(&lines, &printed[0][0], next, table)
                 .iter()
                 .map(|words| {
                     let texts: Vec<&str> = words.iter().map(|word| word.text.as_str()).collect();
@@ -1142,6 +1191,18 @@ mod tests {
                 })
                 .collect()
         };
+        let anywhere = names_until(None);
+        let texts = |printed: &[Vec<Word>], next: Option<&Word>| within(printed, next, &anywhere);
+        let other_column = [
+            words(LEFT, TOP, &["Wartung"]),
+            words(LEFT, TOP + PITCH, &["Anlagen"]),
+            words(LEFT + 200.0, TOP + 2.0 * PITCH, &["Monate"]),
+        ];
+        assert_eq!(
+            within(&other_column, None, &names_until(Some(LEFT + 200.0))),
+            ["Anlagen"]
+        );
+        assert_eq!(texts(&other_column, None), ["Anlagen", "Monate"]);
         let one = stacked(&[&["Wartung"], &["technischer", "Anlagen"]]);
         assert_eq!(texts(&one, None), ["technischer Anlagen"]);
         let two = stacked(&[&["Wartung"], &["technischer"], &["Anlagen"]]);
