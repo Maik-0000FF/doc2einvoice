@@ -720,9 +720,47 @@ const NEGATIONS: [&str; 7] = ["nicht", "kein", "keine", "keinen", "not", "no", "
 /// "Bitte nicht überweisen, der Betrag wird abgebucht".
 const NEGATION_REACH: usize = 2;
 
+/// What a word ends with that closes a clause or a sentence: a negation
+/// before it denies what stands there, not what comes after.
+const CLAUSE_ENDINGS: [char; 6] = [',', '.', ';', ':', '!', '?'];
+
+/// Whether the word at `at` is denied: a negation stands within reach
+/// before it, in its own clause, and is not a marker of a number, as the
+/// "No" before an invoice number.
+///
+/// | Words before the word, and the word          | Denied |
+/// |----------------------------------------------|--------|
+/// | `wird` `nicht` `abgebucht`                   | yes    |
+/// | `kein` `Betrag` `eingezogen`                 | yes    |
+/// | `not` `be` `debited`                         | yes    |
+/// | `nicht` `überweisen,` `abgebucht`            | no (the clause ends before the word) |
+/// | `Keine` `Sorge,` `abgebucht`                 | no (the same) |
+/// | `No.` `4711` `debited`                       | no (the point ends it, and it marks a number) |
+/// | `No` `4711` `debited`                        | no (a marker of a number) |
+/// | `nicht` `überweisen,` `der` `Betrag` `wird` `abgebucht` | no (out of reach) |
+/// | `abgebucht` alone                            | no     |
+fn is_denied(words: &[&str], at: usize) -> bool {
+    let reach = at.saturating_sub(NEGATION_REACH)..at;
+    words[reach.clone()]
+        .iter()
+        .enumerate()
+        .rev()
+        .take_while(|(_, word)| !word.ends_with(CLAUSE_ENDINGS))
+        .any(|(offset, word)| {
+            let normal = normalized(word);
+            let numbers = NUMBER_MARKERS.contains(&normal.as_str())
+                && words
+                    .get(reach.start + offset + 1)
+                    .is_some_and(|next| next.chars().any(|c| c.is_ascii_digit()));
+            NEGATIONS.contains(&normal.as_str()) && !numbers
+        })
+}
+
 /// Whether a line says that the amount is taken by direct debit, which
 /// opens a section of the account debited. A line that denies it says the
-/// opposite: the account after it is the one to transfer to.
+/// opposite: the account after it is the one to transfer to. Only a denial
+/// that is certain counts: taking a debit for denied would give the account
+/// of the buyer out as the one to transfer to.
 ///
 /// | Words                                               | Direct debit |
 /// |-----------------------------------------------------|--------------|
@@ -734,21 +772,22 @@ const NEGATION_REACH: usize = 2;
 /// | `The` `amount` `will` `not` `be` `debited`         | no (denied)  |
 /// | `Le` `montant` `n'est` `pas` `prélevé`             | no (denied)  |
 /// | `Bitte` `nicht` `überweisen,` `der` `Betrag` `wird` `abgebucht` | yes (the transfer is denied, not the debit) |
+/// | `Bitte` `nicht` `überweisen,` `abgebucht` `wird` `am` `1.` | yes (the same, the clause ends before the debit) |
+/// | `Keine` `Sorge,` `abgebucht` `wird` `erst` `am` `15.` | yes       |
+/// | `Invoice` `No.` `4711` `debited` `on` `1` `May`    | yes ("No." marks a number) |
 /// | `Nicht` `vergessen:` `der` `Betrag` `wird` `am` `1.` `abgebucht` | yes |
+/// | `abgebucht` `wird` `der` `Betrag` `nicht`          | yes (a denial after the word is not read: the account is left out, the lesser fault) |
 /// | `Zahlbar` `per` `Überweisung` `oder` `SEPA-Lastschrift` | no (offered, not taken) |
 /// | `Eine` `Lastschrift` `ist` `nicht` `möglich.`      | no           |
 /// | `Payment` `by` `direct` `debit`                    | no (the means only) |
 /// | `Bitte` `überweisen` `Sie`                         | no           |
 pub fn says_direct_debit(words: &[&str]) -> bool {
-    let normal: Vec<String> = words.iter().map(|word| normalized(word)).collect();
-    normal.iter().enumerate().any(|(at, word)| {
+    words.iter().enumerate().any(|(at, word)| {
+        let normal = normalized(word);
         let taken = DIRECT_DEBIT_WORDS
             .iter()
-            .any(|pattern| matches(*pattern, word));
-        let denied = normal[at.saturating_sub(NEGATION_REACH)..at]
-            .iter()
-            .any(|before| NEGATIONS.contains(&before.as_str()));
-        taken && !denied
+            .any(|pattern| matches(*pattern, &normal));
+        taken && !is_denied(words, at)
     })
 }
 
@@ -1015,7 +1054,29 @@ mod tests {
 
     #[test]
     fn direct_debit_is_said_after_its_table() {
-        let rows: [(&[&str], bool); 13] = [
+        let rows: [(&[&str], bool); 18] = [
+            (
+                &[
+                    "Bitte",
+                    "nicht",
+                    "überweisen,",
+                    "abgebucht",
+                    "wird",
+                    "am",
+                    "1.",
+                ],
+                true,
+            ),
+            (
+                &["Keine", "Sorge,", "abgebucht", "wird", "erst", "am", "15."],
+                true,
+            ),
+            (
+                &["Invoice", "No.", "4711", "debited", "on", "1", "May"],
+                true,
+            ),
+            (&["Invoice", "No", "4711", "debited"], true),
+            (&["abgebucht", "wird", "der", "Betrag", "nicht"], true),
             (&["Der", "Betrag", "wird", "nicht", "abgebucht."], false),
             (&["Es", "wird", "kein", "Betrag", "eingezogen"], false),
             (&["The", "amount", "will", "not", "be", "debited"], false),
