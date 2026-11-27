@@ -113,6 +113,27 @@ pub struct Address<'a> {
     pub postcode: Span<'a>,
     pub postcode_digits: String,
     pub place: Span<'a>,
+    /// The country written before the postal code, if one is.
+    pub country: Option<Country<'a>>,
+}
+
+/// The country of an address, as it is written before the postal code.
+pub struct Country<'a> {
+    /// The code of the country.
+    pub code: &'static str,
+    /// The word it is written in.
+    pub word: Span<'a>,
+    /// Whether the word holds the code itself, as "DE", or an older mark of
+    /// the country that stands for it, as the "D" of "D-80333".
+    pub as_code: bool,
+}
+
+/// The country written before a postal code: its code, and whether the
+/// code itself is what is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Written {
+    code: &'static str,
+    as_code: bool,
 }
 
 /// A postal code that starts a line: its digits, the country written before
@@ -120,7 +141,7 @@ pub struct Address<'a> {
 #[derive(Debug, PartialEq, Eq)]
 struct Postcode {
     digits: String,
-    country: Option<&'static str>,
+    country: Option<Written>,
     taken: usize,
 }
 
@@ -130,9 +151,10 @@ struct Postcode {
 /// | Words                         | Postal code | Country | Taken |
 /// |-------------------------------|-------------|---------|-------|
 /// | `80333` `München`             | `80333`     | none    | 1     |
-/// | `DE` `80333` `München`        | `80333`     | DE      | 2     |
-/// | `D-80333` `München`           | `80333`     | DE      | 1     |
-/// | `A-1010` `Wien`               | `1010`      | AT      | 1     |
+/// | `DE` `80333` `München`        | `80333`     | DE, as its code | 2 |
+/// | `DE-80333` `München`          | `80333`     | DE, as its code | 1 |
+/// | `D-80333` `München`           | `80333`     | DE, by an older mark | 1 |
+/// | `A-1010` `Wien`               | `1010`      | AT, by an older mark | 1 |
 /// | `1010` `Wien`                 | `1010`      | none    | 1     |
 /// | `80333`                       | none (no place) |     |       |
 /// | `12345678` `Stadt`            | none (too many digits) | | |
@@ -144,7 +166,10 @@ fn postcode_starting(words: &[&str]) -> Option<Postcode> {
         COUNTRY_WORDS
             .iter()
             .find(|(written, _)| *written == word)
-            .map(|(_, country)| *country)
+            .map(|(written, code)| Written {
+                code,
+                as_code: written == code,
+            })
     };
     let (code, country, taken) = if let Some(country) = country_of(first) {
         (*rest.first()?, Some(country), 2)
@@ -244,6 +269,16 @@ pub fn in_region<'a>(
             page: place_line.page,
             words: place_line.words[postcode.taken..].iter().collect(),
         },
+        country: postcode.country.and_then(|written| {
+            Some(Country {
+                code: written.code,
+                word: Span {
+                    page: place_line.page,
+                    words: vec![place_line.words.first()?],
+                },
+                as_code: written.as_code,
+            })
+        }),
     })
 }
 
@@ -354,8 +389,12 @@ pub fn return_address<'a>(lines: &[Line<'a>]) -> Option<Address<'a>> {
             let texts: Vec<&str> = part.iter().map(|word| word.text.as_str()).collect();
             let postcode = postcode_starting(&texts)?;
             let place = texts[postcode.taken..].join(" ");
-            postcodes::confirms(postcode.country, &postcode.digits, &place)
-                .then_some((index, postcode))
+            postcodes::confirms(
+                postcode.country.map(|written| written.code),
+                &postcode.digits,
+                &place,
+            )
+            .then_some((index, postcode))
         });
         if let Some((index, postcode)) = found {
             let part = |at: usize| Span {
@@ -374,6 +413,16 @@ pub fn return_address<'a>(lines: &[Line<'a>]) -> Option<Address<'a>> {
                     page: WINDOW_PAGE,
                     words: parts[index][postcode.taken..].to_vec(),
                 },
+                country: postcode.country.and_then(|written| {
+                    Some(Country {
+                        code: written.code,
+                        word: Span {
+                            page: WINDOW_PAGE,
+                            words: vec![*parts[index].first()?],
+                        },
+                        as_code: written.as_code,
+                    })
+                }),
             });
         }
     }
@@ -382,22 +431,33 @@ pub fn return_address<'a>(lines: &[Line<'a>]) -> Option<Address<'a>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ADDRESS_ZONE_MM, Postcode, RETURN_ZONE_MM, postcode_starting};
+    use super::{ADDRESS_ZONE_MM, Postcode, RETURN_ZONE_MM, Written, postcode_starting};
 
     /// Words, and the postal code that starts them: its digits, the country
-    /// written before it and the words both take.
+    /// written before it with whether its code is what is written, and the
+    /// words both take.
     type Row = (
         &'static [&'static str],
-        Option<(&'static str, Option<&'static str>, usize)>,
+        Option<(&'static str, Option<(&'static str, bool)>, usize)>,
     );
 
     #[test]
     fn postcodes_start_lines_after_their_table() {
-        let rows: [Row; 9] = [
+        let rows: [Row; 10] = [
             (&["80333", "München"], Some(("80333", None, 1))),
-            (&["DE", "80333", "München"], Some(("80333", Some("DE"), 2))),
-            (&["D-80333", "München"], Some(("80333", Some("DE"), 1))),
-            (&["A-1010", "Wien"], Some(("1010", Some("AT"), 1))),
+            (
+                &["DE", "80333", "München"],
+                Some(("80333", Some(("DE", true)), 2)),
+            ),
+            (
+                &["DE-80333", "München"],
+                Some(("80333", Some(("DE", true)), 1)),
+            ),
+            (
+                &["D-80333", "München"],
+                Some(("80333", Some(("DE", false)), 1)),
+            ),
+            (&["A-1010", "Wien"], Some(("1010", Some(("AT", false)), 1))),
             (&["1010", "Wien"], Some(("1010", None, 1))),
             (&["80333"], None),
             (&["12345678", "Stadt"], None),
@@ -407,7 +467,7 @@ mod tests {
         for (words, expected) in rows {
             let expected = expected.map(|(digits, country, taken)| Postcode {
                 digits: digits.to_owned(),
-                country,
+                country: country.map(|(code, as_code)| Written { code, as_code }),
                 taken,
             });
             assert_eq!(postcode_starting(words), expected, "{words:?}");
