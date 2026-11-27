@@ -555,9 +555,8 @@ pub fn letterhead<'a>(lines: &[Line<'a>], letterhead: &[usize]) -> Option<Addres
     letterhead.iter().find_map(|index| {
         let line = lines.get(*index)?;
         let head = line.words.first()?;
-        let words: Vec<&'a Word> = lines
+        let words: Vec<&'a Word> = lines[page::of_page(lines, line.page)]
             .iter()
-            .filter(|other| other.page == line.page)
             .flat_map(|other| other.words.iter())
             .filter(|word| same_baseline(word.baseline, head.baseline, word.font_size))
             .collect();
