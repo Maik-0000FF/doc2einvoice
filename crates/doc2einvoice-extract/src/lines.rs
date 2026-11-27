@@ -16,7 +16,7 @@ use rust_decimal::{Decimal, RoundingStrategy};
 use crate::breakdown;
 use crate::labels::{self, Names, TOTALS};
 use crate::page::{self, Row, Span};
-use crate::table::{self, Figure, Part, Stated, comes_to, figures, part};
+use crate::table::{self, Figure, Part, Reading, Stated, comes_to, figures, figures_as, part};
 use crate::values;
 
 /// One line of an invoice.
@@ -162,8 +162,9 @@ impl Table {
     }
 }
 
-/// The table the words of a row head, if they name the quantity and the
-/// amount of a line once each, and the price no more than once.
+/// The table the words of a row head, if they name the quantity of a line
+/// once, and its price or its amount or both, each no more than once. A
+/// heading set over two lines names one of the two on its other line.
 ///
 /// | Row                                              | Table                                 |
 /// |--------------------------------------------------|---------------------------------------|
@@ -175,7 +176,9 @@ impl Table {
 /// | `VAT` `Net` `amount` `VAT` `amount`              | none (no quantity, the amount twice)  |
 /// | `Art` `Prozent` `Basisbetrag` `Steuer` `Betrag`  | none (no quantity)                    |
 /// | `Menge` `Preis` `Preis` `Betrag`                 | none (the price twice)                |
-/// | `Menge` `Lieferdatum`                            | none (no amount)                      |
+/// | `Pos` `Beschreibung` `Nettopreis` `Menge` `USt.` | price first, the amount not named     |
+/// | `Menge` `Preis` `Betrag` `Summe`                 | none (the amount twice)               |
+/// | `Menge` `Lieferdatum`                            | none (neither price nor amount)       |
 fn heading(words: &[&Word]) -> Option<Table> {
     let named = table::named(COLUMN_NAMES, words);
     let heads = |column: Column| named.iter().any(|(other, _)| *other == column);
@@ -189,7 +192,8 @@ fn heading(words: &[&Word]) -> Option<Table> {
         })
         .collect();
     let count = |column: Column| columns.iter().filter(|other| **other == column).count();
-    if count(Column::Quantity) != 1 || count(Column::Total) != 1 || count(Column::Price) > 1 {
+    let (prices, totals) = (count(Column::Price), count(Column::Total));
+    if count(Column::Quantity) != 1 || prices > 1 || totals > 1 || prices + totals == 0 {
         return None;
     }
     let description = columns
@@ -238,8 +242,29 @@ struct Found<'a> {
 /// | `Text` `Menge` `Preis` `Betrag` | `Miete` `100,00` `100,00`                     | none (two numbers)                     |
 /// | `Text` `Menge` `Preis` `Betrag` | `Summe` `1` `100,00` `19%`                    | none (two numbers)                     |
 /// | `Text` `Menge` `Preis` `Betrag` `USt.` | `Miete` `1` `100,00` `100,00` `7%` `19%` | 1 at 100, 100, no rate (two printed)   |
+///
+/// A number whose one separator could group thousands or mark decimals is
+/// read the way with which the row agrees, if only one does:
+///
+/// | Heading                         | Row                                | Read                        |
+/// |---------------------------------|------------------------------------|-----------------------------|
+/// | `Text` `Preis` `Menge` `Betrag` | `Strom` `0,0520` `1.000` `kWh` `52,00` | 1000 at 0.052, 52       |
+/// | `Text` `Menge` `Preis` `Betrag` | `Gas` `1.000` `kWh` `52,00` `52,00` | 1 at 52, 52                |
+/// | `Text` `Menge` `Preis` `Betrag` | `Gas` `1.000` `0,00` `0,00`        | none (both readings agree)  |
+/// | `Text` `Menge` `Preis` `Betrag` | `Gas` `1.000` `5,00` `70,00`       | none (neither agrees)       |
 fn line<'a>(row: &'a Row<'a>, table: &Table) -> Option<Found<'a>> {
-    let figures = figures(&row.words);
+    line_of(row, table, &figures(&row.words)).or_else(|| {
+        let thousands = line_of(row, table, &figures_as(&row.words, Reading::Thousands));
+        let decimals = line_of(row, table, &figures_as(&row.words, Reading::Decimals));
+        match (thousands, decimals) {
+            (Some(line), None) | (None, Some(line)) => Some(line),
+            (Some(_), Some(_)) | (None, None) => None,
+        }
+    })
+}
+
+/// The line the numbers `figures` of a row make, if they agree.
+fn line_of<'a>(row: &'a Row<'a>, table: &Table, figures: &[Figure]) -> Option<Found<'a>> {
     let (plain, marked): (Vec<&Figure>, Vec<&Figure>) =
         figures.iter().partition(|figure| !figure.marked);
     let [first, second, net] = plain.get(plain.len().checked_sub(LINE_FIGURES)?..)? else {
@@ -423,7 +448,7 @@ fn runs_on<'a>(printed: &[page::Line<'a>], first: &Word, next: Option<&Word>) ->
                 .first()
                 .is_some_and(|head| next.is_none_or(|next| page::lies_below(next, head)));
             let field = words.iter().any(|word| word.text.ends_with(FIELD_ENDING));
-            above_next && !field && !ends_table(&words)
+            above_next && !field && !names_total(&words) && !breakdown::heads_table(&words)
         })
         .map(|line| line.words)
         .collect()
@@ -448,23 +473,43 @@ fn joined(name: &str, more: &[Word]) -> String {
     format!("{name}{gap}{}", more.join(" "))
 }
 
-/// Whether the words of a row end a table of lines: a label of a total, or
-/// the heading of a breakdown. Other labels do not, as lines print
-/// references of their own.
+/// Whether the words of a row hold the label of a total of the invoice.
+/// Other labels are no sign of the totals: lines print references of their
+/// own.
 ///
-/// | Words of the row                  | Ends the table |
-/// |-----------------------------------|----------------|
-/// | `Positionssumme` `320,00`         | yes            |
-/// | `Net` `total:` `496.00`           | yes            |
-/// | `VAT` `Net` `amount` `VAT` `amount` | yes (a breakdown) |
-/// | `Bestell-Nr.:` `4711`             | no             |
-/// | `~2000ml`                         | no             |
-fn ends_table(words: &[&Word]) -> bool {
+/// | Words of the row           | A total |
+/// |----------------------------|---------|
+/// | `Positionssumme` `320,00`  | yes     |
+/// | `Net` `total:` `496.00`    | yes     |
+/// | `Bestell-Nr.:` `4711`      | no      |
+/// | `~2000ml`                  | no      |
+fn names_total(words: &[&Word]) -> bool {
     let texts: Vec<&str> = words.iter().map(|word| word.text.as_str()).collect();
-    let total = labels::find(&texts)
+    labels::find(&texts)
         .iter()
-        .any(|found| matches!(found.names, Names::Term(term) if TOTALS.contains(&term)));
-    total || breakdown::heads_table(words)
+        .any(|found| matches!(found.names, Names::Term(term) if TOTALS.contains(&term)))
+}
+
+/// Whether the words of a row end a table of lines whose amounts so far add
+/// up to `sum`: the heading of a breakdown, or the label of a total with
+/// that sum beside it. A label of a total with another amount is a property
+/// of an item, as the whole of a cost that is shared out.
+///
+/// | Words of the row                    | Sum so far | Ends the table           |
+/// |-------------------------------------|------------|--------------------------|
+/// | `Positionssumme` `320,00`           | 320        | yes                      |
+/// | `Net` `total:` `496.00` `€`         | 496        | yes                      |
+/// | `Gesamtbetrag:` `1.025,29` `€`      | 320        | no (a property of an item) |
+/// | `Positionssumme`                    | 320        | no (no amount)           |
+/// | `VAT` `Net` `amount` `VAT` `amount` | any        | yes (a breakdown)        |
+/// | `Bestell-Nr.:` `4711`               | 4711       | no (no total)            |
+fn ends_table(words: &[&Word], sum: Decimal) -> bool {
+    let sums_up = || {
+        figures(words)
+            .iter()
+            .any(|figure| !figure.marked && figure.value == sum)
+    };
+    breakdown::heads_table(words) || (names_total(words) && sums_up())
 }
 
 /// The lines of the table that the row at `at` heads: the rows below it
@@ -473,10 +518,12 @@ fn ends_table(words: &[&Word]) -> bool {
 /// be printed again.
 fn table_lines(rows: &[Row], at: usize, table: &Table, printed: &[page::Line]) -> Vec<Line> {
     let mut found: Vec<Found> = Vec::new();
+    let mut sum = Decimal::ZERO;
     for row in rows.iter().skip(at + 1) {
         if let Some(line) = line(row, table) {
+            sum = sum.checked_add(line.line.net.value).unwrap_or(sum);
             found.push(line);
-        } else if heading(&row.words).is_none() && ends_table(&row.words) {
+        } else if heading(&row.words).is_none() && ends_table(&row.words, sum) {
             break;
         }
     }
@@ -527,8 +574,11 @@ mod tests {
     use doc2einvoice_model::Origin;
     use doc2einvoice_pdf::Word;
 
+    use rust_decimal::Decimal;
+
     use super::{
-        Column, Line, Table, after_discount, ends_table, heading, joined, line, read, runs_on,
+        Column, Line, Table, after_discount, ends_table, heading, joined, line, names_total, read,
+        runs_on,
     };
     use crate::page::{self, Row};
     use crate::table::printed::{LEFT, PITCH, TOP, row, stacked, words};
@@ -554,7 +604,7 @@ mod tests {
 
     #[test]
     fn headings_follow_their_table() {
-        let table: [(&[&str], Option<Shape>); 9] = [
+        let table: [(&[&str], Option<Shape>); 11] = [
             (
                 &["Pos", "Produkt", "Beschreibung", "Menge", "Preis", "Netto"],
                 Some((true, false, true)),
@@ -585,6 +635,11 @@ mod tests {
             (&["VAT", "Net", "amount", "VAT", "amount"], None),
             (&["Art", "Prozent", "Basisbetrag", "Steuer", "Betrag"], None),
             (&["Menge", "Preis", "Preis", "Betrag"], None),
+            (
+                &["Pos", "Beschreibung", "Nettopreis", "Menge", "USt."],
+                Some((false, false, true)),
+            ),
+            (&["Menge", "Preis", "Betrag", "Summe"], None),
             (&["Menge", "Lieferdatum"], None),
         ];
         for (texts, expected) in table {
@@ -958,18 +1013,54 @@ mod tests {
     }
 
     #[test]
-    fn the_end_of_a_table_of_lines_follows_its_table() {
-        let table: [(&[&str], bool); 5] = [
+    fn labels_of_totals_follow_their_table() {
+        let table: [(&[&str], bool); 4] = [
             (&["Positionssumme", "320,00"], true),
             (&["Net", "total:", "496.00"], true),
-            (&["VAT", "Net", "amount", "VAT", "amount"], true),
             (&["Bestell-Nr.:", "4711"], false),
             (&["~2000ml"], false),
         ];
         for (texts, expected) in table {
             let printed = words(LEFT, TOP, texts);
-            assert_eq!(ends_table(&row(&printed).words), expected, "{texts:?}");
+            assert_eq!(names_total(&row(&printed).words), expected, "{texts:?}");
         }
+    }
+
+    #[test]
+    fn the_end_of_a_table_of_lines_follows_its_table() {
+        let table: [(&[&str], &str, bool); 6] = [
+            (&["Positionssumme", "320,00"], "320", true),
+            (&["Net", "total:", "496.00", "€"], "496", true),
+            (&["Gesamtbetrag:", "1.025,29", "€"], "320", false),
+            (&["Positionssumme"], "320", false),
+            (&["VAT", "Net", "amount", "VAT", "amount"], "0", true),
+            (&["Bestell-Nr.:", "4711"], "4711", false),
+        ];
+        for (texts, sum, expected) in table {
+            let printed = words(LEFT, TOP, texts);
+            let sum = Decimal::from_str_exact(sum).unwrap_or_default();
+            assert_eq!(ends_table(&row(&printed).words, sum), expected, "{texts:?}");
+        }
+    }
+
+    #[test]
+    fn open_numbers_are_read_the_way_the_row_agrees() {
+        const PRICE_FIRST: &[&str] = &["Text", "Preis", "Menge", "Betrag"];
+        const PLAIN: &[&str] = &["Text", "Menge", "Preis", "Betrag"];
+        let numbers = |heading: &[&str], texts: &[&str]| {
+            read_line(heading, texts).map(|[_, _, quantity, price, net, ..]| (quantity, price, net))
+        };
+        let some = |text: &str| Some(text.to_owned());
+        assert_eq!(
+            numbers(PRICE_FIRST, &["Strom", "0,0520", "1.000", "kWh", "52,00"]),
+            Some((some("1000"), some("0.052"), some("52")))
+        );
+        assert_eq!(
+            numbers(PLAIN, &["Gas", "1.000", "kWh", "52,00", "52,00"]),
+            Some((some("1"), some("52"), some("52")))
+        );
+        assert_eq!(numbers(PLAIN, &["Gas", "1.000", "0,00", "0,00"]), None);
+        assert_eq!(numbers(PLAIN, &["Gas", "1.000", "5,00", "70,00"]), None);
     }
 
     fn read_names(printed: &[Vec<Word>]) -> Vec<Option<String>> {

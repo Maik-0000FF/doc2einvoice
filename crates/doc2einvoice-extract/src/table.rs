@@ -62,7 +62,16 @@ pub struct Figure {
     pub monetary: bool,
 }
 
-/// The numbers of `words`, from left to right.
+/// How a number is read whose one separator could group thousands or mark
+/// decimals, as `1.000`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reading {
+    Thousands,
+    Decimals,
+}
+
+/// The numbers of `words`, from left to right. A number that could be read
+/// two ways is none.
 ///
 /// | Words                     | Figures                          |
 /// |---------------------------|----------------------------------|
@@ -70,8 +79,27 @@ pub struct Figure {
 /// | `19` `%` `64,46`          | rate 19 (two words); 64.46       |
 /// | `19` `2.923,55`           | 19 (could be a rate); 2923.55    |
 /// | `0,025`                   | 0.025 (no monetary amount)       |
+/// | `0,052` `1.000` `52,00`   | 0.052; 52 (`1.000` is open)      |
 /// | `USt.` `(S)` `16.09.2026` | none                             |
 pub fn figures(words: &[&Word]) -> Vec<Figure> {
+    figures_read(words, None)
+}
+
+/// The numbers of `words`, from left to right, each number that could be
+/// read two ways read as `open` says. Which reading is meant, the numbers
+/// beside it tell: the one with which they agree.
+///
+/// | Words                   | Read as   | Figures               |
+/// |-------------------------|-----------|-----------------------|
+/// | `0,052` `1.000` `52,00` | thousands | 0.052; 1000; 52       |
+/// | `0,052` `1.000` `52,00` | decimals  | 0.052; 1; 52          |
+/// | `12.345`                | decimals  | 12.345 (no monetary amount) |
+/// | `7%` `160,00`           | either    | rate 7; 160           |
+pub fn figures_as(words: &[&Word], open: Reading) -> Vec<Figure> {
+    figures_read(words, Some(open))
+}
+
+fn figures_read(words: &[&Word], open: Option<Reading>) -> Vec<Figure> {
     let texts: Vec<&str> = words.iter().map(|word| word.text.as_str()).collect();
     let mut found = Vec::new();
     let mut at = 0;
@@ -82,6 +110,12 @@ pub fn figures(words: &[&Word]) -> Vec<Figure> {
         let marked = rate.is_some();
         let count = rate.as_ref().map_or(1, |read| read.used);
         let read = rate.or_else(|| monetary.clone()).or(amount);
+        let chosen =
+            open.zip(values::open_number(texts[at]))
+                .map(|(reading, (thousands, decimals))| match reading {
+                    Reading::Thousands => thousands,
+                    Reading::Decimals => decimals,
+                });
         if let Some(read) = read
             && let Ok(value) = Decimal::from_str(&read.text)
         {
@@ -92,6 +126,16 @@ pub fn figures(words: &[&Word]) -> Vec<Figure> {
                 count,
                 marked,
                 monetary: !marked && monetary.is_some(),
+            });
+        } else if let Some(value) = chosen {
+            let text = value.normalize().to_string();
+            found.push(Figure {
+                value,
+                monetary: values::monetary(&[text.as_str()]).is_some(),
+                text,
+                first: at,
+                count,
+                marked: false,
             });
         }
         at += count;
@@ -305,7 +349,9 @@ mod tests {
     use super::printed::{LEFT, TOP, row, words};
     use doc2einvoice_model::Origin;
 
-    use super::{Part, comes_to, ends, figures, named, printed_category, told_by_rate};
+    use super::{
+        Part, Reading, comes_to, ends, figures, figures_as, named, printed_category, told_by_rate,
+    };
 
     fn number(text: &str) -> Decimal {
         Decimal::from_str(text).unwrap_or_default()
@@ -314,7 +360,7 @@ mod tests {
     #[test]
     fn figures_follow_their_table() {
         type Figures = &'static [(&'static str, bool, bool)];
-        let table: [(&[&str], Figures); 5] = [
+        let table: [(&[&str], Figures); 6] = [
             (
                 &["7%", "160,00", "€", "11,20"],
                 &[
@@ -332,6 +378,10 @@ mod tests {
                 &[("19", false, true), ("2923.55", false, true)],
             ),
             (&["0,025"], &[("0.025", false, false)]),
+            (
+                &["0,052", "1.000", "52,00"],
+                &[("0.052", false, false), ("52", false, true)],
+            ),
             (&["USt.", "(S)", "16.09.2026"], &[]),
         ];
         for (texts, expected) in table {
@@ -346,6 +396,44 @@ mod tests {
                 .map(|(text, marked, monetary)| (number(text), *marked, *monetary))
                 .collect();
             assert_eq!(got, want, "{texts:?}");
+        }
+    }
+
+    #[test]
+    fn open_numbers_are_read_as_told() {
+        let values = |texts: &[&str], open: Reading| -> Vec<(Decimal, bool)> {
+            let printed = words(LEFT, TOP, texts);
+            figures_as(&printed.iter().collect::<Vec<_>>(), open)
+                .iter()
+                .map(|figure| (figure.value, figure.monetary))
+                .collect()
+        };
+        let row: &[&str] = &["0,052", "1.000", "52,00"];
+        assert_eq!(
+            values(row, Reading::Thousands),
+            [
+                (number("0.052"), false),
+                (number("1000"), true),
+                (number("52"), true)
+            ]
+        );
+        assert_eq!(
+            values(row, Reading::Decimals),
+            [
+                (number("0.052"), false),
+                (number("1"), true),
+                (number("52"), true)
+            ]
+        );
+        assert_eq!(
+            values(&["12.345"], Reading::Decimals),
+            [(number("12.345"), false)]
+        );
+        for open in [Reading::Thousands, Reading::Decimals] {
+            assert_eq!(
+                values(&["7%", "160,00"], open),
+                [(number("7"), false), (number("160"), true)]
+            );
         }
     }
 
