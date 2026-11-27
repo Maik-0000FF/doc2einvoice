@@ -373,17 +373,57 @@ fn strip_currency(word: &str) -> &str {
     })
 }
 
-/// The number `text` stands for, a sign in front or behind.
-fn number(text: &str) -> Option<Decimal> {
-    let (negative, digits) = match (
+/// Whether `text` carries a sign for minus, in front or behind, and what
+/// stands beside it.
+fn signed(text: &str) -> (bool, &str) {
+    match (
         text.strip_prefix(MINUS_SIGNS),
         text.strip_suffix(MINUS_SIGNS),
     ) {
         (Some(rest), _) | (None, Some(rest)) => (true, rest),
         (None, None) => (false, text),
-    };
+    }
+}
+
+/// The number `text` stands for, a sign in front or behind.
+fn number(text: &str) -> Option<Decimal> {
+    let (negative, digits) = signed(text);
     let value = Decimal::from_str(&plain_digits(digits)?).ok()?;
     Some(if negative { -value } else { value })
+}
+
+/// The two numbers a word can stand for whose one separator could group
+/// thousands or mark decimals: first read as thousands, then as decimals.
+/// Which one is meant, only what stands around the word can tell.
+///
+/// | Word                 | As thousands | As decimals |
+/// |----------------------|--------------|-------------|
+/// | `1.000`, `1,000`     | 1000         | 1.000       |
+/// | `12.345`             | 12345        | 12.345      |
+/// | `-1.000`, `1.000-`   | -1000        | -1.000      |
+/// | `1.000,`, `€1.000`   | 1000         | 1.000       |
+/// | `0.025`              | none (decimals)            | |
+/// | `1.234,50`, `1.000.000` | none (not open)         | |
+/// | `1234`, `1.23`, `1.2345` | none (not open)        | |
+/// | `Stk`, nothing       | none                       | |
+pub fn open_number(word: &str) -> Option<(Decimal, Decimal)> {
+    let (negative, digits) = signed(strip_currency(word.trim_end_matches(TRAILING)));
+    let at = digits.find(SEPARATORS)?;
+    let (whole, rest) = digits.split_at(at);
+    let fraction = &rest[rest.chars().next()?.len_utf8()..];
+    let digits_only = |text: &str| !text.is_empty() && text.chars().all(|c| c.is_ascii_digit());
+    let open = digits_only(whole)
+        && digits_only(fraction)
+        && fraction.len() == GROUP_DIGITS
+        && whole.len() <= GROUP_DIGITS
+        && whole != "0";
+    if !open {
+        return None;
+    }
+    let thousands = Decimal::from_str(&format!("{whole}{fraction}")).ok()?;
+    let decimals = Decimal::from_str(&format!("{whole}.{fraction}")).ok()?;
+    let sign = |value: Decimal| if negative { -value } else { value };
+    Some((sign(thousands), sign(decimals)))
 }
 
 /// The digits with a point for decimals and no separators of thousands, by
@@ -594,7 +634,7 @@ mod tests {
 
     use super::{
         amount, currency, currency_mark, date, has_decimals, iban, identifier, joined_symbol,
-        may_be_rate, monetary, rate, text as text_of, vat_identifier,
+        may_be_rate, monetary, open_number, rate, text as text_of, vat_identifier,
     };
 
     fn text(read: Option<super::Read>) -> Option<String> {
@@ -825,6 +865,38 @@ mod tests {
         assert!(may_be_rate(Decimal::ONE_HUNDRED));
         assert!(!may_be_rate(Decimal::NEGATIVE_ONE));
         assert!(!may_be_rate(Decimal::ONE_THOUSAND));
+    }
+
+    #[test]
+    fn open_numbers_follow_their_table() {
+        let both = |thousands: &str, decimals: &str| {
+            Some((
+                Decimal::from_str_exact(thousands).unwrap_or_default(),
+                Decimal::from_str_exact(decimals).unwrap_or_default(),
+            ))
+        };
+        let table = [
+            ("1.000", both("1000", "1.000")),
+            ("1,000", both("1000", "1.000")),
+            ("12.345", both("12345", "12.345")),
+            ("-1.000", both("-1000", "-1.000")),
+            ("1.000-", both("-1000", "-1.000")),
+            ("1.000,", both("1000", "1.000")),
+            ("€1.000", both("1000", "1.000")),
+            ("0.025", None),
+            ("1.234,50", None),
+            ("1.000.000", None),
+            ("1234", None),
+            ("1.23", None),
+            ("1.2345", None),
+            ("Stk", None),
+            ("", None),
+        ];
+        for (word, expected) in table {
+            assert_eq!(open_number(word), expected, "{word}");
+            // A word that is open is no number on its own.
+            assert!(expected.is_none() || amount(&[word]).is_none(), "{word}");
+        }
     }
 
     #[test]
