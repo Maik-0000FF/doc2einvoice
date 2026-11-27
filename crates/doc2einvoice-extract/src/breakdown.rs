@@ -153,6 +153,10 @@ fn heading(words: &[&Word]) -> Option<Table> {
 /// together that fill the columns in the order of the heading and agree. In
 /// a table the rate may stand without its sign, under a column headed "%".
 ///
+/// Without its sign a rate is borne out by the arithmetic alone, and
+/// noughts agree with anything. Such a row needs a tax above nothing, or to
+/// be the row of a rate of nothing on an amount that is not nothing.
+///
 /// | Columns          | Numbers of the row            | Read                      |
 /// |------------------|-------------------------------|---------------------------|
 /// | base, rate, tax  | 15387.08, 19, 2923.55         | all three                 |
@@ -163,6 +167,9 @@ fn heading(words: &[&Word]) -> Option<Table> {
 /// | rate, base, tax  | 19%, 0.025, 20                | none (do not agree)       |
 /// | base, rate, tax  | 100, 119, 119                 | none (no rate)            |
 /// | base, rate, tax  | 220, 0                        | none (too few)            |
+/// | base, rate, tax  | 0, 19, 0                      | none (noughts agree with any rate) |
+/// | base, rate, tax  | 0, 0, 0                       | none (nothing is charged) |
+/// | rate, base, tax  | 19%, 0, 0                     | 0, 19, 0 (the rate carries its sign) |
 fn table_row(row: &Row, words: &[&Word], order: [Column; COLUMN_COUNT]) -> Option<Breakdown> {
     let figures = figures(words);
     let place = |column: Column| order.iter().position(|other| *other == column);
@@ -173,9 +180,12 @@ fn table_row(row: &Row, words: &[&Word], order: [Column; COLUMN_COUNT]) -> Optio
     );
     figures.windows(COLUMN_COUNT).rev().find_map(|window| {
         let (base, rate, tax) = (&window[base_at], &window[rate_at], &window[tax_at]);
+        let says_something =
+            rate.marked || !tax.value.is_zero() || (rate.value.is_zero() && !base.value.is_zero());
         let fits = base.monetary
             && tax.monetary
             && values::may_be_rate(rate.value)
+            && says_something
             && agree(base.value, rate.value, tax.value);
         fits.then(|| Breakdown {
             base: Some(part(row, base)),
@@ -257,10 +267,10 @@ fn table_rows(rows: &[Row], at: usize, table: &Table) -> Vec<Breakdown> {
     if repeats { Vec::new() } else { found }
 }
 
-/// The row of the totals `row` is, if it starts with a word for VAT before
-/// any number, its first number is a rate with its sign, and what follows
-/// is the amount the tax is charged on and the tax, which agree, or one
-/// amount alone, the tax.
+/// The row of the totals `row` is, if its first number is a rate with its
+/// sign, a word for VAT stands before the rate or directly after it, and
+/// what follows is the amount the tax is charged on and the tax, which
+/// agree, or one amount alone, the tax.
 ///
 /// | Row                                              | Read                    |
 /// |--------------------------------------------------|-------------------------|
@@ -277,13 +287,20 @@ fn table_rows(rows: &[Row], at: usize, table: &Table) -> Vec<Breakdown> {
 /// | `1` `Trennblätter` `9,99` `19` `%` `VAT` `(S)` `199,80` | none (a number first) |
 /// | `Versicherungsteuer` `19` `%` `9,99`             | none (no VAT)           |
 /// | `2%` `Skonto` `USt.` `19%` `100,00` `19,00`      | none (a number first)   |
+/// | `zzgl.` `19` `%` `MwSt.` `16,61`                 | 19, 16.61, no amount charged on |
+/// | `19%` `MwSt` `100,00` `19,00`                    | 100, 19, 19             |
+/// | `zzgl.` `19%` `auf` `MwSt` `16,61`               | none (the word for VAT not directly after the rate) |
+/// | `2%` `Skonto` `16,61`                            | none (no VAT)           |
 fn totals_row(row: &Row) -> Option<Breakdown> {
     let figures = figures(&row.words);
     let (rate, amounts) = figures.split_first()?;
-    let labelled = row.words[..rate.first]
-        .iter()
-        .any(|word| VAT_WORDS.contains(&normalized(&word.text).as_str()));
-    if !labelled || !rate.marked {
+    let names_vat = |word: &&Word| VAT_WORDS.contains(&normalized(&word.text).as_str());
+    let before = row.words[..rate.first].iter().any(names_vat);
+    let directly_after = row
+        .words
+        .get(rate.first + rate.count)
+        .is_some_and(names_vat);
+    if !(before || directly_after) || !rate.marked {
         return None;
     }
     let amounts: Vec<&Figure> = amounts
@@ -509,7 +526,14 @@ mod tests {
     #[test]
     fn rows_of_a_table_follow_their_table() {
         use Column::{Base, Rate, Tax};
-        let table: [([Column; 3], &[&str], Option<Values>); 8] = [
+        let table: [([Column; 3], &[&str], Option<Values>); 11] = [
+            ([Base, Rate, Tax], &["0,00", "19", "0,00"], None),
+            ([Base, Rate, Tax], &["0,00", "0", "0,00"], None),
+            (
+                [Rate, Base, Tax],
+                &["19%", "0,00", "0,00"],
+                Some(expected(Some("0"), "19", "0", None)),
+            ),
             (
                 [Base, Rate, Tax],
                 &["15.387,08", "19", "2.923,55"],
@@ -549,7 +573,17 @@ mod tests {
 
     #[test]
     fn rows_of_the_totals_follow_their_table() {
-        let table: [(&[&str], Option<Values>); 13] = [
+        let table: [(&[&str], Option<Values>); 17] = [
+            (
+                &["zzgl.", "19", "%", "MwSt.", "16,61"],
+                Some(expected(None, "19", "16.61", Some("S"))),
+            ),
+            (
+                &["19%", "MwSt", "100,00", "19,00"],
+                Some(expected(Some("100"), "19", "19", Some("S"))),
+            ),
+            (&["zzgl.", "19%", "auf", "MwSt", "16,61"], None),
+            (&["2%", "Skonto", "16,61"], None),
             (
                 &["Steuerbasisbetrag", "USt.", "7%", "275,00", "19,25"],
                 Some(expected(Some("275"), "7", "19.25", Some("S"))),
