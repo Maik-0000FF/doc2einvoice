@@ -15,10 +15,12 @@
 //! | in the section of a party ("Verkäufer:")           | that party | no: the place says it is an address |
 //! | in the address zone of the window (DIN 5008)       | buyer      | no                  |
 //! | the return address in the zone above it ("A · B · C") | seller  | yes, with `GeoNames`: separators alone do not make an address |
+//! | a line of the letterhead in that form ("A - B - C") | seller    | yes, with `GeoNames` |
+//! | beside the address under the heading of a section, in a column of its own | buyer | no |
 //!
-//! The letterhead and the footer are not read: they often hold several
-//! addresses, as of offices and banks, and only the window says whose an
-//! address is.
+//! Otherwise the letterhead and the footer are not read: they often hold
+//! several addresses, as of offices and banks, and nothing says whose an
+//! address there is.
 
 use std::ops::RangeInclusive;
 
@@ -81,6 +83,11 @@ const LINES_ABOVE: usize = 4;
 /// What parts the return address of a letter, as in `Muster GmbH ·
 /// Hauptstr. 1 · 12345 Stadt`.
 const SEPARATORS: [&str; 5] = ["·", "•", "●", "|", "–"];
+
+/// What parts a line of the letterhead besides: a hyphen standing alone, as
+/// in `Muster SARL - 1 rue du Stade - 75001 Paris`. In the zone of the
+/// return address it is not taken for a separator.
+const LETTERHEAD_SEPARATOR: &str = "-";
 
 /// Points in a millimetre.
 pub const POINTS_PER_MM: f64 = 72.0 / 25.4;
@@ -416,24 +423,104 @@ fn return_baselines(lines: &[Line]) -> Vec<f64> {
         .collect()
 }
 
-/// The return address in the zone for additions of the window: the words
-/// of a baseline there that holds separators, as far as the window reaches,
-/// cut at the separators; the part that is a postal code and place
-/// `GeoNames` confirms ends the address, the parts before it are its lines,
-/// the first part the name.
+/// Which words part a line that holds an address in one line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Parted {
+    /// As the return address: by its separators.
+    ReturnAddress,
+    /// As a line of the letterhead: by those and by a hyphen standing alone.
+    Letterhead,
+}
+
+impl Parted {
+    fn parts(self, word: &str) -> bool {
+        SEPARATORS.contains(&word) || (self == Self::Letterhead && word == LETTERHEAD_SEPARATOR)
+    }
+}
+
+/// The address the words of one baseline hold in one line: cut at the
+/// separators, the part that is a postal code and place `GeoNames` confirms
+/// ends the address, the parts before it are its lines, the first part the
+/// name. The name of a country in the part after it stands for its code.
 ///
 /// | Parts                                          | Name, lines, place  |
 /// |------------------------------------------------|---------------------|
 /// | `Muster GmbH` · `Hauptstr. 1` · `80333 München` | all three          |
 /// | `Muster GmbH` · `80333 München`                | name and place      |
-/// | the same, `Datum: 21.11.2026` right of the window | the same, without the date |
+/// | `Au bon moulin` - `1 rue du Stade` - `75001 Paris` - `France`, in the letterhead | all three, and FR |
+/// | the same, as a return address                  | none (a hyphen parts nothing there) |
 /// | `Muster GmbH` · `Hauptstr. 1` · `12345 Stadthausen` | none (not a place) |
 /// | `Tel. 0800` · `Fax 0801`                       | none                |
-/// | a line with separators in the footer           | none (not in the zone) |
+/// | `80333 München`, no separator                  | none (not one line of an address) |
+fn in_one_line<'a>(mut words: Vec<&'a Word>, page: usize, parted: Parted) -> Option<Address<'a>> {
+    words.sort_by(|a, b| a.left.total_cmp(&b.left));
+    if !words.iter().any(|word| parted.parts(&word.text)) {
+        return None;
+    }
+    let parts: Vec<Vec<&Word>> = words
+        .split(|word| parted.parts(&word.text))
+        .filter(|part| !part.is_empty())
+        .map(<[_]>::to_vec)
+        .collect();
+    let texts = |part: &[&'a Word]| -> Vec<&'a str> {
+        part.iter().map(|word| word.text.as_str()).collect()
+    };
+    let (index, postcode) = parts.iter().enumerate().find_map(|(index, part)| {
+        let texts = texts(part);
+        let postcode = postcode_starting(&texts)?;
+        let place = texts[postcode.taken..].join(" ");
+        postcodes::confirms(
+            postcode.country.map(|written| written.code),
+            &postcode.digits,
+            &place,
+        )
+        .then_some((index, postcode))
+    })?;
+    let part = |at: usize| Span {
+        page,
+        words: parts[at].clone(),
+    };
+    let written = postcode.country.and_then(|written| {
+        Some(Country {
+            code: written.code,
+            word: Span {
+                page,
+                words: vec![*parts[index].first()?],
+            },
+            as_code: written.as_code,
+        })
+    });
+    let named = parts.get(index + 1).and_then(|after| {
+        country_named(&texts(after)).map(|code| Country {
+            code,
+            word: part(index + 1),
+            as_code: false,
+        })
+    });
+    Some(Address {
+        name: (index > 0).then(|| part(0)),
+        lines: (1..index).map(part).collect(),
+        postcode: Span {
+            page,
+            words: vec![parts[index][postcode.taken - 1]],
+        },
+        postcode_digits: postcode.digits,
+        place: Span {
+            page,
+            words: parts[index][postcode.taken..].to_vec(),
+        },
+        country: written.or(named),
+    })
+}
+
+/// The return address in the zone for additions of the window: the words
+/// of a baseline there that holds separators, as far as the window reaches,
+/// read as an address in one line. A line with separators in the footer is
+/// none: it is not in the zone.
 pub fn return_address<'a>(lines: &[Line<'a>]) -> Option<Address<'a>> {
     let across = window_across();
-    for baseline in return_baselines(lines) {
-        let mut words: Vec<&'a Word> = lines
+    return_baselines(lines).into_iter().find_map(|baseline| {
+        let words: Vec<&'a Word> = lines
             .iter()
             .filter(|line| line.page == WINDOW_PAGE)
             .flat_map(|line| line.words.iter())
@@ -442,54 +529,77 @@ pub fn return_address<'a>(lines: &[Line<'a>]) -> Option<Address<'a>> {
                     && across.contains(&word.left)
             })
             .collect();
-        words.sort_by(|a, b| a.left.total_cmp(&b.left));
-        let parts: Vec<Vec<&Word>> = words
-            .split(|word| SEPARATORS.contains(&word.text.as_str()))
-            .filter(|part| !part.is_empty())
-            .map(<[_]>::to_vec)
+        in_one_line(words, WINDOW_PAGE, Parted::ReturnAddress)
+    })
+}
+
+/// The address of the sender in the letterhead: the first of the lines
+/// `letterhead`, those of the first page above everything labelled, that
+/// holds an address in one line, parted by separators or hyphens standing
+/// alone, with the words on its baseline.
+///
+/// | Lines of the letterhead                                  | Address        |
+/// |----------------------------------------------------------|----------------|
+/// | `Au bon moulin - 1 rue du Stade - 75001 Paris - France`  | it, and FR     |
+/// | `+33 4 50 44 68 99 - www.example.org`                    | none           |
+/// | `Au bon moulin`, `1 rue du Stade`, `75001 Paris` below each other | none (not one line) |
+pub fn letterhead<'a>(lines: &[Line<'a>], letterhead: &[usize]) -> Option<Address<'a>> {
+    letterhead.iter().find_map(|index| {
+        let line = lines.get(*index)?;
+        let head = line.words.first()?;
+        let words: Vec<&'a Word> = lines
+            .iter()
+            .filter(|other| other.page == line.page)
+            .flat_map(|other| other.words.iter())
+            .filter(|word| same_baseline(word.baseline, head.baseline, word.font_size))
             .collect();
-        let found = parts.iter().enumerate().find_map(|(index, part)| {
-            let texts: Vec<&str> = part.iter().map(|word| word.text.as_str()).collect();
-            let postcode = postcode_starting(&texts)?;
-            let place = texts[postcode.taken..].join(" ");
-            postcodes::confirms(
-                postcode.country.map(|written| written.code),
-                &postcode.digits,
-                &place,
-            )
-            .then_some((index, postcode))
-        });
-        if let Some((index, postcode)) = found {
-            let part = |at: usize| Span {
-                page: WINDOW_PAGE,
-                words: parts[at].clone(),
-            };
-            return Some(Address {
-                name: (index > 0).then(|| part(0)),
-                lines: (1..index).map(part).collect(),
-                postcode: Span {
-                    page: WINDOW_PAGE,
-                    words: vec![parts[index][postcode.taken - 1]],
-                },
-                postcode_digits: postcode.digits,
-                place: Span {
-                    page: WINDOW_PAGE,
-                    words: parts[index][postcode.taken..].to_vec(),
-                },
-                country: postcode.country.and_then(|written| {
-                    Some(Country {
-                        code: written.code,
-                        word: Span {
-                            page: WINDOW_PAGE,
-                            words: vec![*parts[index].first()?],
-                        },
-                        as_code: written.as_code,
-                    })
-                }),
-            });
+        in_one_line(words, line.page, Parted::Letterhead)
+    })
+}
+
+/// The addresses that end in `region`, each as the lines of the region in
+/// its column: for every line that starts with a postal code, the lines
+/// that start where it does. Two addresses beside each other are two
+/// columns; a line that starts with a postal code in the column of one
+/// before it adds none.
+///
+/// | Lines of the region (left edge)                         | Addresses |
+/// |---------------------------------------------------------|-----------|
+/// | name, street, `69001 Lyon` (all at 37)                  | one       |
+/// | the same at 37 and again at 326                         | two       |
+/// | `Nummer:` at 66, `DE 12345 Leipzig` at 305              | one, the lines at 305 |
+/// | name, street (no postal code)                           | none      |
+pub fn blocks(lines: &[Line], region: &[usize]) -> Vec<Vec<usize>> {
+    let head_of = |index: usize| lines.get(index).and_then(|line| line.words.first());
+    let mut blocks: Vec<Vec<usize>> = Vec::new();
+    for index in region {
+        let starts = postcode_starting(&lines[*index].texts()).is_some();
+        let known = blocks.iter().any(|block| block.contains(index));
+        if let (true, false, Some(head)) = (starts, known, head_of(*index)) {
+            blocks.push(
+                region
+                    .iter()
+                    .copied()
+                    .filter(|other| head_of(*other).is_some_and(|word| same_column(word, head)))
+                    .collect(),
+            );
         }
     }
-    None
+    blocks
+}
+
+/// Whether two words start in one column: no further apart than the slack
+/// of a column at the font size of the second.
+pub fn same_column(word: &Word, other: &Word) -> bool {
+    (word.left - other.left).abs() <= other.font_size * COLUMN_SLACK
+}
+
+/// The stretch across the page in which only what starts in the column of
+/// `word` lies: for an address beside another, whose lines are no text
+/// beside its own.
+pub fn column_of(word: &Word) -> RangeInclusive<f64> {
+    let slack = word.font_size * COLUMN_SLACK;
+    (word.left - slack)..=(word.left + slack)
 }
 
 #[cfg(test)]

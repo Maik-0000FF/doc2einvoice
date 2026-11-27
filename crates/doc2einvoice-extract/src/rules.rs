@@ -441,10 +441,21 @@ fn address_terms(party: Party) -> Option<&'static AddressTerms> {
 }
 
 /// The addresses printed without labels and whose they are: the first in
-/// the section of each party, the one in the address window as the
-/// buyer's, and the return address as the seller's.
+/// the section of each party, the one in the address window as the buyer's,
+/// and the return address as the seller's; then an address in one line of
+/// the letterhead as the seller's, and an address that stands beside that
+/// of a section in a column of its own as the buyer's. Each party takes the
+/// first address found for it.
+///
+/// | In the section of a party                                  | Whose                         |
+/// |------------------------------------------------------------|-------------------------------|
+/// | one address                                                | that party's                  |
+/// | one under the heading, one beside it in another column     | the party's; the other the buyer's, if the party is not the buyer |
+/// | two beside each other, neither or both under the heading   | the first, that party's       |
+/// | three or more                                              | the one under the heading, that party's; the others no one's |
 fn addresses<'a>(lines: &[Line<'a>], labelled: &[Labelled]) -> Vec<(Party, Address<'a>)> {
     let mut found = Vec::new();
+    let mut beside: Vec<Address<'a>> = Vec::new();
     let mut sections: Vec<(usize, Party, Vec<usize>)> = Vec::new();
     for line in labelled {
         let Some((section, party)) = line.section else {
@@ -456,7 +467,31 @@ fn addresses<'a>(lines: &[Line<'a>], labelled: &[Labelled]) -> Vec<(Party, Addre
         }
     }
     for (_, party, region) in sections {
-        if let Some(address) = address::in_region(lines, &region, &address::WHOLE_PAGE) {
+        let head_of = |index: usize| lines.get(index).and_then(|line| line.words.first());
+        let heading = region.first().and_then(|index| head_of(*index));
+        let blocks = address::blocks(lines, &region);
+        let under_heading = |block: &Vec<usize>| {
+            block
+                .first()
+                .and_then(|index| head_of(*index))
+                .zip(heading)
+                .is_some_and(|(word, heading)| address::same_column(word, heading))
+        };
+        let own: Vec<&Vec<usize>> = blocks.iter().filter(|block| under_heading(block)).collect();
+        let in_column = |block: &Vec<usize>| {
+            let across = block.first().and_then(|index| head_of(*index))?;
+            address::in_region(lines, block, &address::column_of(across))
+        };
+        if let ([own], true) = (own.as_slice(), blocks.len() > 1) {
+            found.extend(in_column(own).map(|address| (party, address)));
+            let others: Vec<&Vec<usize>> = blocks
+                .iter()
+                .filter(|block| !under_heading(block))
+                .collect();
+            if let ([other], true) = (others.as_slice(), party != Party::Buyer) {
+                beside.extend(in_column(other));
+            }
+        } else if let Some(address) = address::in_region(lines, &region, &address::WHOLE_PAGE) {
             found.push((party, address));
         }
     }
@@ -467,7 +502,49 @@ fn addresses<'a>(lines: &[Line<'a>], labelled: &[Labelled]) -> Vec<(Party, Addre
     if let Some(address) = address::return_address(lines) {
         found.push((Party::Seller, address));
     }
+    if let Some(address) = address::letterhead(lines, &letterhead(lines, labelled)) {
+        found.push((Party::Seller, address));
+    }
+    found.extend(beside.into_iter().map(|address| (Party::Buyer, address)));
     found
+}
+
+/// The lines of the letterhead: those of the first page that stand above
+/// its first line that is labelled or stands in a section. A page on which
+/// nothing is labelled has no letterhead: nothing says where it ends, and a
+/// footer is not read. A word that is a label only after the invoice
+/// number, as "du" in the name of a street, is an ordinary word here.
+///
+/// | First page, from the top                                  | Letterhead        |
+/// |-----------------------------------------------------------|-------------------|
+/// | sender line, phone line, `Rechnung Nr. 17`, the rest      | the first two     |
+/// | `Rechnung Nr. 17` at the top, a line of the sender in the footer | none      |
+/// | a line of the sender alone, nothing labelled              | none              |
+/// | a sender line on the second page                          | none              |
+/// | `1 rue du Stade - 75001 Paris`, `Facture FA-17`           | the first line    |
+fn letterhead(lines: &[Line], labelled: &[Labelled]) -> Vec<usize> {
+    let on_first_page = |index: usize| lines.get(index).filter(|line| line.page == 0);
+    let below = labelled
+        .iter()
+        .filter(|line| {
+            let labelled = line
+                .found
+                .iter()
+                .any(|found| found.label.scope != Scope::AfterNumber);
+            labelled || line.section.is_some()
+        })
+        .filter_map(|line| on_first_page(line.line)?.words.first())
+        .min_by(|a, b| a.baseline.total_cmp(&b.baseline));
+    let Some(below) = below else {
+        return Vec::new();
+    };
+    (0..lines.len())
+        .filter(|index| {
+            on_first_page(*index)
+                .and_then(|line| line.words.first())
+                .is_some_and(|head| page::lies_below(below, head))
+        })
+        .collect()
 }
 
 /// The parts of `found` as the entries of `party`, each where the draft has
@@ -1736,6 +1813,122 @@ mod tests {
             block(mm(140.0), mm(55.0), &["Datum:", "21.11.2026"]),
         ])];
         assert_eq!(value(&pages, SELLER_CITY).as_deref(), Some("München"));
+    }
+
+    /// A line of a sender, parted by hyphens, from `left` on `baseline`.
+    fn sender_line(left: f64, baseline: f64, place: &[&str]) -> Block {
+        let mut texts = vec!["Au", "bon", "moulin", "-", "1", "rue", "du", "Stade", "-"];
+        texts.extend(place);
+        block(left, baseline, &texts)
+    }
+
+    const SELLER_ADDRESS: [u16; 5] = [
+        SELLER_NAME,
+        SELLER_ADDRESS_LINES[0],
+        SELLER_POST_CODE,
+        SELLER_CITY,
+        SELLER_COUNTRY,
+    ];
+
+    #[test]
+    fn a_line_of_the_letterhead_parted_by_hyphens_is_the_address_of_the_seller() {
+        let title = || block(50.0, mm(40.0), &["Facture", "FA-2017-0010"]);
+        let letterhead = [page(vec![
+            sender_line(mm(40.0), mm(13.0), &["75001", "Paris", "-", "France"]),
+            block(
+                mm(40.0),
+                mm(17.0),
+                &["+33", "4", "50", "44", "-", "www.example.org"],
+            ),
+            title(),
+        ])];
+        assert_eq!(
+            values(&letterhead, &SELLER_ADDRESS),
+            [
+                Some("Au bon moulin".to_owned()),
+                Some("1 rue du Stade".to_owned()),
+                Some("75001".to_owned()),
+                Some("Paris".to_owned()),
+                Some("FR".to_owned()),
+            ]
+        );
+        assert_eq!(
+            origins(&letterhead, SELLER_COUNTRY),
+            [("FR".to_owned(), Origin::Derived)]
+        );
+        // A place the table of places does not know makes no address.
+        let unknown = [page(vec![
+            sender_line(mm(40.0), mm(13.0), &["12345", "Stadthausen"]),
+            title(),
+        ])];
+        assert_eq!(value(&unknown, SELLER_NAME), None);
+        // Below the first labelled line the line stands in no letterhead.
+        let footer = [page(vec![
+            title(),
+            sender_line(mm(40.0), mm(280.0), &["75001", "Paris"]),
+        ])];
+        assert_eq!(value(&footer, SELLER_NAME), None);
+        // Nor on a page on which nothing is labelled.
+        let alone = [page(vec![sender_line(
+            mm(40.0),
+            mm(13.0),
+            &["75001", "Paris"],
+        )])];
+        assert_eq!(value(&alone, SELLER_NAME), None);
+    }
+
+    #[test]
+    fn an_address_beside_that_of_a_section_in_its_own_column_is_the_buyer() {
+        let delivery = wrapped_block(
+            mm(13.0),
+            mm(47.0),
+            &[
+                &["Adresse", "de", "livraison"],
+                &["Ma", "jolie", "boutique"],
+                &["35", "rue", "de", "la", "République"],
+                &["69001", "Lyon"],
+            ],
+        );
+        // The lines of the address beside stand between those of the section.
+        let beside = |rows: &[&[&str]]| wrapped_block(mm(115.0), mm(47.0) + LINE_PITCH / 2.0, rows);
+        let pages = [page(vec![
+            delivery.clone(),
+            beside(&[
+                &["Ma", "jolie", "boutique"],
+                &["35", "rue", "de", "la", "République"],
+                &["69001", "Lyon"],
+                &["France"],
+            ]),
+        ])];
+        assert_eq!(
+            values(
+                &pages,
+                &[
+                    BUYER_NAME,
+                    BUYER_ADDRESS_LINES[0],
+                    BUYER_POST_CODE,
+                    BUYER_CITY,
+                    BUYER_COUNTRY
+                ]
+            ),
+            [
+                Some("Ma jolie boutique".to_owned()),
+                Some("35 rue de la République".to_owned()),
+                Some("69001".to_owned()),
+                Some("Lyon".to_owned()),
+                Some("FR".to_owned()),
+            ]
+        );
+        let place = draft(&pages)
+            .values_of(BUYER_CITY)
+            .next()
+            .and_then(|entry| entry.location)
+            .map(|at| at.left);
+        assert_eq!(place, Some(mm(115.0) + CHARACTER * 5.0 + GAP));
+        // The address under the heading alone is that of the delivery, not
+        // of the buyer.
+        let alone = [page(vec![delivery])];
+        assert_eq!(value(&alone, BUYER_CITY), None);
     }
 
     #[test]
