@@ -95,7 +95,9 @@ pub fn lines(pages: &[PageLayout]) -> Vec<Line<'_>> {
 
 /// Where the lines of `page` stand among `lines`, which [`lines`] gives page
 /// after page. What is looked up beside or below a word stands on its page:
-/// only these lines are gone through, however long the document.
+/// only these lines are gone through, however long the document. Lines
+/// in another order would give a wrong place without a word: a build that
+/// checks itself refuses them.
 ///
 /// | Pages of the lines  | Page | Where          |
 /// |---------------------|------|----------------|
@@ -106,6 +108,10 @@ pub fn lines(pages: &[PageLayout]) -> Vec<Line<'_>> {
 /// | 0, 0, 1, 1, 1, 3    | 4    | none, at the end |
 /// | none                | 0    | none           |
 pub fn of_page(lines: &[Line], page: usize) -> Range<usize> {
+    debug_assert!(
+        lines.is_sorted_by_key(|line| line.page),
+        "the lines do not come page after page"
+    );
     let start = lines.partition_point(|line| line.page < page);
     let end = lines.partition_point(|line| line.page <= page);
     start..end
@@ -360,6 +366,17 @@ mod tests {
             assert_eq!(of_page(&printed, page), expected, "page {page}");
         }
         assert_eq!(of_page(&[], 0), 0..0);
+    }
+
+    #[test]
+    #[should_panic(expected = "page after page")]
+    fn lines_out_of_order_are_refused() {
+        let out_of_order = [1, 0].map(|page| Line {
+            page,
+            block: 0,
+            words: &[],
+        });
+        let _ = of_page(&out_of_order, 0);
     }
 
     /// The lookups go through the lines of one page only: the lines must

@@ -719,8 +719,9 @@ fn name(
 /// The lines a name runs on over below its first word: the lines of its
 /// block that follow below it in the column of the names, above the row of
 /// the next line of the invoice, up to one that holds a field of its own or
-/// ends the table. `page` is the page the name stands on. A line of the block on the baseline of the name, or in
-/// another column, belongs to a cell beside it.
+/// ends the table. `page` is the page the name stands on. A line of the
+/// block on the baseline of the name, or in another column, belongs to a
+/// cell beside it.
 ///
 /// | Below "Wartung" in its block               | Runs on over        |
 /// |--------------------------------------------|---------------------|
@@ -1689,10 +1690,10 @@ mod tests {
         }
     }
 
-    /// The lines of one block below each other, and one of another block.
     /// The page every line of these tests stands on.
     const PAGE: usize = 0;
 
+    /// The lines of one block below each other, and one of another block.
     fn block_lines<'a>(block: &'a [Vec<Word>], other: &'a [Word]) -> Vec<page::Line<'a>> {
         let line = |block, words| page::Line {
             page: PAGE,
