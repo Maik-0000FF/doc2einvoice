@@ -387,7 +387,8 @@ fn price_base(quantity: Decimal, price: Decimal, net: Decimal) -> Option<Decimal
 /// and the price, in the order of the heading, and the amount, and agree:
 /// as they stand, with one of the printed rates taken off as a discount, or,
 /// where the sum of the lines is to bear them out, with the price being one
-/// for a hundred or a thousand. What stands
+/// for a hundred or a thousand and the quantity having its unit after it.
+/// What stands
 /// after them is another column, as the tax or the amount with it, and
 /// needs a word of the heading after the name of the amount.
 ///
@@ -402,6 +403,7 @@ fn price_base(quantity: Decimal, price: Decimal, net: Decimal) -> Option<Decimal
 /// | 20, 4.55, 81.90                    | 10 %, no such column | none                     |
 /// | 400, 32.76, 131.04, to be borne out by the sum | none | 400 at 32.76 for 100, 131.04 |
 /// | 400, 32.76, 131.04, to be borne out in the row | none | none                     |
+/// | 2, 100, 2.00, to be borne out by the sum, no unit after the 2 | none | none (2 per cent of 100, the sign not printed) |
 /// | 1, 100, 120                        | none        | none (do not agree)               |
 /// | 100, 100                           | none        | none (two numbers)                |
 /// | 1, 100, 0.025 (no amount of money) | none        | none                              |
@@ -441,7 +443,15 @@ fn numbers<'f>(
             .copied()
             .filter(|_| !as_they_stand && table.has(Column::Discount))
             .find(|rate| comes_to(taken_off(rate), net.value));
-        let base = (!as_they_stand && discount.is_none() && proof == Proof::Sum)
+        // A quantity priced by the hundred has its unit after it. A number
+        // with another number after it may as well be a percentage printed
+        // without its sign, as the 2 in "Skonto 2 100,00 2,00".
+        let after_quantity = quantity.first + quantity.count;
+        let unit_follows = plain
+            .iter()
+            .chain(marked)
+            .all(|figure| figure.first != after_quantity);
+        let base = (!as_they_stand && discount.is_none() && proof == Proof::Sum && unit_follows)
             .then(|| price_base(quantity.value, price.value, net.value))
             .flatten();
         (as_they_stand || discount.is_some() || base.is_some()).then_some(Numbers {
@@ -807,8 +817,8 @@ fn table_lines(
         // A row is tried as a line without a price only while the lines do
         // not add up to a total yet, and not if it ends the table: the row
         // of a sum has the shape of such a line.
+        let ends = heading(&row.words).is_none() && ends_table(&row.words, sum);
         let line = line(row, table, proof).or_else(|| {
-            let ends = heading(&row.words).is_none() && ends_table(&row.words, sum);
             (proof == Proof::Sum && !ends && !sums.contains(&sum))
                 .then(|| line_without_price(row, table))
                 .flatten()
@@ -816,7 +826,7 @@ fn table_lines(
         if let Some(line) = line {
             sum = sum.checked_add(line.line.net.value).unwrap_or(sum);
             found.push(line);
-        } else if heading(&row.words).is_none() && ends_table(&row.words, sum) {
+        } else if ends {
             break;
         }
     }
@@ -1304,6 +1314,7 @@ mod tests {
     #[test]
     fn a_price_for_a_hundred_is_worked_out_and_marked() {
         const HEADING: &[&str] = &["Pos", "Text", "Preis", "Menge", "Betrag"];
+        const QUANTITY_FIRST: &[&str] = &["Text", "Menge", "Preis", "Betrag"];
         assert_eq!(
             worked_out(
                 HEADING,
@@ -1328,6 +1339,24 @@ mod tests {
         assert_eq!(
             worked_out(HEADING, &["1", "Papier", "9,99", "20", "Stk", "250,00"]),
             None
+        );
+        // A percentage without its sign is no quantity priced by the
+        // hundred: no unit stands after it.
+        assert_eq!(
+            worked_out(QUANTITY_FIRST, &["Skonto", "2", "100,00", "2,00"]),
+            None
+        );
+        assert_eq!(
+            worked_out(
+                QUANTITY_FIRST,
+                &["Schraube", "400", "Stk", "32,76", "131,04"]
+            ),
+            Some([
+                Some(marked("400", false)),
+                Some(marked("32.76", false)),
+                Some(marked("100", true)),
+                Some(marked("131.04", false)),
+            ])
         );
     }
 
