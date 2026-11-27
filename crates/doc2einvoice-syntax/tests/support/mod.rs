@@ -559,3 +559,440 @@ pub fn exempt() -> Invoice {
     invoice.totals.due_for_payment = amount("100");
     invoice
 }
+
+/// The value of a business term that names the term, so that a test finds
+/// it again where the term is written and nowhere else.
+pub mod named {
+    use doc2einvoice_model::{Amount, Date, Percentage, Quantity, UnitPriceAmount};
+    use rust_decimal::Decimal;
+
+    use super::{amount as amount_of, date, decimal};
+
+    /// The year the date of the business term 0 would lie in: the date of a
+    /// term is the first of January, as many years later as its number.
+    const FIRST_YEAR: i32 = 2000;
+    /// The decimals of every number that names a term: the number of the
+    /// term goes before them.
+    const DECIMALS: &str = ".5";
+
+    /// The text of the term `number`: its identifier, as `BT-27`.
+    pub fn text(number: u16) -> String {
+        format!("BT-{number}")
+    }
+
+    /// The number of the term `number`, as `27.5`.
+    pub fn number(number: u16) -> Decimal {
+        decimal(&format!("{number}{DECIMALS}"))
+    }
+
+    pub fn amount(term: u16) -> Amount {
+        amount_of(&format!("{term}{DECIMALS}"))
+    }
+
+    pub fn percentage(term: u16) -> Percentage {
+        Percentage(number(term))
+    }
+
+    pub fn quantity(term: u16) -> Quantity {
+        Quantity(number(term))
+    }
+
+    pub fn price(term: u16) -> UnitPriceAmount {
+        UnitPriceAmount(number(term))
+    }
+
+    /// The date of the term `number`, as the first of January 2027.
+    pub fn day(number: u16) -> Date {
+        date(FIRST_YEAR + i32::from(number), 1, 1)
+    }
+
+    /// Whether `written` names the term `term`: as its text, its number or
+    /// its date, the date with or without the hyphens of ISO 8601.
+    ///
+    /// | Written      | Term | Names it |
+    /// |--------------|------|----------|
+    /// | `BT-27`      | 27   | yes      |
+    /// | `27.5`       | 27   | yes      |
+    /// | `27.50`      | 27   | yes      |
+    /// | `2027-01-01` | 27   | yes      |
+    /// | `20270101`   | 27   | yes      |
+    /// | `BT-28`      | 27   | no       |
+    /// | `BT-270`     | 27   | no       |
+    /// | `28.5`       | 27   | no       |
+    /// | `27`         | 27   | no       |
+    /// | `2028-01-01` | 27   | no       |
+    /// | nothing      | 27   | no       |
+    pub fn names(written: &str, term: u16) -> bool {
+        let as_number = written
+            .parse::<Decimal>()
+            .is_ok_and(|value| value == number(term));
+        let as_date = written.replace('-', "") == day(term).format("%Y%m%d").to_string();
+        written == text(term) || as_number || as_date
+    }
+}
+
+/// The countries of the parties of the invoice that names its terms, each
+/// its own: of the seller (BT-40), the buyer (BT-55), the tax representative
+/// (BT-69), the delivery (BT-80) and the origin of the item (BT-159).
+pub const NAMED_COUNTRIES: [(u16, &str); 5] =
+    [(40, "DE"), (55, "FR"), (69, "IT"), (80, "NL"), (159, "ES")];
+
+/// The currencies of the invoice that names its terms: of the invoice (BT-5)
+/// and of the VAT accounting (BT-6).
+pub const NAMED_CURRENCIES: [(u16, &str); 2] = [(5, "EUR"), (6, "USD")];
+
+/// The VAT categories of the invoice that names its terms, each its own: of
+/// the allowance (BT-95), the charge (BT-102), the breakdown (BT-118) and
+/// the line (BT-151), with the codes they are written as.
+pub const NAMED_CATEGORIES: [(u16, VatCategory, &str); 4] = [
+    (95, VatCategory::ZeroRated, "Z"),
+    (102, VatCategory::Exempt, "E"),
+    (118, VatCategory::StandardRate, "S"),
+    (151, VatCategory::ReverseCharge, "AE"),
+];
+
+/// The kind of the invoice that names its terms (BT-3): a commercial
+/// invoice.
+pub const NAMED_TYPE: &str = "380";
+
+fn named_country(term: u16) -> CountryCode {
+    let code = NAMED_COUNTRIES
+        .iter()
+        .find(|(number, _)| *number == term)
+        .map_or_else(
+            || unreachable!("no country of BT-{term}"),
+            |(_, code)| *code,
+        );
+    country(code)
+}
+
+fn named_currency(term: u16) -> CurrencyCode {
+    let code = NAMED_CURRENCIES
+        .iter()
+        .find(|(number, _)| *number == term)
+        .map_or_else(
+            || unreachable!("no currency of BT-{term}"),
+            |(_, code)| *code,
+        );
+    currency(code)
+}
+
+fn named_category(term: u16) -> VatCategory {
+    NAMED_CATEGORIES
+        .iter()
+        .find(|(number, _, _)| *number == term)
+        .map_or_else(
+            || unreachable!("no category of BT-{term}"),
+            |(_, category, _)| *category,
+        )
+}
+
+/// An identifier that names the term, in a scheme of the same name.
+fn named_scheme(term: u16) -> OptionalSchemeIdentifier {
+    scheme(&named::text(term), &named::text(term))
+}
+
+fn named_required_scheme(term: u16) -> RequiredSchemeIdentifier {
+    RequiredSchemeIdentifier {
+        content: named::text(term),
+        scheme: named::text(term),
+    }
+}
+
+/// An address whose parts name the terms `[line 1, line 2, line 3, city,
+/// post code, subdivision, country]`.
+fn named_address(terms: [u16; 7]) -> PostalAddress {
+    let [
+        line_1,
+        line_2,
+        line_3,
+        city,
+        post_code,
+        subdivision,
+        country,
+    ] = terms;
+    PostalAddress {
+        line_1: Some(named::text(line_1)),
+        line_2: Some(named::text(line_2)),
+        line_3: Some(named::text(line_3)),
+        city: Some(named::text(city)),
+        post_code: Some(named::text(post_code)),
+        country_subdivision: Some(named::text(subdivision)),
+        country: named_country(country),
+    }
+}
+
+fn named_contact(terms: [u16; 3]) -> Contact {
+    let [point, telephone, email] = terms;
+    Contact {
+        point: Some(named::text(point)),
+        telephone: Some(named::text(telephone)),
+        email: Some(named::text(email)),
+    }
+}
+
+/// An allowance or a charge of a line whose parts name the terms `[amount,
+/// base amount, percentage, reason, reason code]`.
+fn named_line_adjustment(terms: [u16; 5]) -> LineAdjustment {
+    let [amount, base_amount, percentage, reason, reason_code] = terms;
+    LineAdjustment {
+        amount: named::amount(amount),
+        base_amount: Some(named::amount(base_amount)),
+        percentage: Some(named::percentage(percentage)),
+        reason: Some(named::text(reason)),
+        reason_code: Some(Code(named::text(reason_code))),
+    }
+}
+
+/// An allowance or a charge of the document whose parts name the terms
+/// `[amount, base amount, percentage, category, rate, reason, reason code]`.
+fn named_adjustment(terms: [u16; 7]) -> DocumentAdjustment {
+    let [
+        amount,
+        base_amount,
+        percentage,
+        category,
+        rate,
+        reason,
+        reason_code,
+    ] = terms;
+    DocumentAdjustment {
+        amount: named::amount(amount),
+        base_amount: Some(named::amount(base_amount)),
+        percentage: Some(named::percentage(percentage)),
+        vat_category: named_category(category),
+        vat_rate: Some(named::percentage(rate)),
+        reason: Some(named::text(reason)),
+        reason_code: Some(Code(named::text(reason_code))),
+    }
+}
+
+fn named_line() -> InvoiceLine {
+    InvoiceLine {
+        identifier: Identifier(named::text(126)),
+        note: Some(named::text(127)),
+        object_identifier: Some(named_scheme(128)),
+        quantity: named::quantity(129),
+        unit: Code(named::text(130)),
+        net_amount: named::amount(131),
+        purchase_order_line: Some(named::text(132)),
+        buyer_accounting_reference: Some(named::text(133)),
+        period: Some(Period {
+            start: Some(named::day(134)),
+            end: Some(named::day(135)),
+        }),
+        allowances: vec![named_line_adjustment([136, 137, 138, 139, 140])],
+        charges: vec![named_line_adjustment([141, 142, 143, 144, 145])],
+        price: PriceDetails {
+            net_price: named::price(146),
+            discount: Some(named::price(147)),
+            gross_price: Some(named::price(148)),
+            base_quantity: Some(named::quantity(149)),
+            base_quantity_unit: Some(Code(named::text(150))),
+        },
+        vat: LineVat {
+            category: named_category(151),
+            rate: Some(named::percentage(152)),
+        },
+        item: ItemInformation {
+            name: named::text(153),
+            description: Some(named::text(154)),
+            seller_identifier: Some(Identifier(named::text(155))),
+            buyer_identifier: Some(Identifier(named::text(156))),
+            standard_identifier: Some(named_required_scheme(157)),
+            classifications: vec![ItemClassification {
+                content: named::text(158),
+                scheme: named::text(158),
+                scheme_version: Some(named::text(158)),
+            }],
+            country_of_origin: Some(named_country(159)),
+            attributes: vec![ItemAttribute {
+                name: named::text(160),
+                value: named::text(161),
+            }],
+        },
+    }
+}
+
+fn named_seller() -> Seller {
+    Seller {
+        name: named::text(27),
+        trading_name: Some(named::text(28)),
+        identifiers: vec![named_scheme(29)],
+        legal_registration: Some(named_scheme(30)),
+        vat_identifier: Some(Identifier(named::text(31))),
+        tax_registration: Some(Identifier(named::text(32))),
+        additional_legal_information: Some(named::text(33)),
+        electronic_address: Some(named_required_scheme(34)),
+        address: named_address([35, 36, 162, 37, 38, 39, 40]),
+        contact: Some(named_contact([41, 42, 43])),
+    }
+}
+
+fn named_buyer() -> Buyer {
+    Buyer {
+        name: named::text(44),
+        trading_name: Some(named::text(45)),
+        identifier: Some(named_scheme(46)),
+        legal_registration: Some(named_scheme(47)),
+        vat_identifier: Some(Identifier(named::text(48))),
+        electronic_address: Some(named_required_scheme(49)),
+        address: named_address([50, 51, 163, 52, 53, 54, 55]),
+        contact: Some(named_contact([56, 57, 58])),
+    }
+}
+
+fn named_totals() -> DocumentTotals {
+    DocumentTotals {
+        line_net_total: named::amount(106),
+        allowance_total: Some(named::amount(107)),
+        charge_total: Some(named::amount(108)),
+        total_without_vat: named::amount(109),
+        vat_total: Some(named::amount(110)),
+        vat_total_in_accounting_currency: Some(named::amount(111)),
+        total_with_vat: named::amount(112),
+        paid: Some(named::amount(113)),
+        rounding: Some(named::amount(114)),
+        due_for_payment: named::amount(115),
+    }
+}
+
+/// The payment of the invoice that names its terms: the means, and one of
+/// the three ways to pay, which exclude each other.
+fn named_payment(kind: NamedPayment) -> PaymentInstructions {
+    PaymentInstructions {
+        means_code: Code(named::text(81)),
+        means_text: Some(named::text(82)),
+        remittance_information: Some(named::text(83)),
+        credit_transfers: match kind {
+            NamedPayment::CreditTransfer => vec![CreditTransfer {
+                account: Identifier(named::text(84)),
+                account_name: Some(named::text(85)),
+                service_provider: Some(Identifier(named::text(86))),
+            }],
+            NamedPayment::Card | NamedPayment::DirectDebit => Vec::new(),
+        },
+        card: (kind == NamedPayment::Card).then(|| doc2einvoice_model::PaymentCard {
+            primary_account_number: named::text(87),
+            holder_name: Some(named::text(88)),
+        }),
+        direct_debit: (kind == NamedPayment::DirectDebit).then(|| DirectDebit {
+            mandate_reference: Some(Identifier(named::text(89))),
+            creditor_identifier: Some(Identifier(named::text(90))),
+            debited_account: Some(Identifier(named::text(91))),
+        }),
+    }
+}
+
+/// How the invoice that names its terms is paid.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum NamedPayment {
+    CreditTransfer,
+    Card,
+    DirectDebit,
+}
+
+/// The attachment of the invoice that names its terms (BT-125): its content
+/// is the text of the term.
+pub fn named_attachment() -> Vec<u8> {
+    named::text(125).into_bytes()
+}
+
+/// An invoice in which every business term carries a value of its own that
+/// names the term, as [`named::names`] tells, paid in the given way. A
+/// coded term carries a code no other term of its kind carries. The amounts
+/// do not add up: the invoice is written, not validated.
+///
+/// The VAT point is a date (BT-7); [`named_with_vat_point_code`] gives the
+/// code (BT-8).
+pub fn named_invoice(kind: NamedPayment) -> Invoice {
+    Invoice {
+        number: Identifier(named::text(1)),
+        issue_date: named::day(2),
+        type_code: Code(NAMED_TYPE.to_owned()),
+        currency: named_currency(5),
+        vat_accounting_currency: Some(named_currency(6)),
+        vat_point: Some(VatPoint::Date(named::day(7))),
+        payment_due_date: Some(named::day(9)),
+        buyer_reference: Some(named::text(10)),
+        project_reference: Some(named::text(11)),
+        contract_reference: Some(named::text(12)),
+        purchase_order_reference: Some(named::text(13)),
+        sales_order_reference: Some(named::text(14)),
+        receiving_advice_reference: Some(named::text(15)),
+        despatch_advice_reference: Some(named::text(16)),
+        tender_or_lot_reference: Some(named::text(17)),
+        invoiced_object: Some(named_scheme(18)),
+        buyer_accounting_reference: Some(named::text(19)),
+        payment_terms: Some(named::text(20)),
+        notes: vec![InvoiceNote {
+            subject_code: Some(Code(named::text(21))),
+            text: named::text(22),
+        }],
+        process_control: ProcessControl {
+            business_process: Some(named::text(23)),
+            specification: Identifier(named::text(24)),
+        },
+        preceding_invoices: vec![PrecedingInvoice {
+            reference: named::text(25),
+            issue_date: Some(named::day(26)),
+        }],
+        seller: named_seller(),
+        buyer: named_buyer(),
+        payee: Some(Payee {
+            name: named::text(59),
+            identifier: Some(named_scheme(60)),
+            legal_registration: Some(named_scheme(61)),
+        }),
+        tax_representative: Some(TaxRepresentative {
+            name: named::text(62),
+            vat_identifier: Identifier(named::text(63)),
+            address: named_address([64, 65, 164, 66, 67, 68, 69]),
+        }),
+        delivery: Some(DeliveryInformation {
+            party_name: Some(named::text(70)),
+            location: Some(named_scheme(71)),
+            actual_date: Some(named::day(72)),
+            invoicing_period: Some(Period {
+                start: Some(named::day(73)),
+                end: Some(named::day(74)),
+            }),
+            address: Some(named_address([75, 76, 165, 77, 78, 79, 80])),
+        }),
+        payment_instructions: Some(named_payment(kind)),
+        allowances: vec![named_adjustment([92, 93, 94, 95, 96, 97, 98])],
+        charges: vec![named_adjustment([99, 100, 101, 102, 103, 104, 105])],
+        totals: named_totals(),
+        vat_breakdown: NonEmpty::one(VatBreakdown {
+            taxable_amount: named::amount(116),
+            tax_amount: named::amount(117),
+            category: named_category(118),
+            rate: Some(named::percentage(119)),
+            exemption_reason: Some(named::text(120)),
+            exemption_reason_code: Some(Code(named::text(121))),
+        }),
+        supporting_documents: vec![SupportingDocument {
+            reference: named::text(122),
+            description: Some(named::text(123)),
+            external_location: Some(named::text(124)),
+            attachment: Some(BinaryObject {
+                content: named_attachment(),
+                mime_code: named::text(125),
+                filename: named::text(125),
+            }),
+        }],
+        lines: NonEmpty::one(named_line()),
+    }
+}
+
+/// The code of the VAT point of the invoice that names its terms (BT-8),
+/// of UNTDID 2005: the date of the delivery.
+pub const NAMED_VAT_POINT: &str = "35";
+
+/// The invoice that names its terms with the VAT point as a code (BT-8)
+/// instead of a date (BT-7); the two exclude each other.
+pub fn named_with_vat_point_code() -> Invoice {
+    let mut invoice = named_invoice(NamedPayment::CreditTransfer);
+    invoice.vat_point = Some(VatPoint::Code(Code(NAMED_VAT_POINT.to_owned())));
+    invoice
+}
