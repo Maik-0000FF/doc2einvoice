@@ -5,6 +5,10 @@
   "type": "module",
   "license": "GPL-3.0-or-later",
   "author": "Maik-0000FF",
+  "config": {
+    "noticesDirectory": "src-tauri/gen/notices",
+    "bundledPackagesList": "bundled-packages.json"
+  },
   "imports": {
     "#lib/*": "./src/lib/*"
   },
@@ -28,6 +32,7 @@
     "dependencies:check": "cargo deny check && npm audit --audit-level=high",
     "vendor:check": "tools/verify-vendor.sh",
     "sources:check": "tools/verify-sources.sh",
+    "notices:check": "npm run build && cargo xtask notices --all-targets",
     "conformance:regenerate": "tools/regenerate-conformance.sh",
     "verify": "npm run format:check && npm run lint && npm run check && npm run test && npm run rust:format:check && npm run rust:lint && npm run rust:test && npm run bindings:check && npm run license:check"
   },

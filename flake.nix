@@ -83,6 +83,7 @@
           default = pkgs.mkShell {
             nativeBuildInputs = [
               pkgs.cargo
+              pkgs.cargo-about
               pkgs.cargo-deny
               pkgs.cargo-tauri
               pkgs.clippy

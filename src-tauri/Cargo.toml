@@ -18,6 +18,8 @@ name = "doc2einvoice_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
+# Reads where the list of the contained libraries is generated.
+serde_json.workspace = true
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
@@ -26,7 +28,7 @@ doc2einvoice-validation.workspace = true
 serde.workspace = true
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
-ts-rs = "11"
+ts-rs.workspace = true
 
 # What only Linux needs. The web view, at the version Tauri uses: only it
 # tells when the process that draws the window is lost. And what the dialog

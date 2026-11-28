@@ -1,0 +1,151 @@
+# SPDX-FileCopyrightText: Maik-0000FF
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Settings of the list of libraries a package of the application contains,
+# read by `cargo xtask notices`.
+#
+# Every file in the root of the package of a library whose name says licence,
+# notice or copyright is passed on with it as it is. A file of that name that
+# is none of these is named here under `[[no-notice]]`, with `libraries` and
+# `file`.
+#
+# The package of a library has to hold the texts of the licences it states:
+# of all it asks for together, and of one of those it offers a choice of. A
+# library whose package does not stops the generator until it is settled here.
+# So does a setting that is not needed any more.
+#
+# Which licences a library may have at all is not stated here: that is the
+# policy in deny.toml.
+
+# Where a library offers a choice of licences, the first of these it offers is
+# taken. MIT comes first because its text carries the copyright notice of the
+# author, which the text of Apache-2.0 does not.
+preference = ["MIT"]
+
+# The targets packages are built for. `cargo xtask notices --all-targets`
+# generates the list for each of them.
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-pc-windows-msvc",
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+]
+
+# The settings below name a library by its name, for every version of it, or
+# as `{ name = "...", version = "..." }` for one version. The setting for one
+# version comes first, whatever the two say.
+
+# Libraries whose package holds no licence file. Their author ships no notice
+# of their own, so the standard text of the licence stands for it.
+standard-text = [
+  "alloc-stdlib",
+  "block2",
+  "dispatch2",
+  "dlopen2",
+  "dlopen2_derive",
+  "genawaiter",
+  "genawaiter-macro",
+  "genawaiter-proc-macro",
+  "next-gen-proc_macros",
+  "objc2",
+  "objc2-app-kit",
+  "objc2-core-foundation",
+  "objc2-encode",
+  "objc2-exception-helper",
+  "objc2-foundation",
+  "objc2-quartz-core",
+  "objc2-web-kit",
+  "regexml",
+  "selectors",
+  "tauri-plugin",
+  "ts-rs",
+  "ts-rs-macros",
+  "webview2-com",
+  "webview2-com-macros",
+  "webview2-com-sys",
+]
+
+# A package that is built for several targets at once, by the name the
+# packaging tool gives that build, with the targets it stands for.
+[combined]
+universal-apple-darwin = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
+
+# Libraries whose package holds a licence file that is not recognised as one,
+# or several to choose from. Each entry names the file and the licence it
+# states. A library that asks for several licences together has one entry for
+# each whose text is not recognised.
+
+# The text is indented.
+[[clarify]]
+libraries = [
+  "windows",
+  "windows-collections",
+  "windows-core",
+  "windows-future",
+  "windows-implement",
+  "windows-interface",
+  "windows-link",
+  "windows-numerics",
+  "windows-result",
+  "windows-strings",
+  "windows-sys",
+  "windows-threading",
+  "windows-version",
+]
+license = "MIT"
+file = "license-mit"
+
+[[clarify]]
+libraries = ["tauri-plugin-dialog", "tauri-plugin-fs"]
+license = "MIT"
+file = "LICENSE_MIT"
+
+# One file holds the texts of both licences the library offers.
+[[clarify]]
+libraries = ["chrono"]
+license = "MIT"
+file = "LICENSE.txt"
+
+# The text follows an introduction.
+[[clarify]]
+libraries = ["libm"]
+license = "MIT"
+file = "LICENSE.txt"
+
+[[clarify]]
+libraries = ["dpi"]
+license = "MIT"
+file = "LICENSE-LIBM-MIT"
+
+[[clarify]]
+libraries = ["brotli-decompressor"]
+license = "BSD-3-Clause"
+file = "LICENSE"
+
+# Of the licences each of these libraries offers, its package holds the text
+# of this one.
+[[clarify]]
+libraries = ["dunce"]
+license = "CC0-1.0"
+file = "LICENSE"
+
+[[clarify]]
+libraries = ["cargo_toml"]
+license = "Apache-2.0"
+file = "LICENSE"
+
+# The interface package holds the texts of both licences it offers.
+[[clarify]]
+libraries = ["@tauri-apps/api"]
+license = "MIT"
+file = "LICENSE-MIT"
+
+# Libraries the application contains as a changed copy, with what was changed.
+[[changed]]
+library = "xee-interpreter"
+changes = "A predicate with several matching nodes is evaluated instead of refused, and nodes that are already in document order are not sorted again."
+
+[[changed]]
+library = "xee-xpath-compiler"
+changes = "The right operand of `and` and `or` is evaluated only when the left one does not decide the result, and a search through all descendants is one descent."

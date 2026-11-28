@@ -6,3 +6,7 @@
 # that cross the IPC boundary. The frontend imports them from there, so each
 # type is defined once, in Rust.
 TS_RS_EXPORT_DIR = { value = "src/lib/ipc/bindings", relative = true }
+
+[alias]
+# The build tools of this repository: `cargo xtask <task>`.
+xtask = "run --quiet --package xtask --"

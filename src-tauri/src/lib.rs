@@ -11,6 +11,7 @@
 //!   published files the validation uses.
 //! - [`cli`]: the command line, interpreted before the application starts.
 //! - [`checking`]: checks an invoice the user chose and describes the result.
+//! - [`notices`]: the list of the libraries this build contains.
 //! - `web_view`: notices when the web view of the window is lost.
 //! - `texts`: the texts the core shows itself when no interface is left.
 //!
@@ -21,6 +22,7 @@ pub mod app_info;
 pub mod checking;
 pub mod cli;
 pub mod commands;
+pub mod notices;
 // Only the watch over the web view shows a text, and only Linux has one.
 #[cfg(target_os = "linux")]
 mod texts;
@@ -63,6 +65,7 @@ pub fn run(file: Option<std::path::PathBuf>) -> tauri::Result<Ending> {
             commands::check_invoice,
             commands::check_invoice_again,
             commands::check_start_file,
+            commands::library_notices,
         ])
         .setup(move |app| Ok(watch_at_setup.start(app.handle())?))
         .build(tauri::generate_context!())?;
