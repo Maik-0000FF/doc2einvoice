@@ -8,9 +8,11 @@ node_modules/
 /coverage/
 vite.config.ts.timestamp-*
 
-# Rust build output and the capability schemas Tauri generates on build
+# Rust build output, the capability schemas Tauri generates on build and the
+# list of the contained libraries generated when a package is built
 /target/
 /src-tauri/gen/schemas/
+/src-tauri/gen/notices/
 
 # Nix: the direnv-cached dev shell and `nix build` result symlinks.
 # flake.nix and flake.lock are tracked.

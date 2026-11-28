@@ -4,12 +4,15 @@ SPDX-License-Identifier: GPL-3.0-or-later
 -->
 <script lang="ts">
   // What the program is, under which terms it is distributed, which published
-  // files its validation uses, which material of other authors it contains
-  // and what the author does not answer for.
+  // files its validation uses, which material of other authors and which
+  // libraries it contains and what the author does not answer for.
   import { formatLegalNotice } from '#lib/app-info/legal-notice.ts';
+  import { licenseTextSummary, licenseTextUses } from '#lib/app-info/library-notices.ts';
   import { i18n } from '#lib/i18n/i18n.svelte.ts';
   import type { MessageKey } from '#lib/i18n/translate.ts';
   import type { AppInfo } from '#lib/ipc/bindings/AppInfo.ts';
+  import type { Library } from '#lib/ipc/bindings/Library.ts';
+  import type { LibraryNotices } from '#lib/ipc/bindings/LibraryNotices.ts';
   import type { Material } from '#lib/ipc/bindings/Material.ts';
   import type { Publication } from '#lib/ipc/bindings/Publication.ts';
 
@@ -23,7 +26,19 @@ SPDX-License-Identifier: GPL-3.0-or-later
   import Table from './base/Table.svelte';
   import { byPosition, type TableColumn } from './base/table.ts';
 
-  let { info, open = $bindable(false) }: { info: AppInfo; open?: boolean } = $props();
+  let {
+    info,
+    libraries,
+    open = $bindable(false),
+  }: {
+    info: AppInfo;
+    /**
+     * The list of the libraries the build contains, once it is asked for;
+     * `null` for a build that carries none.
+     */
+    libraries?: Promise<LibraryNotices | null> | undefined;
+    open?: boolean;
+  } = $props();
 
   // The sentences of the disclaimer, in the order they are shown.
   const DISCLAIMER: readonly MessageKey[] = [
@@ -55,6 +70,19 @@ SPDX-License-Identifier: GPL-3.0-or-later
     ];
   }
 
+  const libraryColumns: readonly TableColumn<Library>[] = $derived([
+    { heading: i18n.t('about.libraries.name'), cell: libraryNameCell, wrap: 'anywhere' },
+    { heading: i18n.t('about.publications.version'), cell: libraryVersionCell },
+    { heading: i18n.t('about.license'), cell: libraryLicenseCell },
+  ]);
+
+  // What was changed in the libraries the program contains as a changed copy.
+  function changedLibraries(notices: LibraryNotices): readonly Fact[] {
+    return notices.libraries.flatMap((library) =>
+      library.changes === null ? [] : [{ term: library.name, value: library.changes }],
+    );
+  }
+
   const columns: readonly TableColumn<Publication>[] = $derived([
     { heading: i18n.t('about.publications.title'), cell: titleCell },
     { heading: i18n.t('about.publications.version'), cell: versionCell },
@@ -63,6 +91,9 @@ SPDX-License-Identifier: GPL-3.0-or-later
   ]);
 </script>
 
+{#snippet libraryNameCell(library: Library)}{library.name}{/snippet}
+{#snippet libraryVersionCell(library: Library)}{library.version}{/snippet}
+{#snippet libraryLicenseCell(library: Library)}{library.license}{/snippet}
 {#snippet titleCell(publication: Publication)}{publication.title}{/snippet}
 {#snippet versionCell(publication: Publication)}
   {publication.version ?? i18n.t('about.publications.notNumbered')}
@@ -97,6 +128,32 @@ SPDX-License-Identifier: GPL-3.0-or-later
       <FactList facts={materialFacts(material)} />
       <FoldedText summary={i18n.t('about.materials.licenseText')} text={material.licenseText} />
     {/each}
+  </section>
+
+  <section>
+    <SectionHeading text={i18n.t('about.libraries.heading')} />
+    <p class="about__text">{i18n.t('about.libraries.text')}</p>
+    {#if libraries !== undefined}
+      {#await libraries then notices}
+        {#if notices === null}
+          <Note spaced>{i18n.t('about.libraries.missing')}</Note>
+        {:else}
+          {@const changed = changedLibraries(notices)}
+          <Table columns={libraryColumns} rows={notices.libraries} key={byPosition} />
+          {#if changed.length > 0}
+            <SubHeading text={i18n.t('about.libraries.changed')} />
+            <FactList facts={changed} />
+          {/if}
+          <SubHeading text={i18n.t('about.libraries.texts')} />
+          <!-- A text has nothing to tell it from the others but its place. -->
+          {#each licenseTextUses(notices) as use, index (index)}
+            <FoldedText summary={licenseTextSummary(use)} text={use.text} />
+          {/each}
+        {/if}
+      {:catch error}
+        <Note tone="danger" role="alert">{String(error)}</Note>
+      {/await}
+    {/if}
   </section>
 
   <section>

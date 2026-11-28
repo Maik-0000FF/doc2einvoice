@@ -6,3 +6,11 @@
 # that cross the IPC boundary. The frontend imports them from there, so each
 # type is defined once, in Rust.
 TS_RS_EXPORT_DIR = { value = "src/lib/ipc/bindings", relative = true }
+# Where the list of the libraries the application contains is written when a
+# package is built, one file per target. The generator writes there and the
+# build script of the application reads there.
+NOTICES_DIR = { value = "src-tauri/gen/notices", relative = true }
+
+[alias]
+# The build tools of this repository: `cargo xtask <task>`.
+xtask = "run --quiet --package xtask --"

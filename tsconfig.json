@@ -17,6 +17,6 @@
     "noFallthroughCasesInSwitch": true,
     "noPropertyAccessFromIndexSignature": true
   },
-  "include": ["src", "*"],
+  "include": ["src", "tools", "*"],
   "exclude": ["node_modules", "build", "target", "vendor", "private"]
 }

@@ -22,6 +22,7 @@ use crate::checking;
 use crate::checking::document::INVOICE_EXTENSION;
 use crate::checking::outcome::{CheckOutcome, ProfileKind, Refusal};
 use crate::checking::service::ValidationService;
+use crate::notices;
 
 /// The kind of file the dialog offers, as it names it.
 const INVOICE_FILE_KIND: &str = "XML";
@@ -60,6 +61,14 @@ impl StartFile {
 #[must_use]
 pub fn app_info() -> AppInfo {
     AppInfo::current()
+}
+
+/// Returns the list of the libraries this build contains as JSON, in the form
+/// its generator defines, or nothing if the build carries no list.
+#[tauri::command]
+#[must_use]
+pub fn library_notices() -> Option<&'static str> {
+    notices::embedded()
 }
 
 /// Lets the user choose an invoice and checks it as the profile it suggests.

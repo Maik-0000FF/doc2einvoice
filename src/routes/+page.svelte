@@ -11,9 +11,14 @@ SPDX-License-Identifier: GPL-3.0-or-later
   import InvoiceCheck from '#lib/components/InvoiceCheck.svelte';
   import { i18n } from '#lib/i18n/i18n.svelte.ts';
   import { fetchAppInfo } from '#lib/ipc/app-info.ts';
+  import type { LibraryNotices } from '#lib/ipc/bindings/LibraryNotices.ts';
+  import { fetchLibraryNotices } from '#lib/ipc/library-notices.ts';
 
   let documentTitle = $state('');
   let aboutOpen = $state(false);
+  // The list of the contained libraries is long and is asked for once, when
+  // the dialog that shows it is opened for the first time.
+  let libraries = $state<Promise<LibraryNotices | null>>();
 
   const appInfo = fetchAppInfo().then((info) => {
     documentTitle = info.name;
@@ -33,6 +38,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
     <Button
       onclick={() => {
         aboutOpen = true;
+        libraries ??= fetchLibraryNotices();
       }}
     >
       {i18n.t('about.open')}
@@ -41,7 +47,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
       <Note>{formatLegalNotice(info)}</Note>
     </footer>
   </main>
-  <AboutDialog {info} bind:open={aboutOpen} />
+  <AboutDialog {info} {libraries} bind:open={aboutOpen} />
 {:catch error}
   <main class="shell">
     <Note tone="danger" size="body" role="alert">{String(error)}</Note>

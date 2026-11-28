@@ -1,0 +1,132 @@
+# SPDX-FileCopyrightText: Maik-0000FF
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Settings of the list of libraries a package of the application contains,
+# read by `cargo xtask notices`. The list names every library with the licence
+# text its own package holds; a library that holds none stops the generator
+# until it is settled here.
+#
+# Which licences a library may have at all is not stated here: that is the
+# policy in deny.toml.
+
+# Where a library offers a choice of licences, the first of these it offers is
+# taken. MIT comes first because its text carries the copyright notice of the
+# author, which the text of Apache-2.0 does not.
+preference = ["MIT"]
+
+# The targets packages are built for. `cargo xtask notices --all-targets`
+# generates the list for each of them.
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-pc-windows-msvc",
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+]
+
+# Libraries whose package holds no licence file. Their author ships no notice
+# of their own, so the standard text of the licence stands for it.
+standard-text = [
+  "alloc-stdlib",
+  "block2",
+  "dispatch2",
+  "dlopen2",
+  "dlopen2_derive",
+  "genawaiter",
+  "genawaiter-macro",
+  "genawaiter-proc-macro",
+  "next-gen-proc_macros",
+  "objc2",
+  "objc2-app-kit",
+  "objc2-core-foundation",
+  "objc2-encode",
+  "objc2-exception-helper",
+  "objc2-foundation",
+  "objc2-quartz-core",
+  "objc2-web-kit",
+  "regexml",
+  "tauri-plugin",
+  "ts-rs",
+  "ts-rs-macros",
+  "webview2-com",
+  "webview2-com-macros",
+  "webview2-com-sys",
+]
+
+# Libraries whose package holds a licence file that is not recognised as one,
+# or several to choose from. Each entry names the file and the licence it
+# states.
+
+# The text is indented.
+[[clarify]]
+libraries = [
+  "windows",
+  "windows-collections",
+  "windows-core",
+  "windows-future",
+  "windows-implement",
+  "windows-interface",
+  "windows-link",
+  "windows-numerics",
+  "windows-result",
+  "windows-strings",
+  "windows-sys",
+  "windows-threading",
+  "windows-version",
+]
+license = "MIT"
+file = "license-mit"
+
+[[clarify]]
+libraries = ["tauri-plugin-dialog", "tauri-plugin-fs"]
+license = "MIT"
+file = "LICENSE_MIT"
+
+# One file holds the texts of both licences the library offers.
+[[clarify]]
+libraries = ["chrono"]
+license = "MIT"
+file = "LICENSE.txt"
+
+# The text follows an introduction.
+[[clarify]]
+libraries = ["libm"]
+license = "MIT"
+file = "LICENSE.txt"
+
+[[clarify]]
+libraries = ["dpi"]
+license = "MIT"
+file = "LICENSE-LIBM-MIT"
+
+[[clarify]]
+libraries = ["brotli-decompressor"]
+license = "BSD-3-Clause"
+file = "LICENSE"
+
+# Of the licences each of these libraries offers, its package holds the text
+# of this one.
+[[clarify]]
+libraries = ["dunce"]
+license = "CC0-1.0"
+file = "LICENSE"
+
+[[clarify]]
+libraries = ["cargo_toml"]
+license = "Apache-2.0"
+file = "LICENSE"
+
+# The interface package holds the texts of both licences it offers.
+[[clarify]]
+libraries = ["@tauri-apps/api"]
+license = "MIT"
+file = "LICENSE-MIT"
+
+# Libraries the application contains as a changed copy, with what was changed.
+[[changed]]
+library = "xee-interpreter"
+changes = "A predicate with several matching nodes is evaluated instead of refused, and nodes that are already in document order are not sorted again."
+
+[[changed]]
+library = "xee-xpath-compiler"
+changes = "The right operand of `and` and `or` is evaluated only when the left one does not decide the result, and a search through all descendants is one descent."

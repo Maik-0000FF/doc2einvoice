@@ -7,6 +7,8 @@ import adapter from '@sveltejs/adapter-static';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vitest/config';
 
+import { bundledPackages } from './tools/bundled-packages.ts';
+
 // The desktop shell loads the dev server from a fixed address, so the port must
 // match `build.devUrl` in src-tauri/tauri.conf.json (JSON cannot import it).
 const DEV_SERVER_PORT = 1420;
@@ -22,7 +24,7 @@ const remoteDevHost = process.env['TAURI_DEV_HOST'];
 export default defineConfig({
   // The desktop shell has no server to render pages, so the frontend is built
   // as a static single-page application with index.html as the fallback.
-  plugins: [sveltekit({ adapter: adapter({ fallback: 'index.html' }) })],
+  plugins: [sveltekit({ adapter: adapter({ fallback: 'index.html' }) }), bundledPackages()],
 
   // Keep Rust compiler errors visible in the shared terminal.
   clearScreen: false,
@@ -45,7 +47,7 @@ export default defineConfig({
         extends: true,
         test: {
           name: 'logic',
-          include: ['src/**/*.test.ts'],
+          include: ['src/**/*.test.ts', 'tools/**/*.test.ts'],
         },
       },
       {

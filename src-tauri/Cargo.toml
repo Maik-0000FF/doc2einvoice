@@ -26,7 +26,7 @@ doc2einvoice-validation.workspace = true
 serde.workspace = true
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
-ts-rs = "11"
+ts-rs.workspace = true
 
 # What only Linux needs. The web view, at the version Tauri uses: only it
 # tells when the process that draws the window is lost. And what the dialog

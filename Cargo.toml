@@ -3,7 +3,7 @@
 
 [workspace]
 resolver = "3"
-members = ["crates/*", "src-tauri"]
+members = ["crates/*", "src-tauri", "xtask"]
 
 [workspace.package]
 version = "0.1.0"
@@ -53,6 +53,11 @@ sha2 = "0.11"
 # shows without the user interface.
 sys-locale = "0.3"
 thiserror = "2"
+# Reads the policy of the dependencies and the settings of the list of
+# libraries, and writes the configuration of the tool that reads the licences.
+toml = "1"
+# Derives the TypeScript types of what crosses into the interface.
+ts-rs = "11"
 # The XPath engine is pinned exactly: two of its crates are replaced by the
 # patched copies under vendor/ (see vendor/PATCHES.md), and those copies belong
 # to precisely these versions.
