@@ -7,10 +7,11 @@
 //! The list is generated when a package is built and embedded by the build
 //! script. It is carried to the interface as it was written: its form is
 //! defined by its generator, and the interface reads it as the type derived
-//! there. A build that is no package carries no list.
+//! there. Nothing here knows what the list holds. A build for development
+//! carries no list.
 
-/// The list as the build script handed it over; empty where none was
-/// generated.
+/// The list as the build script handed it over; empty where the build
+/// carries none.
 const EMBEDDED: &str = include_str!(env!("LIBRARY_NOTICES_FILE"));
 
 /// The list of the contained libraries as JSON, if this build carries one.
@@ -23,27 +24,9 @@ pub fn embedded() -> Option<&'static str> {
 mod tests {
     use super::embedded;
 
-    /// What the interface reads from the list.
-    const READ_FIELDS: [&str; 2] = ["texts", "libraries"];
-
-    /// A build made for the tests carries a list only where one was generated
-    /// for this target before. Where it does, the list is what the interface
-    /// expects.
+    /// The tests are built for development.
     #[test]
-    fn a_carried_list_holds_what_the_interface_reads() -> Result<(), serde_json::Error> {
-        let Some(list) = embedded() else {
-            return Ok(());
-        };
-        let list: serde_json::Value = serde_json::from_str(list)?;
-
-        for field in READ_FIELDS {
-            assert!(
-                list.get(field)
-                    .and_then(serde_json::Value::as_array)
-                    .is_some_and(|entries| !entries.is_empty()),
-                "{field}"
-            );
-        }
-        Ok(())
+    fn a_build_for_development_carries_no_list() {
+        assert_eq!(embedded(), None);
     }
 }

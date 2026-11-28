@@ -5,6 +5,10 @@
   "type": "module",
   "license": "GPL-3.0-or-later",
   "author": "Maik-0000FF",
+  "config": {
+    "noticesDirectory": "src-tauri/gen/notices",
+    "bundledPackagesList": "bundled-packages.json"
+  },
   "imports": {
     "#lib/*": "./src/lib/*"
   },

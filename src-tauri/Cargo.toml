@@ -18,6 +18,8 @@ name = "doc2einvoice_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
+# Reads where the list of the contained libraries is generated.
+serde_json.workspace = true
 tauri-build = { version = "2", features = [] }
 
 [dependencies]

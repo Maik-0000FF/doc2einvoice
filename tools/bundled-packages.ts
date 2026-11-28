@@ -21,31 +21,32 @@ const WINDOW_ENVIRONMENT = 'client';
 // What the name of a package starts with when it belongs to a scope and so
 // takes two directories.
 const SCOPE_MARK = '@';
-
-/**
- * The list the generator reads, relative to the root of the repository. The
- * directory is the one `NOTICES_DIR` names in `.cargo/config.toml`, the file
- * the one `xtask` names `BUNDLED_PACKAGES_FILE`; neither can be imported here.
- */
-export const BUNDLED_PACKAGES_LIST = 'src-tauri/gen/notices/bundled-packages.json';
+// What the name of a module starts with when a plugin made it up: such a
+// module is no file, even where a path follows.
+const MADE_UP_MARK = '\0';
 
 /**
  * The directory of the package a module belongs to, relative to the root and
  * with forward slashes, or nothing for a module that is no file of a package.
  *
- * | Module                                              | Directory                    |
- * | --------------------------------------------------- | ---------------------------- |
- * | `/r/node_modules/svelte/src/index.js`               | `node_modules/svelte`        |
- * | `/r/node_modules/@scope/name/index.js`              | `node_modules/@scope/name`   |
+ * | Module                                              | Directory                       |
+ * | --------------------------------------------------- | ------------------------------- |
+ * | `/r/node_modules/svelte/src/index.js`               | `node_modules/svelte`           |
+ * | `/r/node_modules/@scope/name/index.js`              | `node_modules/@scope/name`      |
  * | `/r/node_modules/a/node_modules/b/index.js`         | `node_modules/a/node_modules/b` |
- * | `/r/node_modules/svelte/src/index.js?v=1`           | `node_modules/svelte`        |
- * | `/r/src/lib/app.ts`                                 | nothing                      |
- * | `\0virtual:module`                                  | nothing                      |
- * | `/elsewhere/node_modules/svelte/index.js`           | nothing: outside the root    |
- * | `/r/node_modules/@scope`                            | nothing: no package named    |
- * | `/r/node_modules`                                   | nothing: no package named    |
+ * | `/r/node_modules/svelte/src/index.js?v=1`           | `node_modules/svelte`           |
+ * | `/r/src/lib/app.ts`                                 | nothing                         |
+ * | `\0virtual:module`                                  | nothing: made up by a plugin    |
+ * | `\0/r/node_modules/svelte/src/index.js`             | nothing: made up by a plugin    |
+ * | `/elsewhere/node_modules/svelte/index.js`           | nothing: outside the root       |
+ * | `/r/node_modules/@scope`                            | nothing: no package named       |
+ * | `/r/node_modules`                                   | nothing: no package named       |
+ * | empty                                               | nothing                         |
  */
 export function packageDirectory(module: string, root: string): string | undefined {
+  if (module === '' || module.startsWith(MADE_UP_MARK)) {
+    return undefined;
+  }
   const relative = path.relative(root, module);
   if (relative.startsWith('..') || path.isAbsolute(relative)) {
     return undefined;
@@ -66,20 +67,26 @@ export function packageDirectory(module: string, root: string): string | undefin
   return [...parts.slice(0, start + 1), ...named].join('/');
 }
 
-/** Writes the list of the packages in the bundle of the window when it is built. */
-export function bundledPackages(): Plugin {
+/**
+ * Writes the list of the packages in the bundle of the window when it is
+ * built. `list` is the file the list is written to, relative to the root.
+ *
+ * The list is written once the bundle is: a build that fails leaves the list
+ * of the last one that succeeded.
+ */
+export function bundledPackages(list: string): Plugin {
   let root = '';
-  const directories = new Set<string>();
   return {
     name: 'bundled-packages',
     apply: 'build',
     configResolved(config) {
       root = config.root;
     },
-    generateBundle(_options, bundle) {
+    writeBundle(_options, bundle) {
       if (this.environment.name !== WINDOW_ENVIRONMENT) {
         return;
       }
+      const directories = new Set<string>();
       for (const chunk of Object.values(bundle)) {
         if (chunk.type !== 'chunk') {
           continue;
@@ -93,14 +100,9 @@ export function bundledPackages(): Plugin {
           }
         }
       }
-    },
-    closeBundle() {
-      if (this.environment.name !== WINDOW_ENVIRONMENT) {
-        return;
-      }
-      const list = path.join(root, BUNDLED_PACKAGES_LIST);
-      mkdirSync(path.dirname(list), { recursive: true });
-      writeFileSync(list, `${JSON.stringify([...directories].sort())}\n`);
+      const file = path.join(root, list);
+      mkdirSync(path.dirname(file), { recursive: true });
+      writeFileSync(file, `${JSON.stringify([...directories].sort())}\n`);
     },
   };
 }

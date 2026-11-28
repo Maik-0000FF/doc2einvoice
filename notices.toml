@@ -24,6 +24,10 @@ targets = [
   "x86_64-apple-darwin",
 ]
 
+# The settings below name a library by its name, for every version of it, or
+# as `{ name = "...", version = "..." }` for one version. The setting for one
+# version comes first.
+
 # Libraries whose package holds no licence file. Their author ships no notice
 # of their own, so the standard text of the licence stands for it.
 standard-text = [
@@ -45,6 +49,7 @@ standard-text = [
   "objc2-quartz-core",
   "objc2-web-kit",
   "regexml",
+  "selectors",
   "tauri-plugin",
   "ts-rs",
   "ts-rs-macros",
@@ -52,6 +57,11 @@ standard-text = [
   "webview2-com-macros",
   "webview2-com-sys",
 ]
+
+# A package that is built for several targets at once, by the name the
+# packaging tool gives that build, with the targets it stands for.
+[combined]
+universal-apple-darwin = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
 
 # Libraries whose package holds a licence file that is not recognised as one,
 # or several to choose from. Each entry names the file and the licence it

@@ -15,10 +15,12 @@ describe('the directory of the package a module belongs to', () => {
     ['/r/node_modules/svelte/src/index.js?v=1', 'node_modules/svelte'],
     ['/r/src/lib/app.ts', undefined],
     ['\0virtual:module', undefined],
+    ['\0/r/node_modules/svelte/src/index.js', undefined],
     ['/elsewhere/node_modules/svelte/index.js', undefined],
     ['/r/node_modules/@scope', undefined],
     ['/r/node_modules', undefined],
-  ])('of %s is %s', (module, expected) => {
+    ['', undefined],
+  ])('of %j is %s', (module, expected) => {
     expect(packageDirectory(module, ROOT)).toBe(expected);
   });
 });
