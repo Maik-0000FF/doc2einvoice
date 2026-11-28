@@ -17,7 +17,7 @@
 // | not asked for yet         | the section, without a list                        |
 // | the build carries none    | that it carries none                               |
 // | a list                    | every library with version and licence, and every  |
-// |                           | licence text folded, named by its libraries        |
+// |                           | text they pass on folded, named by its libraries   |
 // | a list with a changed one | the same, and what was changed                     |
 
 import { flushSync, mount, tick, unmount } from 'svelte';
@@ -49,10 +49,7 @@ const CHANGED: Material = {
 };
 
 const LIBRARIES: LibraryNotices = {
-  texts: [
-    { license: 'MIT', text: 'The terms of the sample libraries.' },
-    { license: 'Zlib', text: 'The terms of the other sample library.' },
-  ],
+  texts: ['The terms of the sample libraries.', 'The notice of the other sample library.'],
   libraries: [
     { name: 'sample-reader', version: '1.0.0', license: 'MIT', texts: [0], changes: null },
     {
@@ -181,17 +178,15 @@ describe('AboutDialog', () => {
     expect(text).not.toContain(i18n.t('about.libraries.missing'));
   });
 
-  it('holds every licence text of the libraries folded, named by its libraries', async () => {
+  it('holds every text the libraries pass on folded, named by its libraries', async () => {
     await shownWithLibraries(LIBRARIES);
     const folds = [...target.querySelectorAll('details')];
 
     expect(folds.map((fold) => fold.querySelector('summary')?.textContent)).toEqual([
-      'MIT: sample-reader 1.0.0, sample-writer 2.1.0',
-      'Zlib: sample-writer 2.1.0',
+      'sample-reader 1.0.0, sample-writer 2.1.0',
+      'sample-writer 2.1.0',
     ]);
-    expect(folds.map((fold) => fold.querySelector('pre')?.textContent)).toEqual(
-      LIBRARIES.texts.map(({ text }) => text),
-    );
+    expect(folds.map((fold) => fold.querySelector('pre')?.textContent)).toEqual(LIBRARIES.texts);
     expect(folds.every((fold) => !fold.open)).toBe(true);
   });
 

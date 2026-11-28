@@ -17,9 +17,8 @@ use serde::{Deserialize, Serialize};
 
 use super::cargo::{Workspace, cargo, run};
 use super::files::{holds_text, regular_files};
-use super::format::LicenseText;
 use super::settings::Settings;
-use super::{Candidate, Error, Reason, read_text, write_text};
+use super::{Candidate, Error, Reason, StandardText, read_text, write_text};
 
 /// The directory below the one Cargo builds in that holds what the tool is
 /// given and what it answers.
@@ -109,8 +108,9 @@ fn from_own_package(
     }
 }
 
-/// Asks the tool for the crates the application contains for one target.
-/// The sources have to be fetched before; the tool is kept from the network.
+/// Asks the tool for the crates the application contains for one target,
+/// which has to be one name. The sources have to be fetched before; the tool
+/// is kept from the network.
 pub fn read(
     workspace: &Workspace,
     settings: &Settings,
@@ -151,8 +151,8 @@ pub fn read(
 }
 
 /// The crates of a report that are not the workspace's own, each with the
-/// texts its own package holds and the texts that stand in for those it does
-/// not hold.
+/// licences whose texts its own package holds and the standard texts that
+/// stand in for those it does not hold.
 fn candidates(report: &Report, workspace: &Workspace) -> Vec<Candidate> {
     let mut entries: BTreeMap<Identity, Vec<&Entry>> = BTreeMap::new();
     for entry in &report.licenses {
@@ -181,30 +181,31 @@ fn candidates(report: &Report, workspace: &Workspace) -> Vec<Candidate> {
                 Vec::new()
             });
 
-            let mut own = Vec::new();
-            let mut substituted = Vec::new();
+            let mut licenses_held = Vec::new();
+            let mut texts_held = Vec::new();
+            let mut standard_texts = Vec::new();
             for entry in entries.get(&package.identity()).into_iter().flatten() {
-                let text = LicenseText {
-                    license: entry.id.clone(),
-                    text: entry.text.clone(),
-                };
                 let holds = || holds_text(&directory, &files, &entry.text);
                 if from_own_package(entry.source_path.as_deref(), &directory, holds) {
-                    own.push(text);
+                    licenses_held.push(entry.id.clone());
+                    texts_held.push(entry.text.clone());
                 } else {
-                    substituted.push(text);
+                    standard_texts.push(StandardText {
+                        license: entry.id.clone(),
+                        text: entry.text.clone(),
+                    });
                 }
             }
             Candidate {
                 name: package.name.clone(),
                 version: package.version.clone(),
                 license: listed.license.clone(),
-                lacks_own_text: own.is_empty() || !substituted.is_empty(),
                 changed_copy: package.source.is_none(),
                 directory,
                 files,
-                own,
-                substituted,
+                licenses_held,
+                texts_held,
+                standard_texts,
                 problems,
             }
         })

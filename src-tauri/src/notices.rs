@@ -11,7 +11,8 @@
 //! carries no list.
 
 /// The list as the build script handed it over; empty where the build
-/// carries none.
+/// carries none. The build script sets the variable named here and names it
+/// as `EMBEDDED_VARIABLE`.
 const EMBEDDED: &str = include_str!(env!("LIBRARY_NOTICES_FILE"));
 
 /// The list of the contained libraries as JSON, if this build carries one.

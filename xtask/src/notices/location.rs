@@ -11,8 +11,9 @@
 
 use std::path::{Component, Path, PathBuf};
 
-/// The manifest of the interface, in the root of the repository.
-const MANIFEST_FILE: &str = "package.json";
+/// The manifest of a package of the interface; the one in the root of the
+/// repository is that of the interface itself.
+pub const MANIFEST_FILE: &str = "package.json";
 /// The part of the manifest that holds the settings of the repository.
 const SETTINGS_KEY: &str = "config";
 /// The directory the lists are generated in, relative to the root.
@@ -38,6 +39,22 @@ pub fn stays_below(path: &str) -> bool {
     let mut components = Path::new(path).components().peekable();
     components.peek().is_some()
         && components.all(|component| matches!(component, Component::Normal(_)))
+}
+
+/// Whether a text is the name of one file or directory, and no path to
+/// another place.
+///
+/// | Text                        | One name |
+/// |-----------------------------|----------|
+/// | `LICENSE`                   | yes      |
+/// | `x86_64-unknown-linux-gnu`  | yes      |
+/// | `docs/LICENSE`              | no       |
+/// | `../x`                      | no       |
+/// | `..`, `.`                   | no       |
+/// | `/x`                        | no       |
+/// | empty, or only spaces       | no       |
+pub fn is_one_name(text: &str) -> bool {
+    !text.trim().is_empty() && stays_below(text) && Path::new(text).components().count() == 1
 }
 
 /// Where the lists lie.
@@ -102,6 +119,7 @@ impl Location {
     }
 
     /// The list of the libraries a package for the given target contains.
+    /// The target has to be one name.
     pub fn list(&self, target: &str) -> PathBuf {
         self.directory.join(format!("{target}.{LIST_EXTENSION}"))
     }
@@ -117,7 +135,7 @@ impl Location {
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use super::{Location, stays_below};
+    use super::{Location, is_one_name, stays_below};
 
     #[test]
     fn a_path_that_stays_below_follows_its_table() {
@@ -132,6 +150,24 @@ mod tests {
         ];
         for (path, expected) in table {
             assert_eq!(stays_below(path), expected, "{path}");
+        }
+    }
+
+    #[test]
+    fn one_name_follows_its_table() {
+        let table = [
+            ("LICENSE", true),
+            ("x86_64-unknown-linux-gnu", true),
+            ("docs/LICENSE", false),
+            ("../x", false),
+            ("..", false),
+            (".", false),
+            ("/x", false),
+            ("", false),
+            (" ", false),
+        ];
+        for (text, expected) in table {
+            assert_eq!(is_one_name(text), expected, "{text}");
         }
     }
 

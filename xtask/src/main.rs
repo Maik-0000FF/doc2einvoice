@@ -24,8 +24,6 @@ const ALL_TARGETS_OPTION: &str = "all-targets";
 /// The variable in which the packaging tool names the target it builds for,
 /// set for the command it runs before a build.
 const PACKAGING_TARGET_VARIABLE: &str = "TAURI_ENV_TARGET_TRIPLE";
-/// The target these tools are compiled for, set by the build script.
-const HOST: &str = env!("XTASK_HOST");
 
 fn command() -> Command {
     Command::new(env!("CARGO_PKG_NAME"))
@@ -35,55 +33,62 @@ fn command() -> Command {
         .subcommand(
             Command::new(NOTICES_TASK)
                 .about(
-                    "Generates the list of the libraries a package contains, with their \
-                     licence texts",
+                    "Generates the list of the libraries a package contains, with the texts \
+                     they ask to be passed on",
                 )
                 .arg(
                     Arg::new(TARGET_OPTION)
                         .long(TARGET_OPTION)
                         .value_name("TRIPLE")
-                        .help("The target the package is built for [default: the one being packaged, or this machine]"),
+                        .help(
+                            "The target the package is built for [default: the one being \
+                             packaged]",
+                        ),
                 )
                 .arg(
                     Arg::new(ALL_TARGETS_OPTION)
                         .long(ALL_TARGETS_OPTION)
                         .action(ArgAction::SetTrue)
                         .conflicts_with(TARGET_OPTION)
-                        .help("Every target packages are built for, and a check that no setting is left unused"),
+                        .help(
+                            "Every target packages are built for, and a check that no setting \
+                             is left unused",
+                        ),
                 ),
         )
 }
 
 /// Which targets the list is asked for.
 ///
-/// | Command line                  | Packaging tool names a target | Selection        |
-/// |-------------------------------|-------------------------------|------------------|
-/// | `--all-targets`               | any                           | every target     |
-/// | `--target T`                  | any                           | `T`              |
-/// | neither                       | yes, `P`                      | `P`              |
-/// | neither                       | no                            | this machine     |
-/// | both                          | any                           | refused by clap  |
-fn selection(all: bool, named: Option<&String>, packaging: Option<String>) -> Selection {
+/// | Command line      | Packaging tool names a target | Selection          |
+/// |-------------------|-------------------------------|--------------------|
+/// | `--all-targets`   | any                           | every target       |
+/// | `--target T`      | any                           | `T`                |
+/// | neither           | yes, `P`                      | `P`                |
+/// | neither           | no                            | none: to be named  |
+/// | both              | any                           | refused by clap    |
+fn selection(all: bool, named: Option<&String>, packaging: Option<String>) -> Option<Selection> {
     if all {
-        Selection::All
+        Some(Selection::All)
     } else {
-        Selection::One(
-            named
-                .cloned()
-                .or(packaging)
-                .unwrap_or_else(|| HOST.to_owned()),
-        )
+        named.cloned().or(packaging).map(Selection::One)
     }
 }
 
 fn main() -> ExitCode {
     let matches = command().get_matches();
     let result = match matches.subcommand() {
-        Some((NOTICES_TASK, task)) => notices::run(&selection(
+        Some((NOTICES_TASK, task)) => match selection(
             task.get_flag(ALL_TARGETS_OPTION),
             task.get_one::<String>(TARGET_OPTION),
             std::env::var(PACKAGING_TARGET_VARIABLE).ok(),
-        )),
+        ) {
+            Some(selection) => notices::run(&selection).map_err(|error| error.to_string()),
+            None => Err(format!(
+                "Name the target with --{TARGET_OPTION}, or ask for every target with \
+                 --{ALL_TARGETS_OPTION}."
+            )),
+        },
         // Not reached: a task is required, and no other is defined.
         _ => Ok(()),
     };
@@ -98,7 +103,7 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::{HOST, Selection, command, selection};
+    use super::{Selection, command, selection};
 
     #[test]
     fn the_command_line_is_consistent() {
@@ -109,23 +114,14 @@ mod tests {
     fn the_selection_follows_its_table() {
         let named = "named".to_owned();
         let packaging = || Some("packaged".to_owned());
+        let one = |target: &str| Some(Selection::One(target.to_owned()));
         let table = [
-            (true, None, packaging(), Selection::All),
-            (true, None, None, Selection::All),
-            (
-                false,
-                Some(&named),
-                packaging(),
-                Selection::One(named.clone()),
-            ),
-            (false, Some(&named), None, Selection::One(named.clone())),
-            (
-                false,
-                None,
-                packaging(),
-                Selection::One("packaged".to_owned()),
-            ),
-            (false, None, None, Selection::One(HOST.to_owned())),
+            (true, None, packaging(), Some(Selection::All)),
+            (true, None, None, Some(Selection::All)),
+            (false, Some(&named), packaging(), one("named")),
+            (false, Some(&named), None, one("named")),
+            (false, None, packaging(), one("packaged")),
+            (false, None, None, None),
         ];
         for (all, named, packaging, expected) in table {
             assert_eq!(selection(all, named, packaging), expected);

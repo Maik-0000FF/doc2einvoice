@@ -4,10 +4,11 @@
 import type { Library } from '#lib/ipc/bindings/Library.ts';
 import type { LibraryNotices } from '#lib/ipc/bindings/LibraryNotices.ts';
 
-/** A licence text with the libraries it belongs to. */
-export interface LicenseTextUse {
-  /** SPDX identifier of the licence the text states. */
-  license: string;
+/**
+ * A text that is passed on with libraries, as a licence or a notice is, with
+ * the libraries it belongs to.
+ */
+export interface TextUse {
   text: string;
   /** The libraries, each as its name and version, in the order of the list. */
   libraries: string[];
@@ -19,7 +20,7 @@ export function libraryLabel(library: Library): string {
 }
 
 /**
- * The licence texts of a list, each with the libraries that refer to it.
+ * The texts of a list, each with the libraries that refer to it.
  *
  * | List                                         | Result                           |
  * | -------------------------------------------- | -------------------------------- |
@@ -29,12 +30,8 @@ export function libraryLabel(library: Library): string {
  * | a library refers to a text that is not there | the reference is left out        |
  * | no texts                                     | nothing                          |
  */
-export function licenseTextUses(notices: LibraryNotices): LicenseTextUse[] {
-  const uses: LicenseTextUse[] = notices.texts.map(({ license, text }) => ({
-    license,
-    text,
-    libraries: [],
-  }));
+export function textUses(notices: LibraryNotices): TextUse[] {
+  const uses: TextUse[] = notices.texts.map((text) => ({ text, libraries: [] }));
   for (const library of notices.libraries) {
     for (const place of library.texts) {
       uses[place]?.libraries.push(libraryLabel(library));
@@ -43,7 +40,7 @@ export function licenseTextUses(notices: LibraryNotices): LicenseTextUse[] {
   return uses;
 }
 
-/** The line that names a licence text: its licence and the libraries it belongs to. */
-export function licenseTextSummary(use: LicenseTextUse): string {
-  return `${use.license}: ${use.libraries.join(', ')}`;
+/** The line that names a text: the libraries it belongs to. */
+export function textSummary(use: TextUse): string {
+  return use.libraries.join(', ');
 }

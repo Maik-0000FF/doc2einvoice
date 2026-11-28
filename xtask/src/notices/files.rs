@@ -1,76 +1,55 @@
 // SPDX-FileCopyrightText: Maik-0000FF
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The files of the package of a library: which there are, what their names
-//! say they are, and whether one of them holds a given text.
+//! The files in the root of the package of a library: which there are, which
+//! of them their names say are passed on, and whether one holds a given text.
+//!
+//! Nothing here guesses what a file is. A file whose name says licence,
+//! notice or copyright is passed on with the library, word for word, unless
+//! the settings name it as none of these. That is the one rule and the one
+//! place to settle a file.
 
 use std::path::Path;
 
-/// What the first word of the name of a licence file is, in lower case.
-const LICENSE_WORDS: [&str; 4] = ["licence", "license", "copying", "unlicense"];
-/// What the first word of the name of a notice file is, in lower case.
-const NOTICE_WORDS: [&str; 2] = ["notice", "notices"];
-/// What ends a word in the name of a file.
-const WORD_ENDS: [char; 3] = ['.', '-', '_'];
-/// The extensions of the program code of a library, in lower case: a file
-/// that ends in one is code, whatever its name starts with.
-const PROGRAM_EXTENSIONS: [&str; 5] = ["rs", "js", "mjs", "cjs", "ts"];
+/// What a name says when the file holds the text of a licence, in lower
+/// case.
+const LICENSE_WORDS: [&str; 3] = ["license", "licence", "copying"];
+/// What a name says when the file holds a notice or a statement of
+/// copyright, in lower case.
+const NOTICE_WORDS: [&str; 2] = ["notice", "copyright"];
 
-/// What the name of a file says the file is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Document {
-    /// The text of a licence.
-    License,
-    /// A notice that is passed on with the library.
-    Notice,
+fn says(name: &str, words: &[&str]) -> bool {
+    let name = name.to_lowercase();
+    words.iter().any(|word| name.contains(word))
 }
 
-/// What a file of a package is, by its name. Only the name of a regular file
-/// is asked here; a directory is nothing of the kind.
+/// Whether the name of a file says it holds the text of a licence.
+pub fn names_license(name: &str) -> bool {
+    says(name, &LICENSE_WORDS)
+}
+
+/// Whether the name of a file in the root of a package says it is passed on
+/// with the library.
 ///
-/// A name that only might be a document counts as one: the generator then
-/// stops and asks, where the other reading would pass a notice over silently.
-///
-/// | Name                  | Document             |
-/// |-----------------------|----------------------|
-/// | `LICENSE`             | licence              |
-/// | `LICENSE.md`          | licence              |
-/// | `licence.txt`         | licence              |
-/// | `LICENSE-MIT`         | licence              |
-/// | `LICENSE_APACHE-2.0`  | licence              |
-/// | `license-apache-2.0`  | licence              |
-/// | `LICENSE.spdx`        | licence              |
-/// | `COPYING`             | licence              |
-/// | `UNLICENSE`           | licence              |
-/// | `NOTICE`              | notice               |
-/// | `NOTICE.txt`          | notice               |
-/// | `NOTICES`             | notice               |
-/// | `NOTICE-THIRD-PARTY`  | notice               |
-/// | `NOTICE_APACHE`       | notice               |
-/// | `notice_board.rs`     | none: program code   |
-/// | `license.js`          | none: program code   |
-/// | `LICENSE.RS`          | none: program code   |
-/// | `noticeboard.md`      | none: another word   |
-/// | `relicense.md`        | none: another word   |
-/// | `README.md`           | none                 |
-/// | `.license`            | none: no first word  |
-/// | empty                 | none                 |
-pub fn document(name: &str) -> Option<Document> {
-    let name = name.to_lowercase();
-    let extension = Path::new(&name)
-        .extension()
-        .and_then(|extension| extension.to_str());
-    if extension.is_some_and(|extension| PROGRAM_EXTENSIONS.contains(&extension)) {
-        return None;
-    }
-    let word = name.split(WORD_ENDS).next().unwrap_or_default();
-    if LICENSE_WORDS.contains(&word) {
-        Some(Document::License)
-    } else if NOTICE_WORDS.contains(&word) {
-        Some(Document::Notice)
-    } else {
-        None
-    }
+/// | Name                    | Passed on                                |
+/// |-------------------------|------------------------------------------|
+/// | `LICENSE`               | yes                                      |
+/// | `LICENSE-MIT`           | yes                                      |
+/// | `license-apache-2.0`    | yes                                      |
+/// | `licence.txt`           | yes                                      |
+/// | `UNLICENSE`             | yes                                      |
+/// | `COPYING`               | yes                                      |
+/// | `COPYRIGHT`             | yes                                      |
+/// | `NOTICE`                | yes                                      |
+/// | `THIRD-PARTY-NOTICES`   | yes                                      |
+/// | `LICENSE.spdx`          | yes                                      |
+/// | `Notice.svelte`         | yes: the settings name it as none        |
+/// | `notice_board.rs`       | yes: the settings name it as none        |
+/// | `README.md`             | no                                       |
+/// | `Cargo.toml`            | no                                       |
+/// | empty                   | no                                       |
+pub fn names_document(name: &str) -> bool {
+    names_license(name) || says(name, &NOTICE_WORDS)
 }
 
 /// The names of the regular files a directory holds itself, in order. A
@@ -100,41 +79,35 @@ pub fn holds_text(directory: &Path, files: &[String], text: &str) -> bool {
 mod tests {
     use std::path::Path;
 
-    use super::{Document, document, holds_text, regular_files};
+    use super::{holds_text, names_document, names_license, regular_files};
 
     #[test]
-    fn what_a_name_says_follows_its_table() {
+    fn what_is_passed_on_follows_its_table() {
         let table = [
-            ("LICENSE", Some(Document::License)),
-            ("LICENSE.md", Some(Document::License)),
-            ("licence.txt", Some(Document::License)),
-            ("LICENSE-MIT", Some(Document::License)),
-            ("LICENSE_APACHE-2.0", Some(Document::License)),
-            ("license-apache-2.0", Some(Document::License)),
-            ("LICENSE.spdx", Some(Document::License)),
-            ("COPYING", Some(Document::License)),
-            ("UNLICENSE", Some(Document::License)),
-            ("NOTICE", Some(Document::Notice)),
-            ("NOTICE.txt", Some(Document::Notice)),
-            ("NOTICES", Some(Document::Notice)),
-            ("NOTICE-THIRD-PARTY", Some(Document::Notice)),
-            ("NOTICE_APACHE", Some(Document::Notice)),
-            ("notice_board.rs", None),
-            ("license.js", None),
-            ("LICENSE.RS", None),
-            ("noticeboard.md", None),
-            ("relicense.md", None),
-            ("README.md", None),
-            (".license", None),
-            ("", None),
+            ("LICENSE", true, true),
+            ("LICENSE-MIT", true, true),
+            ("license-apache-2.0", true, true),
+            ("licence.txt", true, true),
+            ("UNLICENSE", true, true),
+            ("COPYING", true, true),
+            ("COPYRIGHT", true, false),
+            ("NOTICE", true, false),
+            ("THIRD-PARTY-NOTICES", true, false),
+            ("LICENSE.spdx", true, true),
+            ("Notice.svelte", true, false),
+            ("notice_board.rs", true, false),
+            ("README.md", false, false),
+            ("Cargo.toml", false, false),
+            ("", false, false),
         ];
-        for (name, expected) in table {
-            assert_eq!(document(name), expected, "{name}");
+        for (name, document, license) in table {
+            assert_eq!(names_document(name), document, "{name}");
+            assert_eq!(names_license(name), license, "{name}");
         }
     }
 
-    /// The directory of this crate: it holds its manifest and its build
-    /// script as files and its code in a directory.
+    /// The directory of this crate: it holds its manifest as a file and its
+    /// code in a directory.
     const CRATE: &str = env!("CARGO_MANIFEST_DIR");
 
     #[test]
@@ -142,7 +115,6 @@ mod tests {
         let files = regular_files(Path::new(CRATE))?;
 
         assert!(files.contains(&"Cargo.toml".to_owned()));
-        assert!(files.contains(&"build.rs".to_owned()));
         assert!(!files.contains(&"src".to_owned()));
         assert!(files.is_sorted());
         Ok(())

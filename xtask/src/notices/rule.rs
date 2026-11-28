@@ -1,100 +1,77 @@
 // SPDX-FileCopyrightText: Maik-0000FF
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The rule that decides where the licence text of a library comes from, and
-//! when the list is not generated.
+//! The rule that decides whether a library needs the settings for its licence
+//! texts, and when the list is not generated.
 
 use thiserror::Error;
 
-use super::settings::{Clarification, SETTINGS_FILE};
+use super::settings::{SETTINGS_FILE, Settling};
 
-/// Where the licence text of a library comes from.
+/// Where the licence texts of a library come from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Settled<'a> {
     /// From its own package, found there without help.
-    OwnText,
-    /// From the file of its package the settings name.
-    Clarified(&'a Clarification),
-    /// The standard text of its licence, because its package holds none.
-    StandardText,
+    OwnTexts,
+    /// From its own package and from what the settings say.
+    Settings(&'a Settling),
 }
 
-/// Why the text of a library is not settled.
+/// Why the texts of a library are not settled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum Unsettled {
-    /// Nothing says where its text comes from.
-    #[error("its package holds no licence text that is recognised; settle it in {SETTINGS_FILE}")]
+    /// Nothing says where a text comes from.
+    #[error(
+        "its package does not hold the texts of the licences it states; settle it in {SETTINGS_FILE}"
+    )]
     NoText,
     /// The settings settle what needs no settling any more.
-    #[error("its package holds its licence text, so its entry in {SETTINGS_FILE} is not needed")]
+    #[error(
+        "its package holds the texts of the licences it states, so its entry in {SETTINGS_FILE} is not needed"
+    )]
     NotNeeded,
-    /// The settings settle it in two ways.
-    #[error("{SETTINGS_FILE} both clarifies it and lets the standard text stand for it")]
-    Both,
 }
 
-/// Decides where the licence text of a library comes from.
+/// Decides where the licence texts of a library come from.
 ///
-/// A library lacks a text of its own when, for a licence that applies to it,
-/// no text was found in its package.
+/// A package holds what its library states when the licences whose texts
+/// were found in it fulfil the stated licence: every one of those it asks
+/// for together, and one of those it offers a choice of.
 ///
-/// | Lacks a text of its own | Clarified | Standard text allowed | Outcome                |
-/// |-------------------------|-----------|-----------------------|------------------------|
-/// | no                      | no        | no                    | its own text           |
-/// | no                      | yes       | no                    | refused: not needed    |
-/// | no                      | no        | yes                   | refused: not needed    |
-/// | yes                     | yes       | no                    | the clarified file     |
-/// | yes                     | no        | yes                   | the standard text      |
-/// | yes                     | no        | no                    | refused: no text       |
-/// | either                  | yes       | yes                   | refused: both          |
+/// | Its package holds what it states | The settings settle it | Outcome              |
+/// |----------------------------------|------------------------|----------------------|
+/// | yes                              | no                     | its own texts        |
+/// | yes                              | yes                    | refused: not needed  |
+/// | no                               | yes                    | what the settings say |
+/// | no                               | no                     | refused: no text     |
 pub fn settle(
-    lacks_own_text: bool,
-    clarification: Option<&Clarification>,
-    standard_text_allowed: bool,
+    package_holds_what_it_states: bool,
+    settling: Option<&Settling>,
 ) -> Result<Settled<'_>, Unsettled> {
-    match (lacks_own_text, clarification, standard_text_allowed) {
-        (_, Some(_), true) => Err(Unsettled::Both),
-        (false, None, false) => Ok(Settled::OwnText),
-        (false, _, _) => Err(Unsettled::NotNeeded),
-        (true, Some(clarification), false) => Ok(Settled::Clarified(clarification)),
-        (true, None, true) => Ok(Settled::StandardText),
-        (true, None, false) => Err(Unsettled::NoText),
+    match (package_holds_what_it_states, settling) {
+        (true, None) => Ok(Settled::OwnTexts),
+        (true, Some(_)) => Err(Unsettled::NotNeeded),
+        (false, Some(settling)) => Ok(Settled::Settings(settling)),
+        (false, None) => Err(Unsettled::NoText),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{Settled, Unsettled, settle};
-    use crate::notices::settings::Clarification;
+    use crate::notices::settings::Settling;
 
     #[test]
-    fn where_a_text_comes_from_follows_its_table() {
-        let clarification = Clarification {
-            license: "MIT".to_owned(),
-            file: "LICENSE".to_owned(),
-        };
-        let clarified = Some(&clarification);
+    fn where_the_texts_come_from_follows_its_table() {
+        let settling = Settling::StandardText;
         let table = [
-            (false, None, false, Ok(Settled::OwnText)),
-            (false, clarified, false, Err(Unsettled::NotNeeded)),
-            (false, None, true, Err(Unsettled::NotNeeded)),
-            (
-                true,
-                clarified,
-                false,
-                Ok(Settled::Clarified(&clarification)),
-            ),
-            (true, None, true, Ok(Settled::StandardText)),
-            (true, None, false, Err(Unsettled::NoText)),
-            (false, clarified, true, Err(Unsettled::Both)),
-            (true, clarified, true, Err(Unsettled::Both)),
+            (true, None, Ok(Settled::OwnTexts)),
+            (true, Some(&settling), Err(Unsettled::NotNeeded)),
+            (false, Some(&settling), Ok(Settled::Settings(&settling))),
+            (false, None, Err(Unsettled::NoText)),
         ];
-        for (lacks, clarification, standard, expected) in table {
-            assert_eq!(
-                settle(lacks, clarification, standard),
-                expected,
-                "{lacks} {clarification:?} {standard}"
-            );
+        for (holds, settling, expected) in table {
+            assert_eq!(settle(holds, settling), expected, "{holds} {settling:?}");
         }
     }
 }

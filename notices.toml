@@ -2,9 +2,17 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Settings of the list of libraries a package of the application contains,
-# read by `cargo xtask notices`. The list names every library with the licence
-# text its own package holds; a library that holds none stops the generator
-# until it is settled here.
+# read by `cargo xtask notices`.
+#
+# Every file in the root of the package of a library whose name says licence,
+# notice or copyright is passed on with it as it is. A file of that name that
+# is none of these is named here under `[[no-notice]]`, with `libraries` and
+# `file`.
+#
+# The package of a library has to hold the texts of the licences it states:
+# of all it asks for together, and of one of those it offers a choice of. A
+# library whose package does not stops the generator until it is settled here.
+# So does a setting that is not needed any more.
 #
 # Which licences a library may have at all is not stated here: that is the
 # policy in deny.toml.
@@ -26,7 +34,7 @@ targets = [
 
 # The settings below name a library by its name, for every version of it, or
 # as `{ name = "...", version = "..." }` for one version. The setting for one
-# version comes first.
+# version comes first, whatever the two say.
 
 # Libraries whose package holds no licence file. Their author ships no notice
 # of their own, so the standard text of the licence stands for it.
@@ -65,7 +73,8 @@ universal-apple-darwin = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
 
 # Libraries whose package holds a licence file that is not recognised as one,
 # or several to choose from. Each entry names the file and the licence it
-# states.
+# states. A library that asks for several licences together has one entry for
+# each whose text is not recognised.
 
 # The text is indented.
 [[clarify]]

@@ -21,40 +21,71 @@ const WINDOW_ENVIRONMENT = 'client';
 // What the name of a package starts with when it belongs to a scope and so
 // takes two directories.
 const SCOPE_MARK = '@';
-// What the name of a module starts with when a plugin made it up: such a
-// module is no file, even where a path follows.
+// What the name of a module starts with when a tool of the build made it up.
+// Such a module is no file, even where its name looks like a path.
 const MADE_UP_MARK = '\0';
 
 /**
- * The directory of the package a module belongs to, relative to the root and
- * with forward slashes, or nothing for a module that is no file of a package.
- *
- * | Module                                              | Directory                       |
- * | --------------------------------------------------- | ------------------------------- |
- * | `/r/node_modules/svelte/src/index.js`               | `node_modules/svelte`           |
- * | `/r/node_modules/@scope/name/index.js`              | `node_modules/@scope/name`      |
- * | `/r/node_modules/a/node_modules/b/index.js`         | `node_modules/a/node_modules/b` |
- * | `/r/node_modules/svelte/src/index.js?v=1`           | `node_modules/svelte`           |
- * | `/r/src/lib/app.ts`                                 | nothing                         |
- * | `\0virtual:module`                                  | nothing: made up by a plugin    |
- * | `\0/r/node_modules/svelte/src/index.js`             | nothing: made up by a plugin    |
- * | `/elsewhere/node_modules/svelte/index.js`           | nothing: outside the root       |
- * | `/r/node_modules/@scope`                            | nothing: no package named       |
- * | `/r/node_modules`                                   | nothing: no package named       |
- * | empty                                               | nothing                         |
+ * The modules the tools of the build make up and put into the bundle, by what
+ * their name starts with after the mark, each with the package whose code it
+ * is. A made-up module that is not named here stops the build: its code would
+ * be in the bundle without its package being in the list.
  */
-export function packageDirectory(module: string, root: string): string | undefined {
-  if (module === '' || module.startsWith(MADE_UP_MARK)) {
-    return undefined;
+const MADE_UP_MODULES: Readonly<Record<string, string>> = {
+  // The helpers the bundler adds to the code it joins.
+  'rolldown/': 'rolldown',
+  // The helper that loads the parts of the bundle a page needs.
+  'vite/': 'vite',
+};
+
+/** A module of the bundle as the list sees it. */
+export type ModuleOrigin =
+  | { kind: 'package'; directory: string }
+  /** Code of this repository, or of nothing that has a package. */
+  | { kind: 'own' }
+  /** Made up by a tool that is not known here. */
+  | { kind: 'unknown' };
+
+/**
+ * Where a module of the bundle comes from. The directory of a package is
+ * relative to the root and written with forward slashes.
+ *
+ * | Module                                        | Origin                                   |
+ * | --------------------------------------------- | ---------------------------------------- |
+ * | `/r/node_modules/svelte/src/index.js`         | package `node_modules/svelte`            |
+ * | `/r/node_modules/@scope/name/index.js`        | package `node_modules/@scope/name`       |
+ * | `/r/node_modules/a/node_modules/b/index.js`   | package `node_modules/a/node_modules/b`  |
+ * | `/r/node_modules/svelte/src/index.js?v=1`     | package `node_modules/svelte`            |
+ * | `/r/src/lib/app.ts`                           | own                                      |
+ * | `/elsewhere/node_modules/svelte/index.js`     | own: outside the root, no package of it  |
+ * | `/r/node_modules/@scope`                      | own: no package named                    |
+ * | `/r/node_modules`                             | own: no package named                    |
+ * | empty                                         | own                                      |
+ * | made up, its start named in the table         | the package named there                  |
+ * | made up, not named in the table               | unknown                                  |
+ * | made up, with the path of a package after it  | unknown: the path is not asked           |
+ */
+export function moduleOrigin(
+  module: string,
+  root: string,
+  madeUp: Readonly<Record<string, string>> = MADE_UP_MODULES,
+): ModuleOrigin {
+  if (module.startsWith(MADE_UP_MARK)) {
+    const name = module.slice(MADE_UP_MARK.length);
+    const start = Object.keys(madeUp).find((known) => name.startsWith(known));
+    const packageName = start === undefined ? undefined : madeUp[start];
+    return packageName === undefined
+      ? { kind: 'unknown' }
+      : { kind: 'package', directory: `${PACKAGES_DIRECTORY}/${packageName}` };
   }
   const relative = path.relative(root, module);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    return undefined;
+  if (module === '' || relative.startsWith('..') || path.isAbsolute(relative)) {
+    return { kind: 'own' };
   }
   const parts = relative.split(path.sep);
   const start = parts.lastIndexOf(PACKAGES_DIRECTORY);
   if (start === -1) {
-    return undefined;
+    return { kind: 'own' };
   }
   const first = parts[start + 1];
   const length = first?.startsWith(SCOPE_MARK) === true ? 2 : 1;
@@ -62,9 +93,9 @@ export function packageDirectory(module: string, root: string): string | undefin
   // A file directly in the directory of the packages, or in that of a scope,
   // belongs to no package.
   if (named.length < length || parts.length <= start + 1 + length) {
-    return undefined;
+    return { kind: 'own' };
   }
-  return [...parts.slice(0, start + 1), ...named].join('/');
+  return { kind: 'package', directory: [...parts.slice(0, start + 1), ...named].join('/') };
 }
 
 /**
@@ -87,18 +118,28 @@ export function bundledPackages(list: string): Plugin {
         return;
       }
       const directories = new Set<string>();
+      const unknown = new Set<string>();
       for (const chunk of Object.values(bundle)) {
         if (chunk.type !== 'chunk') {
           continue;
         }
         for (const [module, rendered] of Object.entries(chunk.modules)) {
           // A module of which nothing is left in the bundle is not contained.
-          const directory =
-            rendered.renderedLength > 0 ? packageDirectory(module, root) : undefined;
-          if (directory !== undefined) {
-            directories.add(directory);
+          if (rendered.renderedLength === 0) {
+            continue;
+          }
+          const origin = moduleOrigin(module, root);
+          if (origin.kind === 'package') {
+            directories.add(origin.directory);
+          } else if (origin.kind === 'unknown') {
+            unknown.add(JSON.stringify(module));
           }
         }
+      }
+      if (unknown.size > 0) {
+        this.error(
+          `The bundle holds code of modules a tool made up, and no package is named for them: ${[...unknown].sort().join(', ')}. Name the package in tools/bundled-packages.ts.`,
+        );
       }
       const file = path.join(root, list);
       mkdirSync(path.dirname(file), { recursive: true });

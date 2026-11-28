@@ -31,7 +31,10 @@ const TARGET_VARIABLE: &str = "TARGET";
 const OUTPUT_DIRECTORY_VARIABLE: &str = "OUT_DIR";
 /// The file the list is handed over as, in the output directory.
 const EMBEDDED_FILE: &str = "library-notices.json";
-/// The variable the code reads the place of that file from.
+/// The variable the code reads the place of that file from. The code names
+/// it a second time (`src/notices.rs`), and that cannot be avoided: the macro
+/// that reads a variable while compiling takes its name written out, and a
+/// build script and the code it builds share no constant.
 const EMBEDDED_VARIABLE: &str = "LIBRARY_NOTICES_FILE";
 
 /// What a build embeds as the list of its libraries.

@@ -13,8 +13,7 @@ name: string,
  */
 version: string, 
 /**
- * The licence its author states, as an SPDX expression. Where that is a
- * choice, the texts say which was taken.
+ * The licence its author states, as an SPDX expression where it is one.
  */
 license: string, 
 /**

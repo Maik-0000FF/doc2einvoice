@@ -7,7 +7,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
   // files its validation uses, which material of other authors and which
   // libraries it contains and what the author does not answer for.
   import { formatLegalNotice } from '#lib/app-info/legal-notice.ts';
-  import { licenseTextSummary, licenseTextUses } from '#lib/app-info/library-notices.ts';
+  import { textSummary, textUses } from '#lib/app-info/library-notices.ts';
   import { i18n } from '#lib/i18n/i18n.svelte.ts';
   import type { MessageKey } from '#lib/i18n/translate.ts';
   import type { AppInfo } from '#lib/ipc/bindings/AppInfo.ts';
@@ -146,8 +146,8 @@ SPDX-License-Identifier: GPL-3.0-or-later
           {/if}
           <SubHeading text={i18n.t('about.libraries.texts')} />
           <!-- A text has nothing to tell it from the others but its place. -->
-          {#each licenseTextUses(notices) as use, index (index)}
-            <FoldedText summary={licenseTextSummary(use)} text={use.text} />
+          {#each textUses(notices) as use, index (index)}
+            <FoldedText summary={textSummary(use)} text={use.text} />
           {/each}
         {/if}
       {:catch error}

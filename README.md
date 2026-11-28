@@ -225,13 +225,14 @@ Further checks need a network connection and are run on demand:
 npm run vendor:check             # the copies under vendor/ against the published crates
 npm run sources:check            # rule files, schemas and test documents against their publishers
 npm run conformance:regenerate   # the reference results, with Saxon (Java)
-npm run notices:check            # every library of every target with its licence text
+npm run notices:check            # every library of every target with its licences and notices
 ```
 
-A package names every library it contains, with its licence text, in the about
-dialog. `cargo xtask notices` generates that list when a package is built; it
-needs [cargo-about](https://github.com/EmbarkStudios/cargo-about), and
-`notices.toml` holds its settings. A build that is no package carries no list.
+A package names every library it contains in the about dialog, with the
+licences and notices its author ships. `cargo xtask notices` generates that
+list when a package is built; it needs
+[cargo-about](https://github.com/EmbarkStudios/cargo-about), and `notices.toml`
+holds its settings. A build for development carries no list.
 
 ## Support
 

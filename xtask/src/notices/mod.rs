@@ -2,19 +2,26 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! Generates the list of the libraries a package of the application contains,
-//! with the licence texts they ask to be passed on.
+//! with the texts they ask to be passed on.
 //!
 //! The Rust libraries are read by `cargo about`, the libraries of the
-//! interface from the list its build writes. Every library has to bring its
-//! licence text in its own package. One that does not stops the generator,
-//! unless the settings name the file that holds the text or let the standard
-//! text of the licence stand for it. Nothing is left out silently, and no
-//! setting stays that is not needed any more.
+//! interface from the list its build writes. Two things are asked of every
+//! library, and nothing is left out silently:
+//!
+//! - Every file in the root of its package whose name says licence, notice
+//!   or copyright is passed on as it is, unless the settings name it as none
+//!   of these.
+//! - Its package has to hold the texts of the licences it states. Where it
+//!   does not, the generator stops, unless the settings name the file that
+//!   holds a text or let the standard text of the licence stand for it.
+//!
+//! A setting that is not needed any more stops the generator as well.
 
 mod cargo;
 mod crates;
 mod files;
 mod format;
+mod license;
 // The build script of the application includes this module by its path.
 #[allow(
     dead_code,
@@ -32,11 +39,14 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 use self::cargo::Workspace;
-use self::files::{Document, document};
-use self::format::{Library, LibraryNotices, LicenseText};
-use self::location::Location;
+use self::files::names_document;
+use self::format::{Library, LibraryNotices};
+use self::license::Stated;
+use self::location::{Location, is_one_name};
 use self::rule::{Settled, Unsettled, settle};
-use self::settings::{Clarification, Invalid, POLICY_FILE, SETTINGS_FILE, Selector, Settings};
+use self::settings::{
+    Clarification, Invalid, POLICY_FILE, SETTINGS_FILE, Setting, Settings, Settling,
+};
 
 /// What joins the licences of a library that all apply to it.
 const ALL_APPLY: &str = " AND ";
@@ -51,7 +61,17 @@ pub enum Selection {
     All,
 }
 
-/// A library a package contains, with what was found about its licence text.
+/// The standard text of a licence, which stands in for a text the package of
+/// a library does not hold.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StandardText {
+    /// SPDX identifier of the licence.
+    pub license: String,
+    /// The text.
+    pub text: String,
+}
+
+/// A library a package contains, with what was found in its package.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Candidate {
     /// The name its author publishes it under.
@@ -64,12 +84,14 @@ pub struct Candidate {
     pub directory: PathBuf,
     /// The names of the regular files that directory holds itself.
     pub files: Vec<String>,
-    /// The licence texts its package holds.
-    pub own: Vec<LicenseText>,
-    /// The texts that stand in for texts its package does not hold.
-    pub substituted: Vec<LicenseText>,
-    /// Whether a text that applies to it is not held by its package.
-    pub lacks_own_text: bool,
+    /// The licences whose texts its package holds.
+    pub licenses_held: Vec<String>,
+    /// Those texts, as far as a tool found them; they may lie below the root
+    /// of the package.
+    pub texts_held: Vec<String>,
+    /// The standard texts of the licences whose texts its package does not
+    /// hold.
+    pub standard_texts: Vec<StandardText>,
     /// Whether it is a copy kept in this repository, not the published one.
     pub changed_copy: bool,
     /// What was found wrong while it was read.
@@ -79,9 +101,14 @@ pub struct Candidate {
 /// Why a library keeps the list from being generated.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum Reason {
-    /// Its licence text is not settled.
+    /// Its licence texts are not settled.
     #[error(transparent)]
     Unsettled(#[from] Unsettled),
+    /// What the settings say does not give all the texts it states.
+    #[error(
+        "what {SETTINGS_FILE} says for it does not give the texts of the licences it states ({0})"
+    )]
+    StillLacking(String),
     /// The file the settings name does not give its text.
     #[error("the file `{file}` that {SETTINGS_FILE} names cannot be read: {message}")]
     ClarifiedFile {
@@ -90,9 +117,9 @@ pub enum Reason {
         /// Why it cannot be read.
         message: String,
     },
-    /// The settings name a licence the library does not offer.
+    /// The settings name a licence the library does not state.
     #[error(
-        "{SETTINGS_FILE} states the licence {license} for it, which is not one it offers ({stated})"
+        "{SETTINGS_FILE} states the licence {license} for it, which is not one it states ({stated})"
     )]
     ClarifiedLicense {
         /// The licence the settings state.
@@ -103,14 +130,26 @@ pub enum Reason {
     /// The standard text is allowed, and there is none.
     #[error("{SETTINGS_FILE} lets the standard text stand for it, and none is at hand")]
     NoStandardText,
-    /// Its package holds a notice the list has no place for yet.
-    #[error("its package holds the notice file `{0}`, which the list does not carry yet")]
-    NoticeFile(String),
+    /// A file that is passed on with it cannot be read as a text.
+    #[error(
+        "the file `{file}` of its package says licence, notice or copyright and cannot be read as a text ({message}); if it is none of these, name it under `no-notice` in {SETTINGS_FILE}"
+    )]
+    Document {
+        /// The file.
+        file: String,
+        /// Why it cannot be read.
+        message: String,
+    },
+    /// The settings name a file as no notice that its package does not hold.
+    #[error(
+        "{SETTINGS_FILE} names `{0}` as no notice, and its package holds no such file that would be passed on"
+    )]
+    NoNoticeNotNeeded(String),
     /// Its package cannot be read.
     #[error("its package cannot be read: {0}")]
     PackageUnreadable(String),
-    /// Its licence is not one a library may have.
-    #[error("its licence {0} is not one {POLICY_FILE} allows")]
+    /// Its licence cannot be fulfilled by the licences a library may have.
+    #[error("the licence it states ({0}) is not one {POLICY_FILE} allows")]
     LicenseNotAllowed(String),
     /// It is a changed copy and the change is not stated.
     #[error("it is a changed copy, and {SETTINGS_FILE} does not state what was changed")]
@@ -167,6 +206,9 @@ pub enum Error {
     /// Where the lists lie is not stated.
     #[error("{0}")]
     Location(String),
+    /// What is asked for as a target is not the name of one.
+    #[error("`{0}` is not the name of a target")]
+    Target(String),
     /// The list of the packages of the interface is missing.
     #[error(
         "{} is missing; build the interface first (`npm run build`)",
@@ -180,7 +222,7 @@ pub enum Error {
     #[error("{0}")]
     Refused(Refusals),
     /// Settings apply to no library of any target.
-    #[error("{SETTINGS_FILE} names libraries no package contains: {}", .0.join(", "))]
+    #[error("{SETTINGS_FILE} holds settings no package needs: {}", .0.join(", "))]
     Unused(Vec<String>),
 }
 
@@ -204,38 +246,23 @@ fn write_text(path: &Path, text: &str) -> Result<(), Error> {
     std::fs::write(path, text).map_err(io)
 }
 
-/// The licences a stated licence consists of, each once, in the order they
-/// are stated, or nothing where it is not an SPDX expression.
+/// The text of a file that is passed on, which has to say something.
 ///
-/// | Stated                              | Licences                          |
-/// |-------------------------------------|-----------------------------------|
-/// | `MIT`                               | `MIT`                             |
-/// | `MIT OR Apache-2.0`                 | `MIT`, `Apache-2.0`               |
-/// | `Apache-2.0 AND MIT`                | `Apache-2.0`, `MIT`               |
-/// | `(MIT OR Apache-2.0) AND MIT`       | `MIT`, `Apache-2.0`               |
-/// | `MIT/Apache-2.0`, as older crates do | `MIT`, `Apache-2.0`              |
-/// | `Apache-2.0 WITH LLVM-exception`    | `Apache-2.0 WITH LLVM-exception`  |
-/// | `GPL-3.0-or-later`                  | `GPL-3.0-or-later`                |
-/// | `SEE LICENSE IN LICENSE`            | nothing                           |
-/// | `MIT OR`                            | nothing                           |
-/// | empty                               | nothing                           |
-fn licenses_offered(stated: &str) -> Option<Vec<String>> {
-    let expression = spdx::Expression::parse_mode(stated, spdx::ParseMode::LAX).ok()?;
-    let mut licenses = Vec::new();
-    for requirement in expression.requirements() {
-        let license = requirement.req.to_string();
-        if !licenses.contains(&license) {
-            licenses.push(license);
-        }
+/// | The file                               | Outcome          |
+/// |----------------------------------------|------------------|
+/// | a regular file that holds a text       | the text         |
+/// | a directory, or not there              | refused          |
+/// | not a text, as an image is             | refused          |
+/// | empty, or nothing but blank lines      | refused          |
+fn passed_on_text(path: &Path) -> Result<String, String> {
+    if !std::fs::metadata(path).is_ok_and(|metadata| metadata.is_file()) {
+        return Err("it is not a file of the package".to_owned());
     }
-    Some(licenses)
-}
-
-/// The notice file among the regular files of a package, if it holds one.
-fn notice_file(files: &[String]) -> Option<&String> {
-    files
-        .iter()
-        .find(|name| document(name) == Some(Document::Notice))
+    let text = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    if text.trim().is_empty() {
+        return Err("it is empty".to_owned());
+    }
+    Ok(text)
 }
 
 /// What the list states as changed in a library.
@@ -255,69 +282,56 @@ fn stated_changes(changed_copy: bool, stated: Option<&str>) -> Result<Option<&st
     }
 }
 
-/// The text the settings name for a library, read from its package.
+/// The text the settings name for a licence of a library, read from its
+/// package.
 ///
-/// | The named file                        | The named licence             | Outcome             |
-/// |---------------------------------------|-------------------------------|---------------------|
-/// | a regular file with a text            | one the library offers        | the text            |
-/// | a regular file with a text            | the library states no SPDX expression | the text    |
-/// | a regular file with a text            | not one the library offers    | refused: licence    |
-/// | a directory, or not there             | any                           | refused: file       |
-/// | empty, or not a text                  | any                           | refused: file       |
+/// | The named licence                         | The named file                | Outcome          |
+/// |-------------------------------------------|-------------------------------|------------------|
+/// | one the library states                    | a file that holds a text      | the text         |
+/// | any, and the library states no expression | a file that holds a text      | the text         |
+/// | not one the library states                | any                           | refused: licence |
+/// | one the library states                    | not a file, no text, or empty | refused: file    |
 fn clarified_text(
     candidate: &Candidate,
-    offered: Option<&[String]>,
+    stated: &Stated,
     clarification: &Clarification,
-) -> Result<LicenseText, Reason> {
-    if offered.is_some_and(|offered| !offered.contains(&clarification.license)) {
+) -> Result<String, Reason> {
+    if stated.is_expression() && !stated.licenses().contains(&clarification.license) {
         return Err(Reason::ClarifiedLicense {
             license: clarification.license.clone(),
             stated: candidate.license.clone(),
         });
     }
-    let refused = |message: String| Reason::ClarifiedFile {
-        file: clarification.file.clone(),
-        message,
-    };
-    let path = candidate.directory.join(&clarification.file);
-    if !std::fs::metadata(&path).is_ok_and(|metadata| metadata.is_file()) {
-        return Err(refused("it is not a file of the package".to_owned()));
-    }
-    let text = std::fs::read_to_string(&path).map_err(|error| refused(error.to_string()))?;
-    if text.trim().is_empty() {
-        return Err(refused("it is empty".to_owned()));
-    }
-    Ok(LicenseText {
-        license: clarification.license.clone(),
-        text,
+    passed_on_text(&candidate.directory.join(&clarification.file)).map_err(|message| {
+        Reason::ClarifiedFile {
+            file: clarification.file.clone(),
+            message,
+        }
     })
 }
 
-/// The licence the list shows for a library: the one it states, or, where
-/// that is no SPDX expression, the licences of its texts.
-fn shown_license(stated: &str, offered: Option<&[String]>, texts: &[LicenseText]) -> String {
-    if offered.is_some() {
-        return stated.to_owned();
-    }
-    let mut licenses: Vec<&str> = Vec::new();
-    for text in texts {
-        if !licenses.contains(&text.license.as_str()) {
-            licenses.push(&text.license);
+/// The texts of one library, each once, in the order they were added.
+#[derive(Debug, Default)]
+struct OwnTexts(Vec<String>);
+
+impl OwnTexts {
+    fn add(&mut self, text: String) {
+        if !self.0.contains(&text) {
+            self.0.push(text);
         }
     }
-    licenses.join(ALL_APPLY)
 }
 
-/// The licence texts of the list, each held once.
+/// The texts of the list, each held once.
 #[derive(Debug, Default)]
 struct Texts {
-    texts: Vec<LicenseText>,
-    places: HashMap<LicenseText, usize>,
+    texts: Vec<String>,
+    places: HashMap<String, usize>,
 }
 
 impl Texts {
     /// The place of a text, which is added if it is not held yet.
-    fn place(&mut self, text: LicenseText) -> usize {
+    fn place(&mut self, text: String) -> usize {
         if let Some(place) = self.places.get(&text) {
             return *place;
         }
@@ -331,50 +345,143 @@ impl Texts {
 /// A library as the list names it, before its texts have their places.
 struct SettledLibrary {
     license: String,
-    texts: Vec<LicenseText>,
+    texts: Vec<String>,
     changes: Option<String>,
 }
 
+/// The files in the root of the package of a library that are passed on with
+/// it, read into `texts`. A file the settings name as no notice is left out;
+/// a setting that names a file the package would not pass on is refused.
+fn pass_on_documents(
+    candidate: &Candidate,
+    settings: &Settings,
+    used: &mut BTreeSet<Setting>,
+    texts: &mut OwnTexts,
+    reasons: &mut Vec<Reason>,
+) {
+    let no_notices = settings.no_notices(&candidate.name, &candidate.version);
+    let documents: Vec<&String> = candidate
+        .files
+        .iter()
+        .filter(|file| names_document(file))
+        .collect();
+    for (setting, file) in &no_notices {
+        if documents.iter().any(|document| document.as_str() == *file) {
+            used.insert(setting.clone());
+        } else {
+            reasons.push(Reason::NoNoticeNotNeeded((*file).to_owned()));
+        }
+    }
+    for file in documents {
+        if no_notices.iter().any(|(_, named)| *named == file.as_str()) {
+            continue;
+        }
+        match passed_on_text(&candidate.directory.join(file)) {
+            Ok(text) => texts.add(text),
+            Err(message) => reasons.push(Reason::Document {
+                file: file.clone(),
+                message,
+            }),
+        }
+    }
+}
+
+/// Settles the licence texts of a library: adds to `texts` what the settings
+/// give, and says which licences have their text at hand then.
+fn settle_license_texts(
+    candidate: &Candidate,
+    stated: &Stated,
+    settings: &Settings,
+    used: &mut BTreeSet<Setting>,
+    texts: &mut OwnTexts,
+    reasons: &mut Vec<Reason>,
+) -> Vec<String> {
+    let accepted = settings.accepted();
+    let mut at_hand = candidate.licenses_held.clone();
+    let settling = settings.settling(&candidate.name, &candidate.version);
+    if let Some((setting, _)) = &settling {
+        used.insert(setting.clone());
+    }
+    let before = reasons.len();
+    match settle(
+        stated.fulfilled_by(&at_hand, accepted),
+        settling.map(|(_, settling)| settling),
+    ) {
+        Ok(Settled::OwnTexts) => return at_hand,
+        Ok(Settled::Settings(Settling::Clarified(clarifications))) => {
+            for clarification in clarifications {
+                match clarified_text(candidate, stated, clarification) {
+                    Ok(text) => {
+                        texts.add(text);
+                        at_hand.push(clarification.license.clone());
+                    }
+                    Err(reason) => reasons.push(reason),
+                }
+            }
+        }
+        Ok(Settled::Settings(Settling::StandardText)) => {
+            if candidate.standard_texts.is_empty() {
+                reasons.push(Reason::NoStandardText);
+            }
+            for standard in &candidate.standard_texts {
+                texts.add(standard.text.clone());
+                at_hand.push(standard.license.clone());
+            }
+        }
+        Err(unsettled) => reasons.push(unsettled.into()),
+    }
+    // What the settings give has to be enough: a library that asks for two
+    // licences is not settled by the text of one.
+    if reasons.len() == before && !stated.fulfilled_by(&at_hand, accepted) {
+        reasons.push(Reason::StillLacking(candidate.license.clone()));
+    }
+    at_hand
+}
+
+/// The licence the list shows for a library: the one it states, or, where
+/// that is no SPDX expression, the licences whose texts are at hand.
+fn shown_license(candidate: &Candidate, stated: &Stated, at_hand: &[String]) -> String {
+    if stated.is_expression() {
+        return candidate.license.clone();
+    }
+    let mut licenses: Vec<&str> = Vec::new();
+    for license in at_hand {
+        if !licenses.contains(&license.as_str()) {
+            licenses.push(license);
+        }
+    }
+    licenses.join(ALL_APPLY)
+}
+
 /// One library as the list names it, or every reason it is not settled.
-/// Names in `used` every setting that applies to it.
+/// Names in `used` every setting that was needed for it.
 fn settled(
     candidate: &Candidate,
     settings: &Settings,
-    used: &mut BTreeSet<Selector>,
+    used: &mut BTreeSet<Setting>,
 ) -> Result<SettledLibrary, Vec<Reason>> {
     let mut reasons = candidate.problems.clone();
-    let mut texts = candidate.own.clone();
-    if let Some(file) = notice_file(&candidate.files) {
-        reasons.push(Reason::NoticeFile(file.clone()));
+    let mut texts = OwnTexts::default();
+    let stated = Stated::read(&candidate.license);
+    if !stated.can_be_allowed(settings.accepted()) {
+        reasons.push(Reason::LicenseNotAllowed(candidate.license.clone()));
     }
 
-    let offered = licenses_offered(&candidate.license);
-    let clarification = settings.clarification(&candidate.name, &candidate.version);
-    let standard_text = settings.standard_text(&candidate.name, &candidate.version);
-    used.extend(clarification.map(|(selector, _)| selector.clone()));
-    used.extend(standard_text.cloned());
-    match settle(
-        candidate.lacks_own_text,
-        clarification.map(|(_, clarification)| clarification),
-        standard_text.is_some(),
+    pass_on_documents(candidate, settings, used, &mut texts, &mut reasons);
+    for text in &candidate.texts_held {
+        texts.add(text.clone());
+    }
+    let at_hand =
+        settle_license_texts(candidate, &stated, settings, used, &mut texts, &mut reasons);
+
+    let stated_change = settings.changes(&candidate.name, &candidate.version);
+    if let Some((setting, _)) = &stated_change {
+        used.insert(setting.clone());
+    }
+    let changes = match stated_changes(
+        candidate.changed_copy,
+        stated_change.map(|(_, changes)| changes),
     ) {
-        Ok(Settled::OwnText) => {}
-        Ok(Settled::Clarified(clarification)) => {
-            match clarified_text(candidate, offered.as_deref(), clarification) {
-                Ok(text) => texts.push(text),
-                Err(reason) => reasons.push(reason),
-            }
-        }
-        Ok(Settled::StandardText) if candidate.substituted.is_empty() => {
-            reasons.push(Reason::NoStandardText);
-        }
-        Ok(Settled::StandardText) => texts.extend(candidate.substituted.iter().cloned()),
-        Err(unsettled) => reasons.push(unsettled.into()),
-    }
-
-    let stated = settings.changes(&candidate.name, &candidate.version);
-    used.extend(stated.map(|(selector, _)| selector.clone()));
-    let changes = match stated_changes(candidate.changed_copy, stated.map(|(_, changes)| changes)) {
         Ok(changes) => changes.map(str::to_owned),
         Err(reason) => {
             reasons.push(reason);
@@ -384,8 +491,8 @@ fn settled(
 
     if reasons.is_empty() {
         Ok(SettledLibrary {
-            license: shown_license(&candidate.license, offered.as_deref(), &texts),
-            texts,
+            license: shown_license(candidate, &stated, &at_hand),
+            texts: texts.0,
             changes,
         })
     } else {
@@ -398,7 +505,7 @@ fn settled(
 fn assemble(
     mut candidates: Vec<Candidate>,
     settings: &Settings,
-    used: &mut BTreeSet<Selector>,
+    used: &mut BTreeSet<Setting>,
 ) -> Result<LibraryNotices, Refusals> {
     candidates.sort_by_cached_key(|candidate| {
         (
@@ -442,6 +549,13 @@ fn assemble(
 
 /// Generates the list for the selected targets and writes one file per
 /// target.
+///
+/// | What is asked for                          | Lists generated for            |
+/// |--------------------------------------------|--------------------------------|
+/// | every target                               | each target of the settings    |
+/// | one target                                 | that target                    |
+/// | a target the settings combine from others  | each of those                  |
+/// | a target that is not one name, as `../x`   | none: refused                  |
 pub fn run(selection: &Selection) -> Result<(), Error> {
     let workspace = Workspace::read()?;
     let location = Location::find(&workspace.root).map_err(Error::Location)?;
@@ -449,17 +563,17 @@ pub fn run(selection: &Selection) -> Result<(), Error> {
         &read_text(&workspace.root.join(POLICY_FILE))?,
         &read_text(&workspace.root.join(SETTINGS_FILE))?,
     )?;
-    let interface = packages::read(
-        &workspace.root,
-        location.bundled_packages(),
-        settings.accepted(),
-    )?;
-    workspace.fetch_sources()?;
-
     let targets = match selection {
         Selection::One(target) => settings.built_for(target),
         Selection::All => settings.targets(),
     };
+    // A target names the files written for it.
+    if let Some(target) = targets.iter().find(|target| !is_one_name(target)) {
+        return Err(Error::Target(target.clone()));
+    }
+    let interface = packages::read(&workspace.root, location.bundled_packages())?;
+    workspace.fetch_sources()?;
+
     let mut used = BTreeSet::new();
     for target in targets {
         let mut candidates = crates::read(&workspace, &settings, target)?;
@@ -472,7 +586,7 @@ pub fn run(selection: &Selection) -> Result<(), Error> {
         })?;
         write_text(&file, &written)?;
         println!(
-            "{target}: {} libraries, {} licence texts",
+            "{target}: {} libraries, {} texts",
             notices.libraries.len(),
             notices.texts.len()
         );
@@ -480,10 +594,10 @@ pub fn run(selection: &Selection) -> Result<(), Error> {
 
     if *selection == Selection::All {
         let unused: Vec<String> = settings
-            .selectors()
-            .into_iter()
-            .filter(|selector| !used.contains(*selector))
-            .map(Selector::to_string)
+            .settings()
+            .iter()
+            .filter(|setting| !used.contains(*setting))
+            .map(Setting::to_string)
             .collect();
         if !unused.is_empty() {
             return Err(Error::Unused(unused));
@@ -495,50 +609,70 @@ pub fn run(selection: &Selection) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
-    use super::format::LicenseText;
-    use super::settings::{Clarification, Invalid, Selector, Settings};
+    use super::license::Stated;
+    use super::settings::{Clarification, Invalid, Setting, Settings};
     use super::{
-        Candidate, Reason, Texts, assemble, clarified_text, licenses_offered, notice_file,
-        shown_license, stated_changes,
+        Candidate, Reason, StandardText, Texts, assemble, clarified_text, passed_on_text,
+        stated_changes,
     };
     use crate::notices::rule::Unsettled;
 
-    const POLICY: &str = "[licenses]\nallow = [\"Apache-2.0\", \"MIT\"]\n";
+    const POLICY: &str = "[licenses]\nallow = [\"Apache-2.0\", \"MIT\", \"Zlib\"]\n";
     const SETTINGS: &str = "\
 preference = [\"MIT\"]
 targets = [\"one\"]
 standard-text = [\"bare\", { name = \"split\", version = \"2.0.0\" }]
 
 [[clarify]]
-libraries = [\"named\"]
+libraries = [\"named\", \"two\", { name = \"bare\", version = \"3.0.0\" }]
 license = \"MIT\"
 file = \"Cargo.toml\"
+
+[[clarify]]
+libraries = [\"two\"]
+license = \"Zlib\"
+file = \"src/main.rs\"
+
+[[no-notice]]
+libraries = [\"plain\"]
+file = \"copyright.rs\"
 
 [[changed]]
 library = \"copy\"
 changes = \"One line.\"
 ";
 
-    fn text(license: &str, text: &str) -> LicenseText {
-        LicenseText {
-            license: license.to_owned(),
-            text: text.to_owned(),
-        }
+    /// The directory of this crate, which stands for the package of every
+    /// library of these tests. Its manifest and its code are the texts the
+    /// settings name.
+    const PACKAGE: &str = env!("CARGO_MANIFEST_DIR");
+
+    fn file(name: &str) -> String {
+        std::fs::read_to_string(Path::new(PACKAGE).join(name)).unwrap_or_default()
     }
 
-    /// A library whose package is the directory of this crate.
-    fn candidate(name: &str, own: Vec<LicenseText>, substituted: Vec<LicenseText>) -> Candidate {
+    /// A library that states MIT, in whose package no file is passed on.
+    fn candidate(name: &str, held: &[&str], standard: &[&str]) -> Candidate {
         Candidate {
             name: name.to_owned(),
             version: "1.0.0".to_owned(),
             license: "MIT".to_owned(),
-            directory: PathBuf::from(env!("CARGO_MANIFEST_DIR")),
-            files: vec!["Cargo.toml".to_owned(), "build.rs".to_owned()],
-            lacks_own_text: own.is_empty() || !substituted.is_empty(),
-            own,
-            substituted,
+            directory: PathBuf::from(PACKAGE),
+            files: vec!["Cargo.toml".to_owned()],
+            licenses_held: held.iter().map(|&license| license.to_owned()).collect(),
+            texts_held: held
+                .iter()
+                .map(|license| format!("the text of {license}"))
+                .collect(),
+            standard_texts: standard
+                .iter()
+                .map(|&license| StandardText {
+                    license: license.to_owned(),
+                    text: format!("the standard text of {license}"),
+                })
+                .collect(),
             changed_copy: false,
             problems: Vec::new(),
         }
@@ -553,49 +687,20 @@ changes = \"One line.\"
             .map_err(|refusals| refusals.0)
     }
 
-    #[test]
-    fn the_licences_offered_follow_their_table() {
-        let table: [(&str, Option<&[&str]>); 10] = [
-            ("MIT", Some(&["MIT"])),
-            ("MIT OR Apache-2.0", Some(&["MIT", "Apache-2.0"])),
-            ("Apache-2.0 AND MIT", Some(&["Apache-2.0", "MIT"])),
-            ("(MIT OR Apache-2.0) AND MIT", Some(&["MIT", "Apache-2.0"])),
-            ("MIT/Apache-2.0", Some(&["MIT", "Apache-2.0"])),
-            (
-                "Apache-2.0 WITH LLVM-exception",
-                Some(&["Apache-2.0 WITH LLVM-exception"]),
-            ),
-            ("GPL-3.0-or-later", Some(&["GPL-3.0-or-later"])),
-            ("SEE LICENSE IN LICENSE", None),
-            ("MIT OR", None),
-            ("", None),
-        ];
-        for (stated, expected) in table {
-            let offered = licenses_offered(stated);
-
-            assert_eq!(
-                offered
-                    .as_ref()
-                    .map(|licenses| licenses.iter().map(String::as_str).collect::<Vec<_>>())
-                    .as_deref(),
-                expected,
-                "{stated}"
-            );
-        }
+    fn refused(name: &str, reason: Reason) -> Result<(), Vec<(String, Reason)>> {
+        Err(vec![(format!("{name} 1.0.0"), reason)])
     }
 
     #[test]
-    fn a_notice_file_is_found_among_the_files() {
-        let files =
-            |names: &[&str]| -> Vec<String> { names.iter().map(|&name| name.to_owned()).collect() };
+    fn a_passed_on_text_follows_its_table() {
+        let package = Path::new(PACKAGE);
 
-        assert_eq!(notice_file(&files(&["LICENSE", "README.md"])), None);
-        assert_eq!(
-            notice_file(&files(&["LICENSE", "NOTICE"])).map(String::as_str),
-            Some("NOTICE")
+        assert!(
+            passed_on_text(&package.join("Cargo.toml")).is_ok_and(|text| text.contains("xtask"))
         );
-        assert_eq!(notice_file(&files(&["notice_board.rs"])), None);
-        assert_eq!(notice_file(&[]), None);
+        for path in ["src", "no-such-file", "src/no-such-file"] {
+            assert!(passed_on_text(&package.join(path)).is_err(), "{path}");
+        }
     }
 
     #[test]
@@ -613,87 +718,79 @@ changes = \"One line.\"
 
     #[test]
     fn the_clarified_text_follows_its_table() {
-        let library = candidate("named", Vec::new(), Vec::new());
-        let offered = ["MIT".to_owned(), "Apache-2.0".to_owned()];
+        let mut library = candidate("named", &[], &[]);
+        library.license = "MIT OR Apache-2.0".to_owned();
         let clarification = |license: &str, file: &str| Clarification {
             license: license.to_owned(),
             file: file.to_owned(),
         };
-        let read = |offered: Option<&[String]>, license, file| {
-            clarified_text(&library, offered, &clarification(license, file))
+        let read = |stated: &str, license, file| {
+            clarified_text(
+                &library,
+                &Stated::read(stated),
+                &clarification(license, file),
+            )
         };
 
-        assert!(
-            read(Some(&offered), "MIT", "Cargo.toml")
-                .is_ok_and(|text| text.license == "MIT" && text.text.contains("xtask"))
-        );
-        assert!(read(None, "MIT", "Cargo.toml").is_ok());
         assert_eq!(
-            read(Some(&offered), "Zlib", "Cargo.toml"),
+            read("MIT OR Apache-2.0", "MIT", "Cargo.toml"),
+            Ok(file("Cargo.toml"))
+        );
+        assert_eq!(
+            read("SEE LICENSE IN LICENSE", "Zlib", "Cargo.toml"),
+            Ok(file("Cargo.toml"))
+        );
+        assert_eq!(
+            read("MIT OR Apache-2.0", "Zlib", "Cargo.toml"),
             Err(Reason::ClarifiedLicense {
                 license: "Zlib".to_owned(),
-                stated: "MIT".to_owned(),
+                stated: "MIT OR Apache-2.0".to_owned(),
             })
         );
-        for file in ["src", "no-such-file", "src/no-such-file"] {
+        for missing in ["src", "no-such-file"] {
             assert!(
                 matches!(
-                    read(Some(&offered), "MIT", file),
+                    read("MIT OR Apache-2.0", "MIT", missing),
                     Err(Reason::ClarifiedFile { .. })
                 ),
-                "{file}"
+                "{missing}"
             );
         }
-    }
-
-    #[test]
-    fn the_shown_licence_is_the_stated_one_where_it_can_be_read() {
-        let texts = [
-            text("MIT", "one"),
-            text("Zlib", "two"),
-            text("MIT", "three"),
-        ];
-        let offered = ["MIT".to_owned()];
-
-        assert_eq!(
-            shown_license("MIT OR Zlib", Some(&offered), &texts),
-            "MIT OR Zlib"
-        );
-        assert_eq!(
-            shown_license("SEE LICENSE IN LICENSE", None, &texts),
-            "MIT AND Zlib"
-        );
     }
 
     #[test]
     fn a_text_is_held_once() {
         let mut texts = Texts::default();
 
-        let first = texts.place(text("MIT", "one"));
-        let second = texts.place(text("MIT", "two"));
-        let again = texts.place(text("MIT", "one"));
-        let other_licence = texts.place(text("Apache-2.0", "one"));
+        let first = texts.place("one".to_owned());
+        let second = texts.place("two".to_owned());
+        let again = texts.place("one".to_owned());
 
-        assert_eq!((first, second, again, other_licence), (0, 1, 0, 2));
-        assert_eq!(texts.texts.len(), 3);
+        assert_eq!((first, second, again), (0, 1, 0));
+        assert_eq!(texts.texts, ["one", "two"]);
     }
 
     #[test]
     fn the_list_names_libraries_in_order_and_shares_their_texts() -> Result<(), Invalid> {
         let settings = Settings::from_texts(POLICY, SETTINGS)?;
         let mut used = BTreeSet::new();
-        let mut copy = candidate("copy", vec![text("MIT", "shared")], Vec::new());
+        let mut copy = candidate("copy", &["MIT"], &[]);
         copy.changed_copy = true;
-        let mut split = candidate("split", Vec::new(), vec![text("MIT", "standard")]);
+        let mut split = candidate("split", &[], &["MIT"]);
         split.version = "2.0.0".to_owned();
+        // The setting for this version clarifies the library, the one for
+        // every version gives it the standard text: the closer one decides.
+        let mut bare = candidate("bare", &[], &["MIT"]);
+        bare.version = "3.0.0".to_owned();
         let candidates = vec![
-            candidate("Zeta", vec![text("MIT", "shared")], Vec::new()),
-            candidate("bare", Vec::new(), vec![text("MIT", "standard")]),
+            candidate("Zeta", &["MIT"], &[]),
+            candidate("bare", &[], &["MIT"]),
+            bare,
             copy,
             split,
-            candidate("split", vec![text("MIT", "own")], Vec::new()),
-            candidate("named", Vec::new(), vec![text("MIT", "standard")]),
-            candidate("alpha", vec![text("MIT", "own")], Vec::new()),
+            candidate("split", &["MIT"], &[]),
+            candidate("named", &[], &["MIT"]),
+            candidate("alpha", &["MIT"], &[]),
         ];
 
         let notices = assemble(candidates, &settings, &mut used);
@@ -718,28 +815,88 @@ changes = \"One line.\"
             [
                 ("alpha", "1.0.0", [0].as_slice(), None),
                 ("bare", "1.0.0", [1].as_slice(), None),
-                ("copy", "1.0.0", [2].as_slice(), Some("One line.")),
-                // The file the settings name, not the text that stood in.
-                ("named", "1.0.0", [3].as_slice(), None),
-                // The version that holds its text needs no setting, the
-                // other one has its own.
+                ("bare", "3.0.0", [2].as_slice(), None),
+                ("copy", "1.0.0", [0].as_slice(), Some("One line.")),
+                ("named", "1.0.0", [2].as_slice(), None),
                 ("split", "1.0.0", [0].as_slice(), None),
                 ("split", "2.0.0", [1].as_slice(), None),
-                ("Zeta", "1.0.0", [2].as_slice(), None),
+                ("Zeta", "1.0.0", [0].as_slice(), None),
             ]
         );
-        assert_eq!(notices.texts.len(), 4);
         assert_eq!(
-            notices.texts[..3],
+            notices.texts,
             [
-                text("MIT", "own"),
-                text("MIT", "standard"),
-                text("MIT", "shared")
+                "the text of MIT".to_owned(),
+                "the standard text of MIT".to_owned(),
+                file("Cargo.toml"),
             ]
         );
         assert_eq!(
-            used.iter().map(Selector::to_string).collect::<Vec<_>>(),
-            ["bare", "copy", "named", "split 2.0.0"]
+            used.iter().map(Setting::to_string).collect::<Vec<_>>(),
+            [
+                "the licence text of bare",
+                "the licence text of bare 3.0.0",
+                "the licence text of named",
+                "the licence text of split 2.0.0",
+                "the changes of copy",
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_file_whose_name_says_so_is_passed_on_unless_it_is_named_as_none() -> Result<(), Invalid> {
+        let settings = Settings::from_texts(POLICY, SETTINGS)?;
+        let mut used = BTreeSet::new();
+        let mut silent = candidate("silent", &["MIT"], &[]);
+        silent.files = vec!["Cargo.toml".to_owned(), "README.md".to_owned()];
+        let mut plain = candidate("plain", &["MIT"], &[]);
+        plain.files = vec!["Cargo.toml".to_owned(), "copyright.rs".to_owned()];
+
+        let notices = assemble(vec![silent, plain], &settings, &mut used);
+
+        let Ok(notices) = notices else {
+            unreachable!("refused: {notices:?}")
+        };
+        // Neither holds a file that is passed on: the names of the one say
+        // nothing of the kind, and `copyright.rs` is named as no notice.
+        assert_eq!(notices.texts, ["the text of MIT"]);
+        assert_eq!(
+            used.iter().map(Setting::to_string).collect::<Vec<_>>(),
+            ["`copyright.rs` of plain"]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_file_that_is_passed_on_is_read_from_the_package() -> Result<(), Invalid> {
+        let settings = Settings::from_texts(POLICY, SETTINGS)?;
+        let package = Path::new(PACKAGE).join("src").join("notices");
+        // `license.rs` is a file of this crate whose name says licence.
+        let mut library = candidate("library", &["MIT"], &[]);
+        library.directory.clone_from(&package);
+        library.files = vec!["license.rs".to_owned(), "mod.rs".to_owned()];
+        let mut unreadable = candidate("unreadable", &["MIT"], &[]);
+        unreadable.directory = package;
+        unreadable.files = vec!["no-such-copyright".to_owned()];
+
+        let notices = assemble(vec![library], &settings, &mut BTreeSet::new());
+
+        let Ok(notices) = notices else {
+            unreachable!("refused: {notices:?}")
+        };
+        assert_eq!(
+            notices.texts,
+            [file("src/notices/license.rs"), "the text of MIT".to_owned()]
+        );
+        let refused = refusals(vec![unreadable], &settings);
+        assert!(
+            matches!(
+                refused.as_ref().map_err(Vec::as_slice),
+                Err([(library, Reason::Document { file, .. })])
+                    if library == "unreadable 1.0.0" && file == "no-such-copyright"
+            ),
+            "{refused:?}"
         );
         Ok(())
     }
@@ -747,23 +904,24 @@ changes = \"One line.\"
     #[test]
     fn every_library_that_is_not_settled_is_named_with_its_reason() -> Result<(), Invalid> {
         let settings = Settings::from_texts(POLICY, SETTINGS)?;
-        let mut unstated = candidate("unstated", vec![text("MIT", "own")], Vec::new());
+        let mut unstated = candidate("unstated", &["MIT"], &[]);
         unstated.changed_copy = true;
-        let mut noticed = candidate("noticed", vec![text("MIT", "own")], Vec::new());
-        noticed.files.push("NOTICE".to_owned());
-        let mut unreadable = candidate("unreadable", vec![text("MIT", "own")], Vec::new());
+        let mut unreadable = candidate("unreadable", &["MIT"], &[]);
         unreadable
             .problems
             .push(Reason::PackageUnreadable("no access".to_owned()));
+        let mut forbidden = candidate("forbidden", &["0BSD"], &[]);
+        forbidden.license = "0BSD".to_owned();
         let candidates = vec![
-            candidate("missing", Vec::new(), vec![text("MIT", "standard")]),
-            candidate("nothing", Vec::new(), Vec::new()),
-            candidate("bare", vec![text("MIT", "own")], Vec::new()),
-            candidate("copy", vec![text("MIT", "own")], Vec::new()),
+            candidate("missing", &[], &["MIT"]),
+            candidate("nothing", &[], &[]),
+            candidate("bare", &["MIT"], &[]),
+            candidate("copy", &["MIT"], &[]),
+            candidate("plain", &["MIT"], &[]),
             unstated,
-            noticed,
             unreadable,
-            candidate("fine", vec![text("MIT", "own")], Vec::new()),
+            forbidden,
+            candidate("fine", &["MIT"], &[]),
         ];
 
         let refused = assemble(candidates, &settings, &mut BTreeSet::new());
@@ -780,6 +938,14 @@ changes = \"One line.\"
                 ),
                 ("copy 1.0.0".to_owned(), Reason::ChangeNotNeeded),
                 (
+                    "forbidden 1.0.0".to_owned(),
+                    Reason::LicenseNotAllowed("0BSD".to_owned())
+                ),
+                (
+                    "forbidden 1.0.0".to_owned(),
+                    Reason::Unsettled(Unsettled::NoText)
+                ),
+                (
                     "missing 1.0.0".to_owned(),
                     Reason::Unsettled(Unsettled::NoText)
                 ),
@@ -788,8 +954,8 @@ changes = \"One line.\"
                     Reason::Unsettled(Unsettled::NoText)
                 ),
                 (
-                    "noticed 1.0.0".to_owned(),
-                    Reason::NoticeFile("NOTICE".to_owned())
+                    "plain 1.0.0".to_owned(),
+                    Reason::NoNoticeNotNeeded("copyright.rs".to_owned())
                 ),
                 (
                     "unreadable 1.0.0".to_owned(),
@@ -807,27 +973,76 @@ changes = \"One line.\"
         let settings = Settings::from_texts(POLICY, SETTINGS)?;
 
         assert_eq!(
-            refusals(vec![candidate("bare", Vec::new(), Vec::new())], &settings),
-            Err(vec![("bare 1.0.0".to_owned(), Reason::NoStandardText)])
+            refusals(vec![candidate("bare", &[], &[])], &settings),
+            refused("bare", Reason::NoStandardText)
         );
         Ok(())
     }
 
     #[test]
-    fn a_clarified_licence_has_to_be_one_the_library_offers() -> Result<(), Invalid> {
+    fn a_clarified_licence_has_to_be_one_the_library_states() -> Result<(), Invalid> {
         let settings = Settings::from_texts(POLICY, SETTINGS)?;
-        let mut named = candidate("named", Vec::new(), Vec::new());
+        let mut named = candidate("named", &[], &[]);
         named.license = "Apache-2.0".to_owned();
 
         assert_eq!(
             refusals(vec![named], &settings),
-            Err(vec![(
-                "named 1.0.0".to_owned(),
+            refused(
+                "named",
                 Reason::ClarifiedLicense {
                     license: "MIT".to_owned(),
                     stated: "Apache-2.0".to_owned(),
                 }
-            )])
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_library_that_asks_for_two_licences_needs_the_texts_of_both() -> Result<(), Invalid> {
+        let settings = Settings::from_texts(POLICY, SETTINGS)?;
+        let both = "MIT AND Zlib";
+        // One clarification, for one of the two licences it asks for.
+        let mut one = candidate("named", &[], &[]);
+        one.license = both.to_owned();
+        // One clarification for each.
+        let mut two = candidate("two", &[], &[]);
+        two.license = both.to_owned();
+        // The package holds the text of one, the settings name the other.
+        let mut half = candidate("named", &["Zlib"], &[]);
+        half.license = both.to_owned();
+        // The standard text of one of the two only.
+        let mut bare = candidate("bare", &[], &["MIT"]);
+        bare.license = both.to_owned();
+        // A choice is settled by one.
+        let mut choice = candidate("named", &[], &[]);
+        choice.license = "MIT OR Zlib".to_owned();
+
+        assert_eq!(
+            refusals(vec![one], &settings),
+            refused("named", Reason::StillLacking(both.to_owned()))
+        );
+        assert_eq!(refusals(vec![two], &settings), Ok(()));
+        assert_eq!(refusals(vec![half], &settings), Ok(()));
+        assert_eq!(
+            refusals(vec![bare], &settings),
+            refused("bare", Reason::StillLacking(both.to_owned()))
+        );
+        assert_eq!(refusals(vec![choice], &settings), Ok(()));
+        Ok(())
+    }
+
+    #[test]
+    fn a_licence_that_is_no_expression_is_shown_as_what_was_settled() -> Result<(), Invalid> {
+        let settings = Settings::from_texts(POLICY, SETTINGS)?;
+        let mut named = candidate("named", &[], &[]);
+        named.license = "SEE LICENSE IN LICENSE".to_owned();
+
+        let notices = assemble(vec![named], &settings, &mut BTreeSet::new());
+
+        assert_eq!(
+            notices.map(|notices| notices.libraries[0].license.clone()),
+            Ok("MIT".to_owned())
         );
         Ok(())
     }
